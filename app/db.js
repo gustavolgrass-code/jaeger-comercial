@@ -75,3 +75,20 @@ export async function registrarReposicao(dados) { return gravarContagemEPedido({
 export async function salvarRegra(chave, valor) { return ok(await sb.from('regras').upsert({ chave, valor, atualizado_em: new Date().toISOString() })); }
 export async function criarRegiao(obj) { return ok(await sb.from('regioes').upsert(obj, { onConflict: 'codigo', ignoreDuplicates: true }).select()); }
 export async function salvarRegiao(codigo, patch) { return ok(await sb.from('regioes').update(patch).eq('codigo', codigo)); }
+
+/* ---------- contatos ---------- */
+export async function listarContatos() { return ok(await sb.from('contatos').select('*').order('nome')); }
+export async function criarContato(obj) { return ok(await sb.from('contatos').insert(obj).select().single()); }
+export async function atualizarContato(id, patch) { return ok(await sb.from('contatos').update(patch).eq('id', id).select().single()); }
+export async function excluirPdv(id) { return ok(await sb.from('pdvs').delete().eq('id', id)); }
+
+/* ---------- histórico do negócio ---------- */
+export async function historico(pdvId) {
+  const [etapas, visitas, pedidos, sellouts] = await Promise.all([
+    sb.from('pdv_etapas').select('de, para, motivo, em, perfis(nome)').eq('pdv_id', pdvId).order('em').then(ok),
+    sb.from('visitas').select('id, tipo, em, observacao, perfis(nome)').eq('pdv_id', pdvId).order('em').then(ok),
+    sb.from('pedidos').select('numero, tipo, condicao, unidades, valor, pago_na_hora, visita_id, criado_em, bling_status').eq('pdv_id', pdvId).order('criado_em').then(ok),
+    sb.from('v_sellout_visita').select('*').eq('pdv_id', pdvId).then(ok),
+  ]);
+  return { etapas, visitas, pedidos, sellouts };
+}

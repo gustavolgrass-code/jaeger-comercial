@@ -29,7 +29,7 @@ const ROTA_ETAPAS = ['ativo', 'avaliacao', 'risco', 'revisao'];
 const prazoDias = c => { const m = /(\d+) dias/.exec(c || ''); return m ? +m[1] : 0; };
 
 /* =================== estado =================== */
-const S = { eu: null, base: null, pdvs: [], sellouts: {}, aba: null, sel: null, rotaReg: null, contando: null, abPdv: null, sugestoes: [] };
+const S = { contatos: [], eu: null, base: null, pdvs: [], sellouts: {}, aba: null, sel: null, rotaReg: null, contando: null, abPdv: null, sugestoes: [] };
 const regraAval = () => S.base.regras.avaliacao || { reposicoes: 13, meta_minima_sellout: 6 };
 const cadPadrao = () => S.base.regras.cadencia_padrao || {};
 const regiaoDe = (lng, lat) => {
@@ -58,13 +58,13 @@ async function garantirRegiao(lng, lat, cidade) {
 }
 const regNome = c => (S.base.regioes.find(r => r.codigo === c) || {}).nome || 'sem região';
 const atraso = p => p.proxima_reposicao ? Math.floor((Date.now() - new Date(p.proxima_reposicao)) / DIA) : null;
-const prazoTxt = p => { const a = atraso(p); if (a === null) return '—'; return a > 0 ? `atrasada ${a} dia${a > 1 ? 's' : ''}` : a === 0 ? 'vence hoje' : `em ${-a} dia${a < -1 ? 's' : ''}`; };
+const prazoTxt = p => { const a = atraso(p); if (a === null) return ROTA_ETAPAS.includes(p.etapa) ? '1ª reposição' : '—'; return a > 0 ? `atrasada ${a} dia${a > 1 ? 's' : ''}` : a === 0 ? 'vence hoje' : `em ${-a} dia${a < -1 ? 's' : ''}`; };
 const expo = id => S.base.expositores.find(e => e.id === id) || S.base.expositores[0];
 const alvo = (expoId, prodId) => (S.base.alvo.find(a => a.expositor_id === expoId && a.produto_id === prodId) || {}).quantidade || 0;
 
 async function recarregar() {
-  const [pdvs, so] = await Promise.all([db.carregarPdvs(), db.carregarSellouts()]);
-  S.pdvs = pdvs;
+  const [pdvs, so, cts] = await Promise.all([db.carregarPdvs(), db.carregarSellouts(), db.listarContatos().catch(() => [])]);
+  S.pdvs = pdvs; S.contatos = cts;
   S.sellouts = {};
   so.forEach(s => (S.sellouts[s.pdv_id] = S.sellouts[s.pdv_id] || []).push(s));
 }
@@ -75,7 +75,7 @@ async function iniciar() {
     const s = await db.sessao();
     if (!s) return telaLogin();
     let p = await db.perfil(s.user.id);
-    if (!p) return telaPerfil(s.user);
+    if (!p) return telaPrimeiroAcesso(s.user);
     S.eu = p;
     S.base = await db.carregarBase();
     await recarregar();
@@ -94,7 +94,7 @@ function telaLogin() {
     catch (er) { const x = $('#lErr'); x.style.display = 'block'; x.textContent = 'E-mail ou senha incorretos.'; }
   };
 }
-function telaPerfil(user) {
+function telaPrimeiroAcesso(user) {
   $('#raiz').innerHTML = `<div class="login"><form class="box" id="fPerfil"><h3>Primeiro acesso</h3>
   <p style="color:var(--soft);margin:0">Conectado como ${esc(user.email)}.</p>
   <label>Seu nome</label><input id="pNome" required>
@@ -105,7 +105,7 @@ function telaPerfil(user) {
 
 /* =================== estrutura =================== */
 const ABAS = {
-  comercial: [['mapa', 'Mapa'], ['funil', 'Funil'], ['carteira', 'Carteira'], ['abertura', 'Abertura de cliente'], ['painel', 'Painel'], ['regras', 'Regras']],
+  comercial: [['mapa', 'Mapa'], ['funil', 'Funil'], ['carteira', 'Negócios'], ['contatos', 'Contatos'], ['abertura', 'Abertura de cliente'], ['painel', 'Painel'], ['uploads', 'Uploads'], ['regras', 'Regras']],
   operacao: [['rota', 'Rota de hoje'], ['reposicao', 'Reposição'], ['resumo', 'Resumo do dia']] };
 let lado = 'comercial';
 function montar() {
@@ -123,12 +123,12 @@ function irPara(a) {
   S.aba = a;
   $('#nav').innerHTML = ABAS[lado].map(([k, n]) => `<button data-a="${k}" class="${k === a ? 'on' : ''}">${n}</button>`).join('');
   $('#nav').onclick = e => { const k = e.target.dataset.a; if (k) irPara(k); };
-  ({ mapa: telaMapa, funil: telaFunil, carteira: telaCarteira, abertura: telaAbertura, painel: telaPainel, regras: telaRegras, rota: telaRota, reposicao: telaReposicao, resumo: telaResumo })[a]();
+  ({ perfil: telaPerfil, contato: telaContato, contatos: telaContatos, uploads: telaUploads, mapa: telaMapa, funil: telaFunil, carteira: telaCarteira, abertura: telaAbertura, painel: telaPainel, regras: telaRegras, rota: telaRota, reposicao: telaReposicao, resumo: telaResumo })[a]();
 }
 window.irPara = irPara;
 
 /* =================== mapa =================== */
-let mapa = null, camada = null, camadaSug = null, marcando = false, mostrarReg = true;
+let aoMarcar = null, mapa = null, camada = null, camadaSug = null, marcando = false, mostrarReg = true;
 function telaMapa() {
   $('#main').innerHTML = `<section class="view on" style="display:flex;height:100%"><div id="mapa"><div id="lmap"></div>
    <div class="maptools"><button class="btn pri" id="bAdd">+ Cadastrar ponto</button><button class="btn car" id="bSug">Buscar prospects aqui</button>
@@ -141,7 +141,7 @@ function telaMapa() {
   mapa = L.map('lmap', { zoomControl: true }).setView([-29.98, -51.18], 12);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(mapa);
   camada = L.layerGroup().addTo(mapa); camadaSug = L.layerGroup().addTo(mapa);
-  mapa.on('click', e => { if (!marcando) return; marcando = false; $('#hint').style.display = 'none'; abrirCadastro([e.latlng.lng, e.latlng.lat]); });
+  mapa.on('click', e => { if (!marcando) return; marcando = false; $('#hint').style.display = 'none'; const f = aoMarcar || (ll => abrirCadastro(ll)); aoMarcar = null; f([e.latlng.lng, e.latlng.lat]); });
   $('#bAdd').onclick = () => abrirCadastro(null);
   $('#bSug').onclick = buscarProspects;
   $('#fEt').onchange = $('#fReg').onchange = desenhar;
@@ -188,7 +188,7 @@ function painel() {
   const podeComprar = ['visitado', 'negociacao'].includes(p.etapa);
   const gm = p.lat ? `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}` : null;
   s.innerHTML = `<button class="btn" style="float:right;padding:4px 10px" id="xSide">✕</button>
-  <small style="color:var(--mute)">${esc(p.canal || '')} · ${esc(p.cidade || '')}</small><h2>${esc(p.nome)}</h2>
+  <small style="color:var(--mute)">${esc(p.canal || '')} · ${esc(p.cidade || '')}</small><h2>${esc(p.nome)}</h2>${p.contato_nome ? `<div style="color:var(--soft)">Contato: <b>${esc(p.contato_nome)}</b>${p.contato_telefone ? ' · ' + esc(p.contato_telefone) : ''}</div>` : ''}
   <div class="badges"><span class="badge st" style="background:${etapa(p.etapa).c}">${etapa(p.etapa).n}</span>${p.classe ? `<span class="badge">Classe ${p.classe}</span>` : ''}<span class="badge">${p.regiao || '—'} · ${esc(regNome(p.regiao))}</span>${p.expositor_id ? `<span class="badge">Expositor ${esc(expo(p.expositor_id).nome)}</span>` : ''}</div>
   ${caixaEsteira(p)}
   <div class="sect"><h3>Potencial</h3><div class="stars">${[1, 2, 3, 4, 5].map(i => `<button data-pot="${i}" class="${i <= (p.potencial || 0) ? 'on' : ''}">★</button>`).join('')}</div></div>
@@ -201,7 +201,9 @@ function painel() {
   <div class="actions">
    ${podeComprar ? `<button class="btn car" style="font-size:15px;padding:11px" id="bComprar">Gerar compra →</button>` : ''}
    <button class="btn ${podeComprar ? '' : 'pri'}" id="bVisita">Registrar visita de prospecção</button>
+   <button class="btn" id="bPerfil">Abrir perfil do negócio</button>
    ${gm ? `<a class="btn" href="${gm}" target="_blank" rel="noopener">Abrir no Google Maps ↗</a>` : ''}</div>`;
+  $('#bPerfil').onclick = () => abrirPerfil(p.id);
   $('#xSide').onclick = () => { S.sel = null; desenhar(); painel(); };
   s.querySelectorAll('[data-pot]').forEach(b => b.onclick = () => salvarPdv(p.id, { potencial: +b.dataset.pot }, 'Potencial atualizado'));
   $('#sEt').onchange = e => salvarPdv(p.id, { etapa: e.target.value }, 'Etapa: ' + etapa(e.target.value).n);
@@ -229,6 +231,7 @@ function abrirCadastro(loc) {
   <div class="row" style="margin-top:8px"><button class="btn" id="cGps" style="flex:1">Usar minha localização</button><button class="btn" id="cMarcar" style="flex:1">Marcar no mapa</button></div>
   <label>Nome do estabelecimento</label><input id="cNome">
   <label>Canal</label><select id="cCanal">${CANAIS.map(c => `<option>${c}</option>`).join('')}</select>
+  ${campoContato()}
   <div class="row"><div style="flex:1"><label>Bairro</label><input id="cBairro"></div><div style="flex:1"><label>Cidade</label><input id="cCidade"></div></div>
   <label>Potencial (1 a 5)</label><select id="cPot"><option>3</option><option>1</option><option>2</option><option>4</option><option>5</option></select>
   <label>Observação</label><textarea id="cObs" rows="2" placeholder="Quem decide, melhor horário, espaço no caixa…"></textarea>
@@ -254,11 +257,15 @@ function abrirCadastro(loc) {
   $('#cSalvar').onclick = async () => {
     if (!pos) return msg('Informe a localização: link, localização do aparelho ou marcar no mapa.', false);
     const nome = $('#cNome').value.trim(); if (!nome) return msg('Coloque o nome do estabelecimento.', false);
+    const dup = duplicado(nome, pos[1], pos[0]);
+    if (dup && !$('#cSalvar').dataset.forca) { msg(`Já existe <b>${esc(dup.nome)}</b> (${etapa(dup.etapa).n}) nesse lugar ou com esse nome. <a href="#" id="cAbrirDup">Abrir o perfil dele</a> ou toque em Salvar de novo para cadastrar mesmo assim.`, false); $('#cAbrirDup').onclick = e => { e.preventDefault(); fecharModal(); abrirPerfil(dup.id); }; $('#cSalvar').dataset.forca = 1; return; }
+    $('#cSalvar').disabled = true;
     try {
       const cidade = $('#cCidade').value.trim() || null;
-      const n = await db.criarPdv({ nome, canal: $('#cCanal').value, endereco: rua || null, bairro: $('#cBairro').value.trim() || null, cidade, lng: pos[0], lat: pos[1], regiao: await garantirRegiao(pos[0], pos[1], cidade), potencial: +$('#cPot').value, observacao: $('#cObs').value.trim() || null, origem: $('#cLink').value ? 'link_maps' : 'manual', link_maps: $('#cLink').value.trim() || null, criado_por: S.eu.id });
+      const contato_id = await contatoDoForm(nome);
+      const n = await db.criarPdv({ contato_id, geo_precisao: 'exata', nome, canal: $('#cCanal').value, endereco: rua || null, bairro: $('#cBairro').value.trim() || null, cidade, lng: pos[0], lat: pos[1], regiao: await garantirRegiao(pos[0], pos[1], cidade), potencial: +$('#cPot').value, observacao: $('#cObs').value.trim() || null, origem: $('#cLink').value ? 'link_maps' : 'manual', link_maps: $('#cLink').value.trim() || null, criado_por: S.eu.id });
       fecharModal(); await atualizarUm(n.id); S.sel = n.id; if (S.aba === 'mapa') { desenhar(); painel(); } toast(nome + ' entrou no funil como Mapeado');
-    } catch (e) { erro(e); }
+    } catch (e) { erro(e); $('#cSalvar').disabled = false; }
   };
 }
 
@@ -292,6 +299,8 @@ function buscarProspects() {
 }
 window.addSug = async i => {
   const s = S.sugestoes[i]; if (!s) return;
+  const dup = duplicado(s.nome, s.lat, s.lng); if (dup) { mapa.closePopup(); toast(`Já existe ${dup.nome} no funil (${etapa(dup.etapa).n}).`); return; }
+  S.sugestoes[i] = null;
   try { const g = await geoReverso(s.lat, s.lng); const n = await db.criarPdv({ nome: s.nome, canal: s.canal, endereco: s.rua || g.rua || null, bairro: s.bairro || g.bairro || null, cidade: g.cidade || null, lat: s.lat, lng: s.lng, regiao: await garantirRegiao(s.lng, s.lat, g.cidade), potencial: 3, origem: 'sugestao', criado_por: S.eu.id });
     mapa.closePopup(); S.sugestoes[i] = null; await atualizarUm(n.id); S.sel = n.id; desenhar(); painel(); toast(s.nome + ' adicionado ao funil'); } catch (e) { erro(e); }
 };
@@ -303,7 +312,7 @@ function telaFunil() {
   $('#kanban').innerHTML = ETAPAS.map(e => { const its = S.pdvs.filter(p => p.etapa === e.k).sort((a, b) => (b.potencial || 0) - (a.potencial || 0));
     return `<div class="col" data-et="${e.k}"><h4><span><i class="dot" style="background:${e.c}"></i> ${e.n}</span><span>${its.length}</span></h4><div class="list">${its.slice(0, 80).map(p => `<div class="card" draggable="true" data-id="${p.id}" style="border-left-color:${e.c}"><b>${esc(p.nome)}</b><small>${esc(p.canal || '')} · ${p.regiao || '—'} · ${'★'.repeat(p.potencial || 0)}</small></div>`).join('')}</div></div>`; }).join('');
   let arr = null;
-  document.querySelectorAll('.card').forEach(c => { c.ondragstart = () => arr = c.dataset.id; c.onclick = () => { S.sel = c.dataset.id; irPara('mapa'); }; });
+  document.querySelectorAll('.card').forEach(c => { c.ondragstart = () => arr = c.dataset.id; c.onclick = () => abrirPerfil(c.dataset.id); });
   document.querySelectorAll('.col').forEach(c => { c.ondragover = e => { e.preventDefault(); c.classList.add('drop'); }; c.ondragleave = () => c.classList.remove('drop');
     c.ondrop = e => { e.preventDefault(); c.classList.remove('drop'); if (arr) salvarPdv(arr, { etapa: c.dataset.et }, 'Etapa: ' + etapa(c.dataset.et).n); arr = null; }; });
 }
@@ -320,7 +329,7 @@ function telaCarteira() {
     $('#tN').textContent = ds.length + ' pontos';
     $('#tbl').innerHTML = `<tr>${cols.map(([k, n]) => `<th data-k="${k}">${n}${ord.k === k ? (ord.d > 0 ? ' ↑' : ' ↓') : ''}</th>`).join('')}</tr>` + ds.map(p => `<tr data-id="${p.id}" style="cursor:pointer"><td><b>${esc(p.nome)}</b></td><td>${p.regiao || '—'}</td><td>${esc(p.canal || '')}</td><td><i class="dot" style="background:${etapa(p.etapa).c}"></i> ${etapa(p.etapa).n}</td><td>${p.classe || '—'}</td><td>${'★'.repeat(p.potencial || 0)}</td><td>${p.so === null ? '—' : dec(p.so) + ' un.'}</td><td>${dstr(p.ultima_visita)}</td><td>${p.proxima_reposicao ? dstr(p.proxima_reposicao) + ' · ' + prazoTxt(p) : '—'}</td></tr>`).join('');
     $('#tbl').querySelectorAll('th').forEach(th => th.onclick = () => { ord = { k: th.dataset.k, d: ord.k === th.dataset.k ? -ord.d : 1 }; desenhaT(); });
-    $('#tbl').querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => { S.sel = tr.dataset.id; irPara('mapa'); });
+    $('#tbl').querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => abrirPerfil(tr.dataset.id));
   };
   $('#q').oninput = $('#tEt').onchange = desenhaT; desenhaT();
 }
@@ -404,7 +413,7 @@ function telaRegras() {
 }
 
 /* =================== rota (reposição) =================== */
-function aRepor(reg) { return S.pdvs.filter(p => p.regiao === reg && ROTA_ETAPAS.includes(p.etapa) && p.proxima_reposicao && (atraso(p) ?? -99) >= -2); }
+function aRepor(reg) { return S.pdvs.filter(p => p.regiao === reg && ROTA_ETAPAS.includes(p.etapa) && (!p.proxima_reposicao || (atraso(p) ?? -99) >= -2)); }
 function ordenar(pool) { const o = []; let cur = [...pool].sort((a, b) => b.lat - a.lat)[0]; pool = pool.filter(p => p !== cur); while (cur) { o.push(cur); let best = null, bd = 1e9; pool.forEach(p => { const d = (p.lng - cur.lng) ** 2 + (p.lat - cur.lat) ** 2; if (d < bd) { bd = d; best = p; } }); pool = pool.filter(p => p !== best); cur = best; } return o; }
 async function telaRota() {
   $('#main').innerHTML = '<section class="view on"><div class="loading">Atualizando a rota…</div></section>';
@@ -498,6 +507,252 @@ async function telaResumo() {
   <div class="panel"><h3>Trocas por sabor · 4 semanas</h3><div class="bars">${ps.map(x => `<div class="bar"><span>${esc(x.n)} <small style="color:var(--mute)">· ${esc(x.l.split(' ')[0])}</small></span><div class="tr"><div class="fl" style="width:${x.v / mx * 100}%;background:${x.l.startsWith('Cookie') ? '#B8402A' : x.l.startsWith('Palha') ? '#D08A3C' : '#2E1A12'}"></div></div><b>${x.v}</b></div>`).join('')}</div></div>
   <div class="panel"><h3>PDVs com mais troca · 4 semanas</h3><div class="bars">${top.map(x => `<div class="bar" style="grid-template-columns:1fr 50px"><span>${esc(x.n)}</span><b>${x.v} un.</b></div>`).join('') || '<span style="color:var(--mute)">Sem trocas</span>'}</div></div></div>
   <table><tr><th>Pedido</th><th>Tipo</th><th>PDV</th><th>Unidades</th><th>Valor</th><th>Pagamento</th><th>Situação</th><th>Bling</th></tr>${peds.map(o => `<tr><td>#${o.numero}</td><td>${o.tipo === 'abertura' ? 'Abertura' : o.tipo === 'reposicao_consignado' ? 'Reposição (consignado)' : 'Reposição'}</td><td>${esc(o.pdvs?.nome)}</td><td>${o.unidades}</td><td>${brl(o.valor)}</td><td>${esc(o.condicao)}</td><td>${o.pago_na_hora ? 'Pago' : 'A receber' + (o.vencimento ? ' · ' + dstr(o.vencimento + 'T12:00') : '')}</td><td>${esc(o.bling_status)}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">Nenhum pedido hoje.</td></tr>'}</table></div></section>`;
+}
+
+/* =================== contatos, duplicidade e perfil =================== */
+const norm = s => semAcento(String(s || '')).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const soDig = s => String(s || '').replace(/\D/g, '');
+function duplicado(nome, lat, lng, ignorar) {
+  const n = norm(nome);
+  return S.pdvs.find(p => p.id !== ignorar && ((n && norm(p.nome) === n) || (lat && p.lat && Math.abs(p.lat - lat) < 0.0003 && Math.abs(p.lng - lng) < 0.0003)));
+}
+function acharContato({ nome, telefone, email, empresa }) {
+  const t = soDig(telefone), e = (email || '').toLowerCase().trim(), n = norm(nome), em = norm(empresa);
+  return S.contatos.find(c => (t.length >= 8 && soDig(c.telefone).endsWith(t.slice(-8))) || (t.length >= 8 && soDig(c.whatsapp).endsWith(t.slice(-8))) || (e && (c.email || '').toLowerCase() === e) || (n && norm(c.nome) === n && norm(c.empresa) === em));
+}
+async function obterContato(dados) {
+  if (!dados.nome && !dados.telefone) return null;
+  const achado = acharContato(dados); if (achado) return achado.id;
+  const c = await db.criarContato({ nome: dados.nome || dados.telefone, empresa: dados.empresa || null, cargo: dados.cargo || null, telefone: dados.telefone || null, whatsapp: dados.whatsapp || null, email: dados.email || null, cnpj: dados.cnpj || null, observacao: dados.observacao || null, criado_por: S.eu.id });
+  S.contatos.push(c); return c.id;
+}
+function campoContato() {
+  return `<details style="margin-top:10px;background:var(--sand);border-radius:10px;padding:8px 10px"><summary style="cursor:pointer;font-weight:700;font-size:13px">Contato (responsável)</summary>
+  <label>Contato já cadastrado</label><select id="kSel"><option value="">— novo contato —</option>${S.contatos.map(c => `<option value="${c.id}">${esc(c.nome)}${c.empresa ? ' · ' + esc(c.empresa) : ''}</option>`).join('')}</select>
+  <div class="row"><div style="flex:1"><label>Nome</label><input id="kNome"></div><div style="flex:1"><label>Cargo</label><input id="kCargo" placeholder="Dono, gerente…"></div></div>
+  <div class="row"><div style="flex:1"><label>Telefone / WhatsApp</label><input id="kTel" inputmode="tel"></div><div style="flex:1"><label>E-mail</label><input id="kEmail" type="email"></div></div></details>`;
+}
+async function contatoDoForm(empresa) {
+  if ($('#kSel') && $('#kSel').value) return $('#kSel').value;
+  const nome = $('#kNome')?.value.trim(), tel = $('#kTel')?.value.trim();
+  if (!nome && !tel) return null;
+  return obterContato({ nome, telefone: tel, whatsapp: tel, email: $('#kEmail')?.value.trim(), cargo: $('#kCargo')?.value.trim(), empresa });
+}
+function abrirPerfil(id) { if (!['perfil', 'contato'].includes(S.aba)) S.voltar = S.aba; S.perfilId = id; S.sel = id; irPara('perfil'); }
+function abrirContato(id) { S.contatoId = id; irPara('contato'); }
+window.abrirPerfil = abrirPerfil; window.abrirContato = abrirContato;
+const linkWpp = t => { const d = soDig(t); return d.length >= 10 ? `https://wa.me/${d.length <= 11 ? '55' + d : d}` : null; };
+const quando = d => new Date(d).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+
+async function telaPerfil() {
+  const p = S.pdvs.find(x => x.id === S.perfilId);
+  if (!p) { $('#main').innerHTML = '<section class="view on"><div class="empty">Negócio não encontrado.</div></section>'; return; }
+  $('#main').innerHTML = '<section class="view on"><div class="loading">Carregando o histórico…</div></section>';
+  let h; try { h = await db.historico(p.id); } catch (e) { return erro(e); }
+  const c = S.contatos.find(x => x.id === p.contato_id);
+  const ev = [];
+  h.etapas.forEach(e => ev.push({ em: e.em, cor: etapa(e.para).c, t: e.de ? `Passou de <b>${etapa(e.de).n}</b> para <b>${etapa(e.para).n}</b>` : `Negócio criado como <b>${etapa(e.para).n}</b>`, quem: e.perfis?.nome, obs: e.motivo }));
+  const soV = Object.fromEntries(h.sellouts.map(s => [s.visita_id, s]));
+  const pedV = Object.fromEntries(h.pedidos.filter(o => o.visita_id).map(o => [o.visita_id, o]));
+  h.visitas.forEach(v => { const o = pedV[v.id], s = soV[v.id];
+    const t = v.tipo === 'prospeccao' ? 'Visita de prospecção' : v.tipo === 'abertura' ? `Abertura: pedido #${o?.numero ?? '—'} · ${o?.unidades ?? 0} un. · ${brl(o?.valor)} · ${esc(o?.condicao || '')}`
+      : `Reposição: sell-out <b>${s?.sellout ?? 0} un.</b> (${brl(s?.valor_sellout)})${s?.trocas ? ` · ${s.trocas} trocas` : ''} · pedido #${o?.numero ?? '—'} ${brl(o?.valor)} · ${esc(o?.condicao || '')}`;
+    ev.push({ em: v.em, cor: v.tipo === 'prospeccao' ? '#3F6FA8' : '#D08A3C', t, quem: v.perfis?.nome, obs: v.observacao }); });
+  ev.sort((a, b) => new Date(b.em) - new Date(a.em));
+  const podeComprar = ['visitado', 'negociacao', 'mapeado'].includes(p.etapa);
+  $('#main').innerHTML = `<section class="view on"><div class="dash" style="max-width:1100px">
+  <div class="row" style="gap:8px"><button class="btn" id="pVoltar">← Voltar</button><span style="color:var(--mute)">Perfil do negócio</span></div>
+  <div style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:16px;align-items:start">
+   <div style="display:flex;flex-direction:column;gap:16px">
+    <div class="panel"><small style="color:var(--mute)">${esc(p.canal || '')} · ${esc([p.bairro, p.cidade].filter(Boolean).join(', '))}</small>
+     <h2 style="font-family:Fraunces,Georgia,serif;margin:4px 0 8px;font-size:28px">${esc(p.nome)}</h2>
+     <div class="badges"><span class="badge st" style="background:${etapa(p.etapa).c}">${etapa(p.etapa).n}</span>${p.classe ? `<span class="badge">Classe ${p.classe}</span>` : ''}<span class="badge">${p.regiao || '—'} · ${esc(regNome(p.regiao))}</span>${p.expositor_id ? `<span class="badge">Expositor ${esc(expo(p.expositor_id).nome)}</span>` : ''}<span class="badge">${'★'.repeat(p.potencial || 0) || 'sem potencial'}</span>${p.geo_precisao && p.geo_precisao !== 'exata' ? `<span class="badge" style="background:#F7E9DD">localização ${esc(p.geo_precisao)}</span>` : ''}</div>
+     <p style="color:var(--soft);margin:6px 0">${esc(p.endereco || 'Sem endereço')}${p.condicao ? ` · Condição: <b>${esc(p.condicao)}</b>` : ''}${p.proxima_reposicao ? ` · Próxima reposição: <b>${dstr(p.proxima_reposicao)}</b> (${prazoTxt(p)})` : ''}</p>
+     ${p.observacao ? `<p style="background:var(--sand);padding:8px 10px;border-radius:8px;margin:8px 0 0">${esc(p.observacao)}</p>` : ''}
+     <div class="row" style="flex-wrap:wrap;margin-top:12px">
+      ${podeComprar ? '<button class="btn car" id="pComprar">Gerar compra →</button>' : ''}
+      <button class="btn pri" id="pVisita">Registrar visita</button>
+      <select id="pEtapa">${ETAPAS.map(e => `<option value="${e.k}" ${e.k === p.etapa ? 'selected' : ''}>${e.n}</option>`).join('')}</select>
+      <button class="btn" id="pEditar">Editar dados</button><button class="btn" id="pMapa">Ver no mapa</button><button class="btn" id="pAjustar">Ajustar localização</button>
+     </div></div>
+    ${caixaEsteira(p) ? `<div class="panel" style="padding:4px 14px 14px">${caixaEsteira(p)}</div>` : ''}
+    ${ultimos6(p) ? `<div class="panel">${ultimos6(p)}</div>` : ''}
+    <div class="panel"><h3>Histórico</h3>${ev.map(e => `<div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--sand)"><i style="width:12px;height:12px;border-radius:50%;background:${e.cor};flex:none;margin-top:4px"></i><div style="flex:1"><div>${e.t}</div>${e.obs ? `<div style="color:var(--soft);margin-top:2px">“${esc(e.obs)}”</div>` : ''}<small style="color:var(--mute)">${quando(e.em)}${e.quem ? ' · ' + esc(e.quem) : ''}</small></div></div>`).join('') || '<p class="empty">Sem histórico ainda.</p>'}</div>
+   </div>
+   <div style="display:flex;flex-direction:column;gap:16px">
+    <div class="panel"><h3>Contato</h3>${c ? `<div style="font-size:18px;font-weight:700">${esc(c.nome)}</div><div style="color:var(--soft)">${esc([c.cargo, c.empresa].filter(Boolean).join(' · '))}</div>
+     <p style="margin:8px 0;line-height:1.7">${c.telefone ? `📞 ${esc(c.telefone)}<br>` : ''}${c.email ? `✉️ ${esc(c.email)}<br>` : ''}</p>
+     <div class="row" style="flex-wrap:wrap">${linkWpp(c.whatsapp || c.telefone) ? `<a class="btn car" style="text-decoration:none" target="_blank" rel="noopener" href="${linkWpp(c.whatsapp || c.telefone)}">WhatsApp ↗</a>` : ''}<button class="btn" id="pVerContato">Abrir contato</button><button class="btn" id="pTrocarContato">Trocar</button></div>`
+      : `<p class="empty" style="padding:6px 0">Nenhum contato vinculado.</p><button class="btn pri" id="pTrocarContato">Vincular contato</button>`}</div>
+    <div class="panel"><h3>Resumo</h3><div class="kv" style="margin:0"><div><small>Criado em</small><b>${dstr(p.criado_em)}</b></div><div><small>Visitas</small><b>${h.visitas.length}</b></div><div><small>Pedidos</small><b>${h.pedidos.length}</b></div><div><small>Total pedido</small><b>${brl(h.pedidos.reduce((a, o) => a + Number(o.valor), 0))}</b></div></div></div>
+    <div class="panel"><button class="btn" id="pExcluir" style="width:100%;color:#7A2414">Excluir negócio</button><small style="color:var(--mute);display:block;margin-top:6px">Use para apagar cadastro duplicado ou errado. Negócio com pedidos não pode ser excluído: mude para Inativo.</small></div>
+   </div></div></div></section>`;
+  $('#pVoltar').onclick = () => irPara(S.voltar || 'carteira');
+  if ($('#pComprar')) $('#pComprar').onclick = () => { S.abPdv = p.id; irPara('abertura'); };
+  $('#pVisita').onclick = () => { modal(`<h3>Visita em ${esc(p.nome)}</h3><label>Como foi?</label><textarea id="vObs" rows="3"></textarea><div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="vOk">Registrar</button></div>`);
+    $('#vOk').onclick = async () => { try { await db.registrarVisita(p.id, 'prospeccao', $('#vObs').value, S.eu.id); if (p.etapa === 'mapeado') await db.atualizarPdv(p.id, { etapa: 'visitado' }); fecharModal(); await atualizarUm(p.id); toast('Visita registrada'); telaPerfil(); } catch (e) { erro(e); } }; };
+  $('#pEtapa').onchange = async e => { try { await db.atualizarPdv(p.id, { etapa: e.target.value }); await atualizarUm(p.id); toast('Etapa: ' + etapa(e.target.value).n); telaPerfil(); } catch (er) { erro(er); } };
+  $('#pMapa').onclick = () => { S.sel = p.id; irPara('mapa'); if (p.lat) mapa.setView([p.lat, p.lng], 16); };
+  $('#pAjustar').onclick = () => { irPara('mapa'); if (p.lat) mapa.setView([p.lat, p.lng], 17); marcando = true; $('#hint').textContent = 'Toque no lugar exato de ' + p.nome; $('#hint').style.display = 'block';
+    aoMarcar = async ([lng, lat]) => { try { const g = await geoReverso(lat, lng); await db.atualizarPdv(p.id, { lat, lng, geo_precisao: 'manual', regiao: await garantirRegiao(lng, lat, g.cidade || p.cidade), endereco: g.rua || p.endereco, bairro: g.bairro || p.bairro, cidade: g.cidade || p.cidade }); $('#hint').textContent = 'Toque no mapa onde fica o ponto'; await atualizarUm(p.id); toast('Localização ajustada'); } catch (e) { erro(e); } }; };
+  $('#pEditar').onclick = () => { modal(`<h3>Editar ${esc(p.nome)}</h3><label>Nome</label><input id="eNome" value="${esc(p.nome)}"><label>Canal</label><select id="eCanal">${CANAIS.map(x => `<option ${x === p.canal ? 'selected' : ''}>${x}</option>`).join('')}</select>
+    <label>Endereço</label><input id="eEnd" value="${esc(p.endereco || '')}"><div class="row"><div style="flex:1"><label>Bairro</label><input id="eBai" value="${esc(p.bairro || '')}"></div><div style="flex:1"><label>Cidade</label><input id="eCid" value="${esc(p.cidade || '')}"></div></div>
+    <div class="row"><div style="flex:1"><label>Classe</label><select id="eCla"><option value="">—</option>${['A', 'B', 'C'].map(x => `<option ${x === p.classe ? 'selected' : ''}>${x}</option>`).join('')}</select></div><div style="flex:1"><label>Potencial</label><select id="ePot">${[1, 2, 3, 4, 5].map(x => `<option ${x === p.potencial ? 'selected' : ''}>${x}</option>`).join('')}</select></div></div>
+    <label>Observação</label><textarea id="eObs" rows="3">${esc(p.observacao || '')}</textarea><div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="eOk">Salvar</button></div>`);
+    $('#eOk').onclick = async () => { try { await db.atualizarPdv(p.id, { nome: $('#eNome').value.trim() || p.nome, canal: $('#eCanal').value, endereco: $('#eEnd').value.trim() || null, bairro: $('#eBai').value.trim() || null, cidade: $('#eCid').value.trim() || null, classe: $('#eCla').value || null, potencial: +$('#ePot').value, observacao: $('#eObs').value.trim() || null }); fecharModal(); await atualizarUm(p.id); toast('Dados salvos'); telaPerfil(); } catch (e) { erro(e); } }; };
+  if ($('#pVerContato')) $('#pVerContato').onclick = () => abrirContato(c.id);
+  $('#pTrocarContato').onclick = () => { modal(`<h3>Contato de ${esc(p.nome)}</h3>${campoContato()}<div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="kOk">Vincular</button></div>`); document.querySelector('#modalBox details').open = true;
+    $('#kOk').onclick = async () => { try { const id = await contatoDoForm(p.nome); if (!id) return toast('Escolha um contato ou preencha o nome'); await db.atualizarPdv(p.id, { contato_id: id }); fecharModal(); await atualizarUm(p.id); toast('Contato vinculado'); telaPerfil(); } catch (e) { erro(e); } }; };
+  $('#pExcluir').onclick = () => { modal(`<h3>Excluir ${esc(p.nome)}?</h3><p style="color:var(--soft)">Apaga o negócio e as visitas dele. Não dá para desfazer.</p><div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="xOk" style="background:#7A2414;border-color:#7A2414">Excluir</button></div>`);
+    $('#xOk').onclick = async () => { try { await db.excluirPdv(p.id); fecharModal(); S.pdvs = S.pdvs.filter(x => x.id !== p.id); S.sel = null; toast('Negócio excluído'); irPara('carteira'); } catch (e) { fecharModal(); toast(/foreign key|violates/i.test(e.message) ? 'Esse negócio tem pedidos e não pode ser excluído. Mude a etapa para Inativo.' : 'Erro: ' + e.message); } }; };
+}
+
+/* =================== contatos =================== */
+function telaContatos() {
+  $('#main').innerHTML = `<section class="view on"><div class="tablewrap"><div class="toolbar"><input id="kq" placeholder="Buscar contato…" style="width:240px"><button class="btn pri" id="kNovo">+ Novo contato</button><span id="kN" style="color:var(--mute)"></span></div><table id="ktbl"></table></div></section>`;
+  const neg = id => S.pdvs.filter(p => p.contato_id === id);
+  const draw = () => { const q = norm($('#kq').value); const ds = S.contatos.filter(c => !q || norm(c.nome + ' ' + (c.empresa || '') + ' ' + (c.telefone || '')).includes(q));
+    $('#kN').textContent = ds.length + ' contatos';
+    $('#ktbl').innerHTML = `<tr><th>Nome</th><th>Empresa</th><th>Cargo</th><th>Telefone</th><th>E-mail</th><th>Negócios</th></tr>` + ds.map(c => `<tr data-id="${c.id}" style="cursor:pointer"><td><b>${esc(c.nome)}</b></td><td>${esc(c.empresa || '')}</td><td>${esc(c.cargo || '')}</td><td>${esc(c.telefone || '')}</td><td>${esc(c.email || '')}</td><td>${neg(c.id).map(p => esc(p.nome)).join(', ') || '—'}</td></tr>`).join('');
+    $('#ktbl').querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => abrirContato(tr.dataset.id)); };
+  $('#kq').oninput = draw; draw();
+  $('#kNovo').onclick = () => formContato(null);
+}
+function formContato(c) {
+  modal(`<h3>${c ? 'Editar contato' : 'Novo contato'}</h3><label>Nome</label><input id="fNome" value="${esc(c?.nome || '')}">
+  <div class="row"><div style="flex:1"><label>Empresa</label><input id="fEmp" value="${esc(c?.empresa || '')}"></div><div style="flex:1"><label>Cargo</label><input id="fCargo" value="${esc(c?.cargo || '')}"></div></div>
+  <div class="row"><div style="flex:1"><label>Telefone</label><input id="fTel" value="${esc(c?.telefone || '')}"></div><div style="flex:1"><label>WhatsApp</label><input id="fWpp" value="${esc(c?.whatsapp || '')}"></div></div>
+  <div class="row"><div style="flex:1"><label>E-mail</label><input id="fEmail" value="${esc(c?.email || '')}"></div><div style="flex:1"><label>CNPJ</label><input id="fCnpj" value="${esc(c?.cnpj || '')}"></div></div>
+  <label>Observação</label><textarea id="fObs" rows="2">${esc(c?.observacao || '')}</textarea>
+  <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="fOk">Salvar</button></div>`);
+  $('#fOk').onclick = async () => { const o = { nome: $('#fNome').value.trim(), empresa: $('#fEmp').value.trim() || null, cargo: $('#fCargo').value.trim() || null, telefone: $('#fTel').value.trim() || null, whatsapp: $('#fWpp').value.trim() || null, email: $('#fEmail').value.trim() || null, cnpj: $('#fCnpj').value.trim() || null, observacao: $('#fObs').value.trim() || null };
+    if (!o.nome) return toast('Coloque o nome');
+    try { if (c) { const n = await db.atualizarContato(c.id, o); Object.assign(c, n); } else { if (acharContato(o)) return toast('Já existe um contato com esse telefone, e-mail ou nome.'); S.contatos.push(await db.criarContato({ ...o, criado_por: S.eu.id })); }
+      fecharModal(); toast('Contato salvo'); S.aba === 'contato' ? telaContato() : telaContatos(); } catch (e) { erro(e); } };
+}
+function telaContato() {
+  const c = S.contatos.find(x => x.id === S.contatoId); if (!c) return irPara('contatos');
+  const negs = S.pdvs.filter(p => p.contato_id === c.id), w = linkWpp(c.whatsapp || c.telefone);
+  $('#main').innerHTML = `<section class="view on"><div class="dash" style="max-width:900px"><div class="row"><button class="btn" id="cVoltar">← Contatos</button></div>
+  <div class="panel"><small style="color:var(--mute)">Contato</small><h2 style="font-family:Fraunces,Georgia,serif;margin:4px 0">${esc(c.nome)}</h2><div style="color:var(--soft)">${esc([c.cargo, c.empresa].filter(Boolean).join(' · '))}</div>
+   <div class="kv"><div><small>Telefone</small><b>${esc(c.telefone || '—')}</b></div><div><small>WhatsApp</small><b>${esc(c.whatsapp || '—')}</b></div><div><small>E-mail</small><b style="font-size:14px">${esc(c.email || '—')}</b></div><div><small>CNPJ</small><b style="font-size:14px">${esc(c.cnpj || '—')}</b></div></div>
+   ${c.observacao ? `<p style="color:var(--soft)">${esc(c.observacao)}</p>` : ''}
+   <div class="row">${w ? `<a class="btn car" style="text-decoration:none" target="_blank" rel="noopener" href="${w}">WhatsApp ↗</a>` : ''}<button class="btn" id="cEditar">Editar</button></div></div>
+  <div class="panel"><h3>Negócios deste contato</h3>${negs.map(p => `<div class="stop" data-id="${p.id}" style="cursor:pointer"><div class="info"><b>${esc(p.nome)}</b><br><small style="color:var(--mute)">${esc(p.canal || '')} · ${esc(p.cidade || '')}</small></div><span class="badge st" style="background:${etapa(p.etapa).c}">${etapa(p.etapa).n}</span></div>`).join('') || '<p class="empty">Nenhum negócio vinculado.</p>'}</div></div></section>`;
+  $('#cVoltar').onclick = () => irPara('contatos'); $('#cEditar').onclick = () => formContato(c);
+  document.querySelectorAll('.stop[data-id]').forEach(d => d.onclick = () => abrirPerfil(d.dataset.id));
+}
+
+/* =================== uploads (CSV) =================== */
+function lerCSV(txt) {
+  txt = txt.replace(/^﻿/, '');
+  const primeira = txt.split(/\r?\n/)[0] || '';
+  const sep = (primeira.match(/;/g) || []).length >= (primeira.match(/,/g) || []).length ? ';' : ',';
+  const linhas = []; let campo = '', linha = [], aspas = false;
+  for (let i = 0; i < txt.length; i++) { const ch = txt[i];
+    if (aspas) { if (ch === '"') { if (txt[i + 1] === '"') { campo += '"'; i++; } else aspas = false; } else campo += ch; }
+    else if (ch === '"') aspas = true; else if (ch === sep) { linha.push(campo); campo = ''; }
+    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && txt[i + 1] === '\n') i++; linha.push(campo); campo = ''; if (linha.some(x => x.trim())) linhas.push(linha); linha = []; }
+    else campo += ch; }
+  linha.push(campo); if (linha.some(x => x.trim())) linhas.push(linha);
+  const cab = (linhas.shift() || []).map(h => norm(h).replace(/ /g, '_'));
+  return linhas.map(l => Object.fromEntries(cab.map((h, i) => [h, (l[i] || '').trim()])));
+}
+// "RUA JOAO WOBETO, 350 - MATO GRANDE - Canoas/RS - 92320-160"
+function partesEndereco(s) {
+  const p = String(s).split(/\s+-\s+/).map(x => x.trim()).filter(Boolean);
+  const cep = (s.match(/\d{5}-?\d{3}/) || [''])[0];
+  const cidUf = p.find(x => /\/\s*[A-Z]{2}$/i.test(x)) || '';
+  const [cidade, uf] = cidUf ? cidUf.split('/').map(x => x.trim()) : ['', ''];
+  const ruaNum = p[0] || ''; const m = ruaNum.match(/^(.*?),\s*(\d+[A-Za-z]?)/);
+  const bairro = p.find((x, i) => i > 0 && x !== cidUf && !/^\d{5}-?\d{3}$/.test(x)) || '';
+  return { rua: m ? m[1] : ruaNum, numero: m ? m[2] : '', bairro, cidade, uf: uf || 'RS', cep };
+}
+const esperar = ms => new Promise(r => setTimeout(r, ms));
+async function nominatim(params) {
+  const u = 'https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=1&countrycodes=br&accept-language=pt-BR&' + new URLSearchParams(params);
+  const r = await fetch(u); return (await r.json())[0];
+}
+// devolve { lat, lng, precisao: 'exata' | 'rua' | 'cidade', ... } ou null
+async function geocodificar(endereco) {
+  const e = partesEndereco(endereco);
+  const tentativas = [
+    e.numero ? { street: `${e.numero} ${e.rua}`, city: e.cidade, state: e.uf, ...(e.cep ? { postalcode: e.cep } : {}) } : null,
+    e.numero ? { street: `${e.numero} ${e.rua}`, city: e.cidade, state: e.uf } : null,
+    { q: [e.rua + (e.numero ? ', ' + e.numero : ''), e.bairro, e.cidade, e.uf].filter(Boolean).join(', ') },
+    { street: e.rua, city: e.cidade, state: e.uf },
+  ].filter(Boolean);
+  for (const t of tentativas) {
+    let r; try { r = await nominatim(t); } catch { r = null; } await esperar(1100);
+    if (!r) continue;
+    const a = r.address || {};
+    const precisao = (a.house_number && e.numero && soDig(a.house_number) === soDig(e.numero)) || ['house', 'building'].includes(r.type) || r.category === 'building' ? 'exata' : (a.road ? 'rua' : 'cidade');
+    return { lat: +r.lat, lng: +r.lon, precisao, cidade: a.city || a.town || a.village || a.municipality || e.cidade, bairro: a.suburb || a.neighbourhood || e.bairro, rua: [a.road || e.rua, a.house_number || e.numero].filter(Boolean).join(', ') };
+  }
+  return null;
+}
+const MODELOS = {
+  contatos: { titulo: 'Contatos', desc: 'Pessoas: dono, gerente, comprador. Contatos repetidos (mesmo telefone, e-mail ou nome + empresa) são ignorados.', cols: ['nome', 'empresa', 'cargo', 'telefone', 'whatsapp', 'email', 'cnpj', 'observacao'], ex: ['Maria Souza', 'Padaria Pão Quente', 'Dona', '(51) 99999-0000', '(51) 99999-0000', 'maria@email.com', '', 'Prefere visita de manhã'] },
+  negocios: { titulo: 'Negócios', desc: 'Clientes e negócios já em andamento, em qualquer etapa do funil. A localização é buscada pelo endereço.', cols: ['nome', 'canal', 'etapa', 'localizacao', 'contato_nome', 'contato_telefone', 'classe', 'potencial', 'expositor', 'condicao', 'observacao'], ex: ['Passos Home Market', 'Minimercado', 'Ativo', 'RUA JOAO WOBETO, 350 - MATO GRANDE - Canoas/RS - 92320-160', 'João', '(51) 98888-0000', 'A', '5', '3 andares', 'À vista · Pix', ''] },
+  prospectos: { titulo: 'Prospectos', desc: 'Lista de alvos. Cada endereço é localizado; os encontrados no número exato entram no funil como Mapeado. Os aproximados ficam para você confirmar.', cols: ['nome', 'canal', 'localizacao', 'contato_nome', 'contato_telefone', 'potencial', 'observacao'], ex: ['Padaria Exemplo', 'Padaria', 'RUA JOAO WOBETO, 350 - MATO GRANDE - Canoas/RS - 92320-160', '', '', '3', ''] } };
+function baixarModelo(k) {
+  const m = MODELOS[k], q = v => /[;"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+  const csv = '﻿' + m.cols.join(';') + '\n' + m.ex.map(q).join(';') + '\n';
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })); a.download = `modelo_${k}.csv`; document.body.appendChild(a); a.click(); a.remove();
+}
+const etapaDe = t => { const n = norm(t); return (ETAPAS.find(e => norm(e.n) === n || e.k === n.replace(/ /g, '')) || ETAPAS.find(e => n && norm(e.n).startsWith(n)) || {}).k; };
+const expoDe = t => { const n = norm(t); return (S.base.expositores.find(e => norm(e.nome) === n || String(e.capacidade) === soDig(t)) || {}).id || null; };
+const canalDe = t => CANAIS.find(c => norm(c) === norm(t)) || (t ? 'Outro' : null);
+let pendentes = [];
+function telaUploads() {
+  $('#main').innerHTML = `<section class="view on"><div class="dash" style="max-width:1000px">
+  <div class="panel"><h3>Como funciona</h3><p style="color:var(--soft);margin:0">Baixe o modelo, preencha no Excel ou Google Planilhas e salve como <b>CSV</b>. Pode ser separado por ponto e vírgula (padrão do Excel no Brasil) ou por vírgula. A coluna <b>localizacao</b> segue o padrão <i>RUA JOAO WOBETO, 350 - MATO GRANDE - Canoas/RS - 92320-160</i>. A busca de endereço faz cerca de 1 por segundo, então 100 linhas levam uns 2 a 4 minutos.</p></div>
+  ${Object.entries(MODELOS).map(([k, m]) => `<div class="panel"><div class="row" style="justify-content:space-between;flex-wrap:wrap"><h3 style="margin:0">${m.titulo}</h3><button class="btn" data-mod="${k}">Baixar modelo</button></div>
+   <p style="color:var(--soft)">${m.desc}</p><p style="font-size:12px;color:var(--mute)">Colunas: ${m.cols.join(' · ')}</p>
+   <div class="row" style="flex-wrap:wrap"><input type="file" accept=".csv,text/csv" data-arq="${k}"><button class="btn pri" data-imp="${k}">Importar</button></div><div id="res-${k}" style="margin-top:10px"></div></div>`).join('')}</div></section>`;
+  document.querySelectorAll('[data-mod]').forEach(b => b.onclick = () => baixarModelo(b.dataset.mod));
+  document.querySelectorAll('[data-imp]').forEach(b => b.onclick = async () => {
+    const k = b.dataset.imp, f = document.querySelector(`[data-arq="${k}"]`).files[0];
+    if (!f) return toast('Escolha o arquivo CSV');
+    const linhas = lerCSV(await f.text()); if (!linhas.length) return toast('O arquivo está vazio ou sem cabeçalho');
+    if (!('nome' in linhas[0]) && k !== 'contatos') return toast('Falta a coluna "nome". Use o modelo.');
+    b.disabled = true; try { await importar(k, linhas, $('#res-' + k)); } catch (e) { erro(e); } b.disabled = false;
+  });
+}
+async function importar(k, linhas, el) {
+  let feitos = 0, ignorados = 0; const falhas = []; pendentes = [];
+  const prog = i => el.innerHTML = `<div class="prog" style="height:12px"><i style="width:${i / linhas.length * 100}%;background:var(--car)"></i></div><small>${i} de ${linhas.length} · ${feitos} importados · ${ignorados} já existiam · ${falhas.length + pendentes.length} para revisar</small>`;
+  for (let i = 0; i < linhas.length; i++) { prog(i); const l = linhas[i];
+    try {
+      if (k === 'contatos') {
+        if (!l.nome) { falhas.push({ l, motivo: 'sem nome' }); continue; }
+        if (acharContato(l)) { ignorados++; continue; }
+        await obterContato(l); feitos++; continue;
+      }
+      if (!l.nome) { falhas.push({ l, motivo: 'sem nome' }); continue; }
+      if (S.pdvs.some(p => norm(p.nome) === norm(l.nome))) { ignorados++; continue; }
+      if (!l.localizacao) { falhas.push({ l, motivo: 'sem localização' }); continue; }
+      const g = await geocodificar(l.localizacao);
+      if (!g) { falhas.push({ l, motivo: 'endereço não encontrado' }); continue; }
+      const base = { nome: l.nome, canal: canalDe(l.canal), endereco: g.rua || null, bairro: g.bairro || null, cidade: g.cidade || null, lat: g.lat, lng: g.lng, geo_precisao: g.precisao, potencial: +l.potencial || 3, observacao: l.observacao || null, criado_por: S.eu.id };
+      if (k === 'prospectos' && g.precisao !== 'exata') { pendentes.push({ l, g, base }); continue; }
+      await gravarImportado(k, l, g, base); feitos++;
+    } catch (e) { falhas.push({ l, motivo: e.message }); }
+  }
+  prog(linhas.length);
+  el.innerHTML += `<div style="margin-top:10px"><b>${feitos} importados</b> · ${ignorados} já existiam${falhas.length ? ` · <b style="color:#7A2414">${falhas.length} com problema</b>` : ''}${pendentes.length ? ` · <b style="color:#8A4E17">${pendentes.length} com localização aproximada</b>` : ''}</div>
+   ${pendentes.length ? `<div class="panel" style="margin-top:10px"><h3>Confirme a localização</h3><p style="color:var(--soft);margin-top:0">O endereço foi achado só no nível da rua ou da cidade. Aceite a posição aproximada (dá para ajustar depois no perfil, em "Ajustar localização") ou deixe de fora.</p><table><tr><th>Nome</th><th>Endereço informado</th><th>Encontrado</th><th></th></tr>${pendentes.map((x, i) => `<tr id="pend-${i}"><td>${esc(x.l.nome)}</td><td>${esc(x.l.localizacao)}</td><td>${esc(x.g.rua || '')}, ${esc(x.g.cidade || '')} <small>(${x.g.precisao})</small></td><td><button class="btn" data-acc="${i}">Aceitar</button></td></tr>`).join('')}</table><div class="row" style="margin-top:8px;justify-content:flex-end"><button class="btn car" id="accTodos">Aceitar todos</button></div></div>` : ''}
+   ${falhas.length ? `<div class="panel" style="margin-top:10px"><h3>Não importados</h3><table><tr><th>Nome</th><th>Localização</th><th>Motivo</th></tr>${falhas.map(f => `<tr><td>${esc(f.l.nome || '—')}</td><td>${esc(f.l.localizacao || '')}</td><td>${esc(f.motivo)}</td></tr>`).join('')}</table></div>` : ''}`;
+  const aceitar = async i => { const x = pendentes[i]; if (!x) return; pendentes[i] = null; try { await gravarImportado(k, x.l, x.g, x.base); const tr = document.getElementById('pend-' + i); if (tr) tr.style.opacity = .4; } catch (e) { erro(e); } };
+  el.querySelectorAll('[data-acc]').forEach(b => b.onclick = async () => { b.disabled = true; await aceitar(+b.dataset.acc); toast('Prospecto adicionado'); });
+  if ($('#accTodos')) $('#accTodos').onclick = async () => { for (let i = 0; i < pendentes.length; i++) await aceitar(i); toast('Prospectos adicionados como Mapeado'); };
+  await recarregar();
+}
+async function gravarImportado(k, l, g, base) {
+  const contato_id = (l.contato_nome || l.contato_telefone) ? await obterContato({ nome: l.contato_nome, telefone: l.contato_telefone, whatsapp: l.contato_telefone, empresa: l.nome }) : null;
+  const extra = k === 'negocios' ? { etapa: etapaDe(l.etapa) || 'mapeado', classe: ['A', 'B', 'C'].includes((l.classe || '').toUpperCase()) ? l.classe.toUpperCase() : null, expositor_id: expoDe(l.expositor), condicao: l.condicao || null, origem: 'importacao' } : { etapa: 'mapeado', origem: 'importacao' };
+  const n = await db.criarPdv({ ...base, ...extra, contato_id, regiao: await garantirRegiao(g.lng, g.lat, g.cidade) });
+  S.pdvs.push({ ...n }); return n;
 }
 
 /* =================== início =================== */
