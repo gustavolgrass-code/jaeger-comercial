@@ -128,3 +128,9 @@ tr:hover td{background:var(--sand)}
 .err{background:#F7E1DC;color:#7A2414;padding:8px 10px;border-radius:8px;margin-top:8px;display:none}
 .userbox{display:flex;align-items:center;gap:10px;color:#D9C8B4;font-size:12px}
 .userbox button{background:transparent;border:1px solid #6b4a36;color:#D9C8B4;border-radius:14px;padding:4px 10px}
+
+/* modais e avisos sempre por cima do mapa (o Leaflet usa camadas até z-index 1000) */
+.modal{z-index:3000}
+.toast{z-index:3100}
+.hint{z-index:1100}
+#mapa{isolation:isolate}
