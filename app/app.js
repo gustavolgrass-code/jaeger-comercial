@@ -1,0 +1,474 @@
+// Jaeger's Comercial · app web
+import * as db from './db.js';
+
+/* =================== utilidades =================== */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmt = n => Number(n || 0).toLocaleString('pt-BR');
+const brl = n => 'R$ ' + Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const dstr = d => d ? new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : '—';
+const dec = n => Number(n || 0).toFixed(1).replace('.', ',');
+const DIA = 864e5;
+function toast(t) { const e = $('#toast'); e.textContent = t; e.style.display = 'block'; clearTimeout(e._t); e._t = setTimeout(() => e.style.display = 'none', 4200); }
+function erro(e) { console.error(e); toast('Erro: ' + (e.message || e)); }
+function modal(html) { $('#modalBox').innerHTML = html; $('#modal').classList.add('on'); }
+function fecharModal() { $('#modal').classList.remove('on'); }
+window.fecharModal = fecharModal;
+
+/* =================== catálogos =================== */
+const ETAPAS = [
+  { k: 'mapeado', n: 'Mapeado', c: '#8C7E74' }, { k: 'visitado', n: 'Visitado', c: '#3F6FA8' },
+  { k: 'negociacao', n: 'Em negociação', c: '#D08A3C' }, { k: 'avaliacao', n: 'Em avaliação', c: '#6B4FA0' },
+  { k: 'revisao', n: 'Revisão comercial', c: '#A23B72' }, { k: 'ativo', n: 'Ativo', c: '#2F7D4E' },
+  { k: 'risco', n: 'Em risco', c: '#B8402A' }, { k: 'inativo', n: 'Inativo', c: '#4A3A31' }];
+const etapa = k => ETAPAS.find(e => e.k === k) || ETAPAS[0];
+const CANAIS = ['Minimercado', 'Padaria', 'Fruteira', 'Cantina', 'Conveniência', 'Cafeteria', 'Restaurante', 'Lancheria', 'Outro'];
+const CONDICOES = ['À vista · dinheiro', 'À vista · Pix', 'A prazo · 7 dias', 'A prazo · 14 dias', 'A prazo · 28 dias', 'Consignado', 'Bonificação na abertura'];
+const DIAS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+const ROTA_ETAPAS = ['ativo', 'avaliacao', 'risco', 'revisao'];
+const prazoDias = c => { const m = /(\d+) dias/.exec(c || ''); return m ? +m[1] : 0; };
+
+/* =================== estado =================== */
+const S = { eu: null, base: null, pdvs: [], sellouts: {}, aba: null, sel: null, rotaReg: null, contando: null, abPdv: null, sugestoes: [] };
+const regraAval = () => S.base.regras.avaliacao || { reposicoes: 13, meta_minima_sellout: 6 };
+const cadPadrao = () => S.base.regras.cadencia_padrao || {};
+const regiaoDe = (lng, lat) => {
+  for (const r of S.base.regioes) { const b = r.limites; if (b && lng >= b[0] && lng < b[2] && lat <= b[1] && lat > b[3]) return r.codigo; }
+  return null;
+};
+const regNome = c => (S.base.regioes.find(r => r.codigo === c) || {}).nome || 'sem região';
+const atraso = p => p.proxima_reposicao ? Math.floor((Date.now() - new Date(p.proxima_reposicao)) / DIA) : null;
+const prazoTxt = p => { const a = atraso(p); if (a === null) return '—'; return a > 0 ? `atrasada ${a} dia${a > 1 ? 's' : ''}` : a === 0 ? 'vence hoje' : `em ${-a} dia${a < -1 ? 's' : ''}`; };
+const expo = id => S.base.expositores.find(e => e.id === id) || S.base.expositores[0];
+const alvo = (expoId, prodId) => (S.base.alvo.find(a => a.expositor_id === expoId && a.produto_id === prodId) || {}).quantidade || 0;
+
+async function recarregar() {
+  const [pdvs, so] = await Promise.all([db.carregarPdvs(), db.carregarSellouts()]);
+  S.pdvs = pdvs;
+  S.sellouts = {};
+  so.forEach(s => (S.sellouts[s.pdv_id] = S.sellouts[s.pdv_id] || []).push(s));
+}
+
+/* =================== login =================== */
+async function iniciar() {
+  try {
+    const s = await db.sessao();
+    if (!s) return telaLogin();
+    let p = await db.perfil(s.user.id);
+    if (!p) return telaPerfil(s.user);
+    S.eu = p;
+    S.base = await db.carregarBase();
+    await recarregar();
+    montar();
+  } catch (e) { $('#raiz').innerHTML = `<div class="loading">Não foi possível carregar: ${esc(e.message)}</div>`; }
+}
+function telaLogin() {
+  $('#raiz').innerHTML = `<div class="login"><form class="box" id="fLogin"><h3>Jaeger’s Comercial</h3>
+  <label>E-mail</label><input id="lEmail" type="email" autocomplete="username" required>
+  <label>Senha</label><input id="lSenha" type="password" autocomplete="current-password" required>
+  <div class="err" id="lErr"></div>
+  <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn pri">Entrar</button></div></form></div>`;
+  $('#fLogin').onsubmit = async e => {
+    e.preventDefault();
+    try { await db.entrar($('#lEmail').value.trim(), $('#lSenha').value); iniciar(); }
+    catch (er) { const x = $('#lErr'); x.style.display = 'block'; x.textContent = 'E-mail ou senha incorretos.'; }
+  };
+}
+function telaPerfil(user) {
+  $('#raiz').innerHTML = `<div class="login"><form class="box" id="fPerfil"><h3>Primeiro acesso</h3>
+  <p style="color:var(--soft);margin:0">Conectado como ${esc(user.email)}.</p>
+  <label>Seu nome</label><input id="pNome" required>
+  <label>Sua área</label><select id="pPapel"><option value="comercial">Comercial (prospecção e clientes)</option><option value="operacao">Operação (reposição e entregas)</option></select>
+  <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn pri">Continuar</button></div></form></div>`;
+  $('#fPerfil').onsubmit = async e => { e.preventDefault(); try { await db.criarPerfil(user.id, $('#pNome').value.trim(), $('#pPapel').value); iniciar(); } catch (er) { erro(er); } };
+}
+
+/* =================== estrutura =================== */
+const ABAS = {
+  comercial: [['mapa', 'Mapa'], ['funil', 'Funil'], ['carteira', 'Carteira'], ['abertura', 'Abertura de cliente'], ['painel', 'Painel'], ['regras', 'Regras']],
+  operacao: [['rota', 'Rota de hoje'], ['reposicao', 'Reposição'], ['resumo', 'Resumo do dia']] };
+let lado = 'comercial';
+function montar() {
+  lado = S.eu.papel === 'operacao' ? 'operacao' : 'comercial';
+  $('#raiz').innerHTML = `<header><span class="brand">Jaeger’s Comercial</span>
+   <div class="roles"><button id="rG">Comercial</button><button id="rM">Reposição</button></div>
+   <div class="userbox">${esc(S.eu.nome)} <button id="bSair">Sair</button></div></header>
+   <nav id="nav"></nav><main id="main"></main>`;
+  $('#rG').onclick = () => trocarLado('comercial'); $('#rM').onclick = () => trocarLado('operacao');
+  $('#bSair').onclick = async () => { await db.sair(); location.reload(); };
+  trocarLado(lado);
+}
+function trocarLado(l) { lado = l; $('#rG').classList.toggle('on', l === 'comercial'); $('#rM').classList.toggle('on', l === 'operacao'); irPara(ABAS[l][0][0]); }
+function irPara(a) {
+  S.aba = a;
+  $('#nav').innerHTML = ABAS[lado].map(([k, n]) => `<button data-a="${k}" class="${k === a ? 'on' : ''}">${n}</button>`).join('');
+  $('#nav').onclick = e => { const k = e.target.dataset.a; if (k) irPara(k); };
+  ({ mapa: telaMapa, funil: telaFunil, carteira: telaCarteira, abertura: telaAbertura, painel: telaPainel, regras: telaRegras, rota: telaRota, reposicao: telaReposicao, resumo: telaResumo })[a]();
+}
+window.irPara = irPara;
+
+/* =================== mapa =================== */
+let mapa = null, camada = null, camadaSug = null, marcando = false, mostrarReg = true;
+function telaMapa() {
+  $('#main').innerHTML = `<section class="view on" style="display:flex;height:100%"><div id="mapa"><div id="lmap"></div>
+   <div class="maptools"><button class="btn pri" id="bAdd">+ Cadastrar ponto</button><button class="btn car" id="bSug">Buscar prospects aqui</button>
+   <select id="fEt"><option value="">Todas as etapas</option>${ETAPAS.map(e => `<option value="${e.k}">${e.n}</option>`).join('')}</select>
+   <select id="fReg"><option value="">Todas as regiões</option>${S.base.regioes.map(r => `<option value="${r.codigo}">${r.codigo} · ${esc(r.nome)}</option>`).join('')}</select>
+   <label class="regchk"><input type="checkbox" id="tReg" ${mostrarReg ? 'checked' : ''}> Regiões</label></div>
+   <div class="hint" id="hint">Toque no mapa onde fica o ponto</div>
+   <div class="legend" id="legend"></div></div><aside id="side"></aside></section>`;
+  if (mapa) { mapa.remove(); mapa = null; }
+  mapa = L.map('lmap', { zoomControl: true }).setView([-29.98, -51.18], 12);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(mapa);
+  camada = L.layerGroup().addTo(mapa); camadaSug = L.layerGroup().addTo(mapa);
+  mapa.on('click', e => { if (!marcando) return; marcando = false; $('#hint').style.display = 'none'; abrirCadastro([e.latlng.lng, e.latlng.lat]); });
+  $('#bAdd').onclick = () => abrirCadastro(null);
+  $('#bSug').onclick = buscarProspects;
+  $('#fEt').onchange = $('#fReg').onchange = desenhar;
+  $('#tReg').onchange = e => { mostrarReg = e.target.checked; desenhar(); };
+  desenhar(); painel();
+}
+function desenhar() {
+  camada.clearLayers();
+  if (mostrarReg) S.base.regioes.forEach(r => { const b = r.limites; if (!b) return; L.rectangle([[b[1], b[0]], [b[3], b[2]]], { color: r.cor, weight: 2, dashArray: '8 6', fillOpacity: .04, interactive: false }).addTo(camada).bindTooltip(`${r.codigo} · ${r.nome}`, { permanent: false }); });
+  const fe = $('#fEt').value, fr = $('#fReg').value;
+  S.pdvs.filter(p => p.lat && (!fe || p.etapa === fe) && (!fr || p.regiao === fr)).forEach(p => {
+    const m = L.circleMarker([p.lat, p.lng], { radius: p.classe === 'A' ? 9 : 7, color: S.sel === p.id ? '#2E1A12' : '#F6EFE4', weight: S.sel === p.id ? 3 : 2, fillColor: etapa(p.etapa).c, fillOpacity: 1 });
+    m.on('click', () => { S.sel = p.id; desenhar(); painel(); });
+    m.bindTooltip(esc(p.nome)); m.addTo(camada);
+  });
+  $('#legend').innerHTML = ETAPAS.map(e => `<span><i class="dot" style="background:${e.c}"></i>${e.n} (${S.pdvs.filter(p => p.etapa === e.k).length})</span>`).join('');
+}
+function ultimos6(p) {
+  const so = (S.sellouts[p.id] || []).slice(-6);
+  if (!so.length) return '';
+  const mx = Math.max(1, ...so.map(s => s.sellout)), media = so.reduce((a, s) => a + s.sellout, 0) / so.length, vm = so.reduce((a, s) => a + Number(s.valor_sellout), 0) / so.length;
+  return `<div class="sect"><h3>Últimos ${so.length} sell-outs</h3><div style="display:flex;gap:6px;align-items:flex-end;height:150px;background:var(--sand);border-radius:10px;padding:10px 8px 6px">${so.map((s, i) => `<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:3px"><b style="font-size:13px">${s.sellout}</b><div style="width:100%;max-width:34px;height:${Math.max(3, s.sellout / mx * 80)}px;border-radius:5px 5px 2px 2px;background:${i === so.length - 1 ? '#D08A3C' : '#8C6B55'}"></div><small style="font-size:10.5px;color:var(--soft);white-space:nowrap">${brl(s.valor_sellout).replace('R$ ', 'R$')}</small><small style="font-size:10px;color:var(--mute)">${dstr(s.em)}</small></div>`).join('')}</div>
+  <p style="margin:6px 0 0;color:var(--soft)">Média por reposição: <b>${dec(media)} un.</b> · ticket médio por sell-out <b>${brl(vm)}</b></p></div>`;
+}
+function caixaEsteira(p) {
+  const r = regraAval();
+  if (p.etapa === 'avaliacao') {
+    const n = p.aval_reposicoes || 0, m = Number(p.aval_media || 0);
+    return `<div class="esteira"><h3 style="margin:0;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:#6B4FA0">Em avaliação</h3><p><b>${n} de ${r.reposicoes}</b> reposições</p><div class="prog"><i style="width:${Math.min(100, n / r.reposicoes * 100)}%"></i></div><p>Sell-out médio: <b>${dec(m)} un.</b> por reposição · meta ${r.meta_minima_sellout} un.</p><p>${n ? (m >= r.meta_minima_sellout ? 'No ritmo atual, <b>passa</b>.' : 'No ritmo atual, <b>não passa</b>.') : 'Aguardando a primeira reposição.'}</p></div>`;
+  }
+  if (p.etapa === 'revisao') return `<div class="esteira rev"><h3 style="margin:0;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:#A23B72">Revisão comercial</h3><p>Fechou a avaliação com sell-out médio de <b>${dec(p.aval_media)} un.</b>, abaixo da meta. O que fazer?</p><div class="actions" style="margin-top:8px"><button class="btn" data-rev="preco">Negociar preço e reavaliar</button><button class="btn" data-rev="minimo">Subir pedido mínimo e reavaliar</button><button class="btn" data-rev="retirar">Recolher expositor</button></div></div>`;
+  return '';
+}
+function painel() {
+  const s = $('#side'); if (!s) return;
+  const p = S.pdvs.find(x => x.id === S.sel);
+  if (!p) { s.classList.remove('open'); s.innerHTML = `<div class="empty"><b>Selecione um ponto no mapa.</b><br>A cor mostra a etapa do funil.<br><br><b>+ Cadastrar ponto</b>: pela sua localização, marcando no mapa ou colando o link do Google Maps.<br><b>Buscar prospects aqui</b>: procura estabelecimentos na área visível do mapa.</div>`; return; }
+  s.classList.add('open');
+  const podeComprar = ['visitado', 'negociacao'].includes(p.etapa);
+  const gm = p.lat ? `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}` : null;
+  s.innerHTML = `<button class="btn" style="float:right;padding:4px 10px" id="xSide">✕</button>
+  <small style="color:var(--mute)">${esc(p.canal || '')} · ${esc(p.cidade || '')}</small><h2>${esc(p.nome)}</h2>
+  <div class="badges"><span class="badge st" style="background:${etapa(p.etapa).c}">${etapa(p.etapa).n}</span>${p.classe ? `<span class="badge">Classe ${p.classe}</span>` : ''}<span class="badge">${p.regiao || '—'} · ${esc(regNome(p.regiao))}</span>${p.expositor_id ? `<span class="badge">Expositor ${esc(expo(p.expositor_id).nome)}</span>` : ''}</div>
+  ${caixaEsteira(p)}
+  <div class="sect"><h3>Potencial</h3><div class="stars">${[1, 2, 3, 4, 5].map(i => `<button data-pot="${i}" class="${i <= (p.potencial || 0) ? 'on' : ''}">★</button>`).join('')}</div></div>
+  ${ultimos6(p)}
+  ${p.cadencia_efetiva ? `<div class="sect"><h3>Reposição</h3><div class="kv" style="margin:0 0 8px"><div><small>Próxima</small><b>${dstr(p.proxima_reposicao)}</b><small>${prazoTxt(p)}</small></div><div><small>Rota</small><b>${p.regiao || '—'} · ${DIAS[(S.base.regioes.find(r => r.codigo === p.regiao) || {}).dia_rota] || '—'}</b><small>${esc(regNome(p.regiao))}</small></div></div>
+   <div class="row"><span>Repor a cada</span><select id="sCad"><option value="">padrão da etapa (${cadPadrao()[p.etapa] || '—'} dias)</option>${[7, 10, 14, 21, 28, 30].map(d => `<option value="${d}" ${p.cadencia_dias === d ? 'selected' : ''}>${d} dias</option>`).join('')}</select></div>
+   <p style="color:var(--soft);margin:8px 0 0">Condição: <b>${esc(p.condicao || '—')}</b> · pedido mínimo ${brl(p.pedido_minimo)}</p></div>` : ''}
+  <div class="sect"><h3>Etapa do funil</h3><select id="sEt" style="width:100%">${ETAPAS.map(e => `<option value="${e.k}" ${e.k === p.etapa ? 'selected' : ''}>${e.n}</option>`).join('')}</select></div>
+  ${p.observacao ? `<div class="sect"><h3>Observação</h3><div style="color:var(--soft)">${esc(p.observacao)}</div></div>` : ''}
+  <div class="actions">
+   ${podeComprar ? `<button class="btn car" style="font-size:15px;padding:11px" id="bComprar">Gerar compra →</button>` : ''}
+   <button class="btn ${podeComprar ? '' : 'pri'}" id="bVisita">Registrar visita de prospecção</button>
+   ${gm ? `<a class="btn" href="${gm}" target="_blank" rel="noopener">Abrir no Google Maps ↗</a>` : ''}</div>`;
+  $('#xSide').onclick = () => { S.sel = null; desenhar(); painel(); };
+  s.querySelectorAll('[data-pot]').forEach(b => b.onclick = () => salvarPdv(p.id, { potencial: +b.dataset.pot }, 'Potencial atualizado'));
+  $('#sEt').onchange = e => salvarPdv(p.id, { etapa: e.target.value }, 'Etapa: ' + etapa(e.target.value).n);
+  if ($('#sCad')) $('#sCad').onchange = e => salvarPdv(p.id, { cadencia_dias: e.target.value ? +e.target.value : null }, 'Frequência atualizada');
+  if ($('#bComprar')) $('#bComprar').onclick = () => { S.abPdv = p.id; irPara('abertura'); };
+  $('#bVisita').onclick = () => modal(`<h3>Visita em ${esc(p.nome)}</h3><label>Como foi?</label><textarea id="vObs" rows="3" placeholder="Com quem falou, objeções, próximo passo…"></textarea>
+    <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="vOk">Registrar</button></div>`) || ($('#vOk').onclick = async () => {
+    try { await db.registrarVisita(p.id, 'prospeccao', $('#vObs').value, S.eu.id); if (p.etapa === 'mapeado') await db.atualizarPdv(p.id, { etapa: 'visitado' }); fecharModal(); await atualizarUm(p.id); toast('Visita registrada. Se fechou, toque em Gerar compra.'); } catch (e) { erro(e); } });
+  s.querySelectorAll('[data-rev]').forEach(b => b.onclick = () => revisar(p, b.dataset.rev));
+}
+async function atualizarUm(id) { const n = await db.carregarPdv(id); const i = S.pdvs.findIndex(x => x.id === id); if (i >= 0) S.pdvs[i] = n; else S.pdvs.push(n); if (S.aba === 'mapa') { desenhar(); painel(); } }
+async function salvarPdv(id, patch, msg) { try { await db.atualizarPdv(id, patch); await atualizarUm(id); toast(msg); if (S.aba !== 'mapa') irPara(S.aba); } catch (e) { erro(e); } }
+async function revisar(p, acao) {
+  if (acao === 'retirar') return salvarPdv(p.id, { etapa: 'inativo' }, 'Expositor recolhido: PDV foi para Inativo');
+  const hoje = new Date().toISOString().slice(0, 10);
+  salvarPdv(p.id, { etapa: 'avaliacao', avaliacao_inicio: hoje, observacao: [p.observacao, (acao === 'preco' ? 'Preço renegociado' : 'Pedido mínimo aumentado') + ' em ' + dstr(new Date())].filter(Boolean).join(' · ') }, 'Nova avaliação iniciada');
+}
+
+/* ---------- cadastro ---------- */
+function abrirCadastro(loc) {
+  let pos = loc;
+  modal(`<h3>Novo ponto de venda</h3>
+  <label>Link do Google Maps</label><input id="cLink" placeholder="Cole o link do lugar no Google Maps">
+  <div class="linkmsg" id="cMsg"></div>
+  <div class="row" style="margin-top:8px"><button class="btn" id="cGps" style="flex:1">Usar minha localização</button><button class="btn" id="cMarcar" style="flex:1">Marcar no mapa</button></div>
+  <label>Nome do estabelecimento</label><input id="cNome">
+  <label>Canal</label><select id="cCanal">${CANAIS.map(c => `<option>${c}</option>`).join('')}</select>
+  <div class="row"><div style="flex:1"><label>Bairro</label><input id="cBairro"></div><div style="flex:1"><label>Cidade</label><input id="cCidade" value="Canoas"></div></div>
+  <label>Potencial (1 a 5)</label><select id="cPot"><option>3</option><option>1</option><option>2</option><option>4</option><option>5</option></select>
+  <label>Observação</label><textarea id="cObs" rows="2" placeholder="Quem decide, melhor horário, espaço no caixa…"></textarea>
+  <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="cSalvar">Salvar no funil</button></div>`);
+  const msg = (t, okk) => { const m = $('#cMsg'); m.style.display = 'block'; m.style.background = okk ? '#E3F0E7' : '#F7E9DD'; m.style.color = okk ? '#1F5A37' : '#7A4A16'; m.innerHTML = t; };
+  const marcarPos = (lng, lat, origem) => { pos = [lng, lat]; const r = regiaoDe(lng, lat); if (lat > -29.975) $('#cCidade').value = 'Canoas'; else $('#cCidade').value = 'Porto Alegre'; msg(`Localização ${origem}: ${lat.toFixed(5)}, ${lng.toFixed(5)} · região ${r || 'fora das regiões'}`, true); };
+  if (pos) marcarPos(pos[0], pos[1], 'marcada no mapa');
+  $('#cLink').oninput = () => {
+    const u = $('#cLink').value.trim(); if (!u) return;
+    const m = u.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/) || u.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) || u.match(/[?&](?:q|query|ll)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/);
+    const nm = u.match(/\/place\/([^\/@]+)/);
+    if (m) { marcarPos(+m[2], +m[1], 'encontrada no link'); if (nm && !$('#cNome').value) $('#cNome').value = decodeURIComponent(nm[1].replace(/\+/g, ' ')); return; }
+    if (/maps\.app\.goo\.gl|goo\.gl\/maps/.test(u)) { msg('Link curto do celular. Ainda não consigo ler esse tipo (vem na próxima versão). Por enquanto: abra o link no navegador, copie o endereço completo da barra e cole aqui, ou use "Usar minha localização".', false); return; }
+    msg('Não encontrei a localização nesse link.', false);
+  };
+  $('#cGps').onclick = () => { if (!navigator.geolocation) return msg('Este aparelho não informa a localização.', false); msg('Buscando localização…', true); navigator.geolocation.getCurrentPosition(g => marcarPos(g.coords.longitude, g.coords.latitude, 'do aparelho'), () => msg('Não foi possível pegar a localização. Verifique a permissão do navegador.', false), { enableHighAccuracy: true, timeout: 15000 }); };
+  $('#cMarcar').onclick = () => { fecharModal(); if (S.aba !== 'mapa') irPara('mapa'); marcando = true; $('#hint').style.display = 'block'; };
+  $('#cSalvar').onclick = async () => {
+    if (!pos) return msg('Informe a localização: link, localização do aparelho ou marcar no mapa.', false);
+    const nome = $('#cNome').value.trim(); if (!nome) return msg('Coloque o nome do estabelecimento.', false);
+    try {
+      const n = await db.criarPdv({ nome, canal: $('#cCanal').value, bairro: $('#cBairro').value.trim() || null, cidade: $('#cCidade').value.trim() || null, lng: pos[0], lat: pos[1], regiao: regiaoDe(pos[0], pos[1]), potencial: +$('#cPot').value, observacao: $('#cObs').value.trim() || null, origem: $('#cLink').value ? 'link_maps' : 'manual', link_maps: $('#cLink').value.trim() || null, criado_por: S.eu.id });
+      fecharModal(); await atualizarUm(n.id); S.sel = n.id; if (S.aba === 'mapa') { desenhar(); painel(); } toast(nome + ' entrou no funil como Mapeado');
+    } catch (e) { erro(e); }
+  };
+}
+
+/* ---------- prospects (OpenStreetMap) ---------- */
+const OSM_TAGS = {
+  Padaria: ['shop=bakery', 'shop=pastry', 'shop=confectionery'], Minimercado: ['shop=supermarket', 'shop=general', 'shop=deli'],
+  Fruteira: ['shop=greengrocer'], 'Conveniência': ['shop=convenience', 'amenity=fuel'], Cafeteria: ['amenity=cafe'],
+  Cantina: ['amenity=school', 'amenity=university', 'amenity=college'], Lancheria: ['amenity=fast_food'] };
+function buscarProspects() {
+  modal(`<h3>Buscar prospects na área do mapa</h3><p style="color:var(--soft);margin:0">Procura no OpenStreetMap os estabelecimentos do canal na área que está aparecendo no mapa e mostra os que ainda não estão no funil.</p>
+  <label>Canal</label><select id="sCanal">${Object.keys(OSM_TAGS).map(c => `<option>${c}</option>`).join('')}</select>
+  <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn car" id="sGo">Buscar</button></div>`);
+  $('#sGo').onclick = async () => {
+    const canal = $('#sCanal').value, b = mapa.getBounds();
+    if ((b.getNorth() - b.getSouth()) * (b.getEast() - b.getWest()) > 0.01) { toast('Aproxime mais o mapa (um ou dois bairros) para buscar.'); return; }
+    const bb = `${b.getSouth()},${b.getWest()},${b.getNorth()},${b.getEast()}`;
+    const q = `[out:json][timeout:25];(${OSM_TAGS[canal].map(t => { const [k, v] = t.split('='); return `nwr["${k}"="${v}"](${bb});`; }).join('')});out center 80;`;
+    $('#sGo').disabled = true; $('#sGo').textContent = 'Buscando…';
+    try {
+      const r = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+      const j = await r.json(); fecharModal();
+      const perto = (la, lo) => S.pdvs.some(p => p.lat && Math.abs(p.lat - la) < 0.0004 && Math.abs(p.lng - lo) < 0.0004);
+      S.sugestoes = j.elements.map(e => ({ nome: e.tags?.name, lat: e.lat ?? e.center?.lat, lng: e.lon ?? e.center?.lon, canal, rua: [e.tags?.['addr:street'], e.tags?.['addr:housenumber']].filter(Boolean).join(', '), bairro: e.tags?.['addr:suburb'] || '' }))
+        .filter(s => s.nome && s.lat && !perto(s.lat, s.lng));
+      camadaSug.clearLayers();
+      S.sugestoes.forEach((s, i) => L.circleMarker([s.lat, s.lng], { radius: 7, color: '#D08A3C', weight: 2, dashArray: '3 3', fillColor: '#FBF7F0', fillOpacity: 1 })
+        .bindPopup(`<b>${esc(s.nome)}</b><br>${esc(s.canal)}${s.rua ? ' · ' + esc(s.rua) : ''}<br><button class="btn pri" style="margin-top:6px" onclick="addSug(${i})">Adicionar ao funil</button>`).addTo(camadaSug));
+      toast(S.sugestoes.length ? `${S.sugestoes.length} prospects encontrados. Toque num ponto tracejado para adicionar.` : 'Nenhum prospect novo nessa área para esse canal.');
+    } catch (e) { erro(e); $('#sGo').disabled = false; }
+  };
+}
+window.addSug = async i => {
+  const s = S.sugestoes[i]; if (!s) return;
+  try { const n = await db.criarPdv({ nome: s.nome, canal: s.canal, endereco: s.rua || null, bairro: s.bairro || null, cidade: s.lat > -29.975 ? 'Canoas' : 'Porto Alegre', lat: s.lat, lng: s.lng, regiao: regiaoDe(s.lng, s.lat), potencial: 3, origem: 'sugestao', criado_por: S.eu.id });
+    mapa.closePopup(); S.sugestoes[i] = null; await atualizarUm(n.id); S.sel = n.id; desenhar(); painel(); toast(s.nome + ' adicionado ao funil'); } catch (e) { erro(e); }
+};
+
+/* =================== funil =================== */
+function telaFunil() {
+  const r = regraAval();
+  $('#main').innerHTML = `<section class="view on" style="flex-direction:column;height:100%"><div class="rules">Avaliação de ${r.reposicoes} reposições semanais após a 1ª compra, meta de ${r.meta_minima_sellout} un. por sell-out. Ajuste na aba <b>&nbsp;Regras</b>.</div><div class="kanban" id="kanban" style="flex:1;min-height:0"></div></section>`;
+  $('#kanban').innerHTML = ETAPAS.map(e => { const its = S.pdvs.filter(p => p.etapa === e.k).sort((a, b) => (b.potencial || 0) - (a.potencial || 0));
+    return `<div class="col" data-et="${e.k}"><h4><span><i class="dot" style="background:${e.c}"></i> ${e.n}</span><span>${its.length}</span></h4><div class="list">${its.slice(0, 80).map(p => `<div class="card" draggable="true" data-id="${p.id}" style="border-left-color:${e.c}"><b>${esc(p.nome)}</b><small>${esc(p.canal || '')} · ${p.regiao || '—'} · ${'★'.repeat(p.potencial || 0)}</small></div>`).join('')}</div></div>`; }).join('');
+  let arr = null;
+  document.querySelectorAll('.card').forEach(c => { c.ondragstart = () => arr = c.dataset.id; c.onclick = () => { S.sel = c.dataset.id; irPara('mapa'); }; });
+  document.querySelectorAll('.col').forEach(c => { c.ondragover = e => { e.preventDefault(); c.classList.add('drop'); }; c.ondragleave = () => c.classList.remove('drop');
+    c.ondrop = e => { e.preventDefault(); c.classList.remove('drop'); if (arr) salvarPdv(arr, { etapa: c.dataset.et }, 'Etapa: ' + etapa(c.dataset.et).n); arr = null; }; });
+}
+
+/* =================== carteira =================== */
+let ord = { k: 'nome', d: 1 };
+function telaCarteira() {
+  $('#main').innerHTML = `<section class="view on"><div class="tablewrap"><div class="toolbar"><input id="q" placeholder="Buscar PDV…" style="width:240px"><select id="tEt"><option value="">Todas as etapas</option>${ETAPAS.map(e => `<option value="${e.k}">${e.n}</option>`).join('')}</select><span id="tN" style="color:var(--mute)"></span></div><table id="tbl"></table></div></section>`;
+  const cols = [['nome', 'PDV'], ['regiao', 'Região'], ['canal', 'Canal'], ['etapa', 'Etapa'], ['classe', 'Classe'], ['potencial', 'Potencial'], ['so', 'Sell-out médio'], ['ultima_visita', 'Última visita'], ['proxima_reposicao', 'Próx. reposição']];
+  const desenhaT = () => {
+    const q = $('#q').value.toLowerCase(), et = $('#tEt').value;
+    let ds = S.pdvs.filter(p => (!et || p.etapa === et) && (!q || p.nome.toLowerCase().includes(q))).map(p => { const s = (S.sellouts[p.id] || []).slice(-6); return { ...p, so: s.length ? s.reduce((a, x) => a + x.sellout, 0) / s.length : null }; });
+    ds.sort((a, b) => { const x = a[ord.k] ?? '', y = b[ord.k] ?? ''; return (x > y ? 1 : x < y ? -1 : 0) * ord.d; });
+    $('#tN').textContent = ds.length + ' pontos';
+    $('#tbl').innerHTML = `<tr>${cols.map(([k, n]) => `<th data-k="${k}">${n}${ord.k === k ? (ord.d > 0 ? ' ↑' : ' ↓') : ''}</th>`).join('')}</tr>` + ds.map(p => `<tr data-id="${p.id}" style="cursor:pointer"><td><b>${esc(p.nome)}</b></td><td>${p.regiao || '—'}</td><td>${esc(p.canal || '')}</td><td><i class="dot" style="background:${etapa(p.etapa).c}"></i> ${etapa(p.etapa).n}</td><td>${p.classe || '—'}</td><td>${'★'.repeat(p.potencial || 0)}</td><td>${p.so === null ? '—' : dec(p.so) + ' un.'}</td><td>${dstr(p.ultima_visita)}</td><td>${p.proxima_reposicao ? dstr(p.proxima_reposicao) + ' · ' + prazoTxt(p) : '—'}</td></tr>`).join('');
+    $('#tbl').querySelectorAll('th').forEach(th => th.onclick = () => { ord = { k: th.dataset.k, d: ord.k === th.dataset.k ? -ord.d : 1 }; desenhaT(); });
+    $('#tbl').querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => { S.sel = tr.dataset.id; irPara('mapa'); });
+  };
+  $('#q').oninput = $('#tEt').onchange = desenhaT; desenhaT();
+}
+
+/* =================== abertura de cliente =================== */
+function telaAbertura() {
+  const elig = S.pdvs.filter(p => ['mapeado', 'visitado', 'negociacao', 'inativo'].includes(p.etapa));
+  if (!S.abPdv || !elig.some(p => p.id === S.abPdv)) S.abPdv = (elig.find(p => p.id === S.sel) || elig.find(p => p.etapa === 'negociacao') || elig[0] || {}).id;
+  const p = S.pdvs.find(x => x.id === S.abPdv);
+  const ex = S.base.expositores;
+  $('#main').innerHTML = `<section class="view on"><div class="dash"><div class="panel" style="max-width:980px">
+  <h3 style="font-family:Fraunces,Georgia,serif;font-size:22px;font-weight:600">Abertura de cliente</h3>
+  ${p ? '' : '<p class="empty">Nenhum PDV disponível. Cadastre um ponto no mapa primeiro.</p>'}
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+   <div><label class="lb">PDV</label><select id="oPdv" style="width:100%">${elig.map(x => `<option value="${x.id}" ${x.id === S.abPdv ? 'selected' : ''}>${esc(x.nome)} · ${etapa(x.etapa).n}</option>`).join('')}</select></div>
+   <div><label class="lb">Expositor entregue</label><select id="oExp" style="width:100%">${ex.map(e => `<option value="${e.id}">${esc(e.nome)} · ${e.capacidade} un.</option>`).join('')}</select></div>
+   <div><label class="lb">Preço por unidade (R$)</label><input id="oPre" type="number" step="0.05" value="4.90" style="width:100%"></div>
+   <div><label class="lb">Pedido mínimo combinado (R$)</label><input id="oMin" type="number" step="10" value="150" style="width:100%"></div>
+   <div><label class="lb">Repor a cada</label><select id="oCad" style="width:100%"><option value="">${cadPadrao().avaliacao || 7} dias (padrão da avaliação)</option><option value="10">10 dias</option><option value="14">14 dias</option></select></div></div>
+  <h3 style="margin:16px 0 6px">Condição de pagamento</h3><div class="pay">${CONDICOES.map((c, i) => `<label><input type="radio" name="oc" value="${c}" ${i === 0 ? 'checked' : ''}> ${c}</label>`).join('')}<label><input type="radio" name="oc" value="Outra"> Outra</label></div>
+  <input id="oOutra" placeholder="Descreva a negociação" style="width:100%;display:none;margin-bottom:8px">
+  <div id="oBon" style="display:none;margin-bottom:8px"><label class="lb">Unidades bonificadas</label><input id="oBonQ" type="number" value="6" style="width:120px"></div>
+  <h3 style="margin:16px 0 6px">Itens do primeiro pedido</h3><div id="oItens" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:6px 14px"></div>
+  <div class="row" style="justify-content:space-between;margin-top:14px;flex-wrap:wrap"><div><b id="oUn">0</b> unidades · <span id="oInfo" style="color:var(--soft)"></span></div><div style="font-family:Fraunces,Georgia,serif;font-size:26px" id="oTot">R$ 0,00</div></div>
+  <label class="lb">Observação</label><textarea id="oObs" rows="2" style="width:100%"></textarea>
+  <div class="row" style="margin-top:12px;justify-content:flex-end"><button class="btn pri" id="oSave" ${p ? '' : 'disabled'}>Fechar abertura</button></div></div></div></section>`;
+  const fill = () => { const e = +$('#oExp').value; let l = ''; $('#oItens').innerHTML = S.base.produtos.map(pr => { const h = pr.linha !== l ? `<div style="grid-column:1/-1;font-weight:700;margin-top:6px;color:var(--car-d)">${esc(l = pr.linha)}</div>` : ''; return h + `<div class="row" style="justify-content:space-between"><span>${esc(pr.sabor)}</span><input type="number" min="0" class="oq" data-p="${pr.id}" value="${alvo(e, pr.id)}" style="width:64px"></div>`; }).join(''); calc(); };
+  const cond = () => document.querySelector('input[name=oc]:checked').value;
+  const calc = () => { const un = [...document.querySelectorAll('.oq')].reduce((a, i) => a + (+i.value || 0), 0), pre = +$('#oPre').value || 0, c = cond(), bon = c === 'Bonificação na abertura' ? Math.min(un, +$('#oBonQ').value || 0) : 0, tot = (un - bon) * pre;
+    $('#oUn').textContent = un; $('#oTot').textContent = c === 'Consignado' ? 'R$ 0,00 agora' : brl(tot);
+    $('#oInfo').textContent = c === 'Consignado' ? `consignado: cobra ${brl(un * pre)} conforme vender` : bon ? `${bon} bonificadas` : tot < (+$('#oMin').value || 0) ? 'abaixo do pedido mínimo' : '';
+    $('#oOutra').style.display = c === 'Outra' ? 'block' : 'none'; $('#oBon').style.display = c === 'Bonificação na abertura' ? 'block' : 'none'; return { un, tot, bon, c, pre }; };
+  $('#oPdv') && ($('#oPdv').onchange = e => { S.abPdv = e.target.value; telaAbertura(); });
+  $('#oExp').onchange = fill; const sec = $('#main section'); sec.addEventListener('input', calc); sec.addEventListener('change', calc); fill();
+  $('#oSave').onclick = async () => {
+    const t = calc(); if (!t.un) return toast('Coloque os itens do pedido');
+    const c = t.c === 'Outra' ? ($('#oOutra').value.trim() || 'Negociação especial') : t.c;
+    const itens = [...document.querySelectorAll('.oq')].map(i => ({ produto_id: +i.dataset.p, quantidade: +i.value || 0, preco_unit: t.pre, bonificado: 0 }));
+    if (t.bon) { let r = t.bon; for (const it of itens) { const b = Math.min(r, it.quantidade); it.bonificado = b; r -= b; if (!r) break; } }
+    const hoje = new Date();
+    $('#oSave').disabled = true;
+    try {
+      await db.registrarAbertura({ pdvId: p.id, usuarioId: S.eu.id, observacao: $('#oObs').value || null,
+        contagens: itens.filter(i => i.quantidade).map(i => ({ produto_id: i.produto_id, deixado_anterior: 0, encontrado: 0, troca: 0, reposto: i.quantidade })),
+        pedido: { tipo: 'abertura', condicao: c, unidades: t.un, valor: c === 'Consignado' ? 0 : t.tot, pago_na_hora: c.startsWith('À vista'), vencimento: prazoDias(c) ? new Date(+hoje + prazoDias(c) * DIA).toISOString().slice(0, 10) : null },
+        itens,
+        patch: { etapa: 'avaliacao', avaliacao_inicio: hoje.toISOString().slice(0, 10), expositor_id: +$('#oExp').value, condicao: c, pedido_minimo: +$('#oMin').value || 150, cadencia_dias: $('#oCad').value ? +$('#oCad').value : null } });
+      await atualizarUm(p.id); const n = S.pdvs.find(x => x.id === p.id);
+      toast(`Abertura de ${p.nome} registrada. Primeira reposição em ${dstr(n.proxima_reposicao)}.`); S.abPdv = null; telaAbertura();
+    } catch (e) { erro(e); $('#oSave').disabled = false; }
+  };
+}
+
+/* =================== painel =================== */
+function telaPainel() {
+  const cont = k => S.pdvs.filter(p => p.etapa === k).length;
+  const desde = Date.now() - 28 * DIA;
+  const so4 = Object.values(S.sellouts).flat().filter(s => new Date(s.em) >= desde);
+  const un4 = so4.reduce((a, s) => a + s.sellout, 0), val4 = so4.reduce((a, s) => a + Number(s.valor_sellout), 0);
+  const atras = S.pdvs.filter(p => ROTA_ETAPAS.includes(p.etapa) && (atraso(p) ?? -1) > 0).length;
+  $('#main').innerHTML = `<section class="view on"><div class="dash"><div class="tiles">
+  <div class="tile hi"><small>PDVs ativos</small><b>${cont('ativo')}</b><small>+ ${cont('avaliacao')} em avaliação</small></div>
+  <div class="tile"><small>Em negociação</small><b>${cont('negociacao')}</b><small>prontos para fechar</small></div>
+  <div class="tile"><small>Revisão comercial</small><b>${cont('revisao')}</b><small>decidir preço, mínimo ou retirada</small></div>
+  <div class="tile"><small>Reposições atrasadas</small><b>${atras}</b><small>passaram da data</small></div>
+  <div class="tile"><small>Sell-out · 4 semanas</small><b>${fmt(un4)}</b><small>${brl(val4)}</small></div></div>
+  <div class="panel"><h3>Funil</h3><div class="bars">${ETAPAS.map(e => { const n = cont(e.k); return `<div class="bar"><span>${e.n}</span><div class="tr"><div class="fl" style="width:${S.pdvs.length ? n / S.pdvs.length * 100 : 0}%;background:${e.c}"></div></div><b>${n}</b></div>`; }).join('')}</div></div></div></section>`;
+}
+
+/* =================== regras =================== */
+function telaRegras() {
+  const r = regraAval(), cp = cadPadrao();
+  $('#main').innerHTML = `<section class="view on"><div class="dash">
+  <div class="panel" style="max-width:900px"><h3>Esteira de avaliação</h3><div class="row" style="flex-wrap:wrap;gap:10px">Avaliação de <input type="number" id="rRep" value="${r.reposicoes}" style="width:70px"> reposições. Aprova com sell-out médio de pelo menos <input type="number" id="rMin" value="${r.meta_minima_sellout}" style="width:70px"> un. por reposição.</div></div>
+  <div class="panel" style="max-width:900px"><h3>Frequência padrão de reposição por etapa</h3><table><tr><th>Etapa</th><th>Repor a cada</th><th>PDVs</th></tr>${['avaliacao', 'ativo', 'risco', 'revisao'].map(k => `<tr><td><i class="dot" style="background:${etapa(k).c}"></i> ${etapa(k).n}</td><td><input type="number" class="rCad" data-k="${k}" value="${cp[k] || ''}" style="width:70px"> dias</td><td>${S.pdvs.filter(p => p.etapa === k).length}</td></tr>`).join('')}</table></div>
+  <div class="panel" style="max-width:900px"><h3>Dia de rota por região</h3><table><tr><th>Região</th><th>Dia</th><th>PDVs com reposição</th></tr>${S.base.regioes.map(g => `<tr><td><b style="color:${g.cor}">${g.codigo}</b> · ${esc(g.nome)}</td><td><select class="rDia" data-c="${g.codigo}">${DIAS.map((d, i) => `<option value="${i}" ${g.dia_rota === i ? 'selected' : ''}>${d}</option>`).join('')}</select></td><td>${S.pdvs.filter(p => p.regiao === g.codigo && ROTA_ETAPAS.includes(p.etapa)).length}</td></tr>`).join('')}</table></div></div></section>`;
+  const salvarAval = async () => { const v = { reposicoes: +$('#rRep').value || 13, meta_minima_sellout: +$('#rMin').value || 6 }; try { await db.salvarRegra('avaliacao', v); S.base.regras.avaliacao = v; toast('Regra da avaliação salva'); } catch (e) { erro(e); } };
+  $('#rRep').onchange = $('#rMin').onchange = salvarAval;
+  document.querySelectorAll('.rCad').forEach(i => i.onchange = async () => { const v = { ...cadPadrao(), [i.dataset.k]: +i.value || 7 }; try { await db.salvarRegra('cadencia_padrao', v); S.base.regras.cadencia_padrao = v; await recarregar(); toast('Frequência salva'); } catch (e) { erro(e); } });
+  document.querySelectorAll('.rDia').forEach(s => s.onchange = async () => { try { await db.salvarRegiao(s.dataset.c, { dia_rota: +s.value }); S.base.regioes.find(g => g.codigo === s.dataset.c).dia_rota = +s.value; S.rotaReg = null; toast('Dia de rota salvo'); } catch (e) { erro(e); } });
+}
+
+/* =================== rota (reposição) =================== */
+function aRepor(reg) { return S.pdvs.filter(p => p.regiao === reg && ROTA_ETAPAS.includes(p.etapa) && p.proxima_reposicao && (atraso(p) ?? -99) >= -2); }
+function ordenar(pool) { const o = []; let cur = [...pool].sort((a, b) => b.lat - a.lat)[0]; pool = pool.filter(p => p !== cur); while (cur) { o.push(cur); let best = null, bd = 1e9; pool.forEach(p => { const d = (p.lng - cur.lng) ** 2 + (p.lat - cur.lat) ** 2; if (d < bd) { bd = d; best = p; } }); pool = pool.filter(p => p !== best); cur = best; } return o; }
+async function telaRota() {
+  $('#main').innerHTML = '<section class="view on"><div class="loading">Atualizando a rota…</div></section>';
+  try { await recarregar(); } catch (e) { return erro(e); }
+  const dia = new Date().getDay();
+  if (!S.rotaReg) S.rotaReg = (S.base.regioes.find(g => g.dia_rota === dia) || S.base.regioes[0]).codigo;
+  const r = ordenar(aRepor(S.rotaReg).filter(p => p.lat)).slice(0, 15);
+  const pts = r.map(p => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`);
+  const url = pts.length ? `https://www.google.com/maps/dir/?api=1&destination=${pts[pts.length - 1]}&waypoints=${pts.slice(0, -1).slice(0, 9).join('%7C')}&travelmode=driving` : null;
+  const doDia = S.base.regioes.filter(g => g.dia_rota === dia).map(g => g.codigo).join(' e ') || 'nenhuma';
+  $('#main').innerHTML = `<section class="view on"><div class="route"><div class="toolbar"><h2 style="font-family:Fraunces,Georgia,serif;margin:0 12px 0 0">Rota · ${r.length} paradas</h2>${url ? `<a class="btn car" href="${url}" target="_blank" rel="noopener" style="text-decoration:none">Abrir rota no Google Maps ↗</a>` : ''}</div>
+  <div class="toolbar"><span>${DIAS[dia]}: regiões do dia <b>${doDia}</b>. Montar rota de</span><select id="rReg">${S.base.regioes.map(g => `<option value="${g.codigo}" ${g.codigo === S.rotaReg ? 'selected' : ''}>${g.codigo} · ${esc(g.nome)} · ${DIAS[g.dia_rota] || '—'} (${aRepor(g.codigo).length} a repor)</option>`).join('')}</select></div>
+  <p style="color:var(--soft);margin-top:0">Entram os PDVs da região com reposição vencida ou vencendo em até 2 dias, do mais próximo para o seguinte.</p>
+  ${r.map((p, i) => `<div class="stop"><div class="n">${i + 1}</div><div class="info"><b>${esc(p.nome)}</b> <span class="badge" style="background:${(atraso(p) ?? 0) > 0 ? '#F3D6CF' : 'var(--sand)'}">${prazoTxt(p)}</span><br><small style="color:var(--mute)">${esc(p.canal || '')} · ${p.expositor_id ? 'expositor ' + esc(expo(p.expositor_id).nome) + ' · ' : ''}${etapa(p.etapa).n}${p.etapa === 'avaliacao' ? ` ${p.aval_reposicoes || 0}/${regraAval().reposicoes}` : ''} · ${esc(p.condicao || '')} · a cada ${p.cadencia_efetiva} dias</small></div><button class="btn pri" data-rep="${p.id}">Repor</button></div>`).join('') || '<div class="empty">Nenhuma reposição vencida nessa região.</div>'}</div></section>`;
+  $('#rReg').onchange = e => { S.rotaReg = e.target.value; telaRota(); };
+  document.querySelectorAll('[data-rep]').forEach(b => b.onclick = () => { S.contando = b.dataset.rep; irPara('reposicao'); });
+}
+
+/* =================== reposição (contagem) =================== */
+async function telaReposicao() {
+  const p = S.pdvs.find(x => x.id === S.contando);
+  if (!p) { $('#main').innerHTML = '<section class="view on"><div class="empty">Escolha um PDV na <b>Rota de hoje</b> para começar.</div></section>'; return; }
+  $('#main').innerHTML = '<section class="view on"><div class="loading">Carregando a última contagem…</div></section>';
+  let ant; try { ant = await db.ultimoDeixado(p.id); } catch (e) { return erro(e); }
+  const ex = expo(p.expositor_id), cons = p.condicao === 'Consignado';
+  let h = `<section class="view on"><div class="count"><div class="toolbar"><h2 style="font-family:Fraunces,Georgia,serif;margin:0">${esc(p.nome)}</h2><span class="badge">Expositor ${esc(ex.nome)} · ${ex.capacidade} un.</span></div>
+  <p style="color:var(--soft);margin-top:0">Conte o que tem de cada sabor no expositor, inclusive o que vai ser trocado. O sistema sugere quanto repor e calcula o sell-out.</p>
+  <table id="ct"><tr><th>Sabor</th><th>Deixado na última visita</th><th>Encontrado agora</th><th>Troca</th><th>Sell-out</th><th>Repor</th><th>Valor</th></tr>`;
+  let l = '';
+  S.base.produtos.forEach(pr => { if (pr.linha !== l) { l = pr.linha; h += `<tr class="grp"><td colspan="7">${esc(l)}</td></tr>`; }
+    h += `<tr data-p="${pr.id}" data-ant="${ant[pr.id] ?? 0}" data-alvo="${alvo(ex.id, pr.id)}" data-pre="${pr.preco}"><td>${esc(pr.sabor)}</td><td>${ant[pr.id] ?? 0}</td><td><input type="number" min="0" class="enc"></td><td><input type="number" min="0" class="trc" value="0"></td><td class="so">—</td><td><input type="number" min="0" class="rep" value="0"></td><td class="val">—</td></tr>`; });
+  h += `</table><div class="panel" style="margin-top:14px"><div class="row" style="justify-content:space-between;flex-wrap:wrap"><div><b id="tUn">0 un.</b> a repor · sell-out <b id="tSo">0 un.</b> · trocas <b id="tTr">0</b></div><div style="font-family:Fraunces,Georgia,serif;font-size:24px" id="tVal">R$ 0,00</div></div>
+  ${cons ? `<div class="esteira" style="margin-top:12px"><b>Cliente em consignado.</b><p>Cobra só o que foi vendido desde a última visita: <b id="tCons">R$ 0,00</b>.</p></div>` : ''}
+  <h3 style="margin:14px 0 6px">Pagamento <small style="font-weight:400;color:var(--mute)">· combinado: ${esc(p.condicao || '—')}</small></h3><div class="pay">${CONDICOES.slice(0, 5).map(c => `<label><input type="radio" name="pg" value="${c}" ${(p.condicao === c || (!CONDICOES.slice(0, 5).includes(p.condicao) && c === 'À vista · dinheiro')) ? 'checked' : ''}> ${c}</label>`).join('')}</div>
+  <div class="row"><button class="btn" id="bVoltar">Voltar</button><button class="btn pri" id="fechar">Fechar reposição</button></div></div></div></section>`;
+  $('#main').innerHTML = h;
+  const linhas = () => [...document.querySelectorAll('#ct tr[data-p]')];
+  const calc = () => { let un = 0, so = 0, tr = 0, val = 0, vc = 0;
+    linhas().forEach(r => { const a = +r.dataset.ant, enc = r.querySelector('.enc').value, t = +r.querySelector('.trc').value || 0, pre = +r.dataset.pre;
+      if (enc !== '' && !r.querySelector('.rep').dataset.mexeu) r.querySelector('.rep').value = Math.max(0, +r.dataset.alvo - (+enc - t));
+      const rep = +r.querySelector('.rep').value || 0, s = enc === '' ? null : Math.max(0, a - +enc);
+      r.querySelector('.so').textContent = s === null ? '—' : s; r.querySelector('.val').textContent = rep ? brl(rep * pre) : '—';
+      un += rep; so += s || 0; tr += t; val += rep * pre; vc += (s || 0) * pre; });
+    if (cons) { val = vc; $('#tCons').textContent = brl(vc); }
+    $('#tUn').textContent = un + ' un.'; $('#tSo').textContent = so + ' un.'; $('#tTr').textContent = tr; $('#tVal').textContent = brl(val); return { un, so, tr, val }; };
+  $('#ct').addEventListener('input', e => { if (e.target.classList.contains('rep')) e.target.dataset.mexeu = 1; calc(); });
+  $('#bVoltar').onclick = () => irPara('rota');
+  $('#fechar').onclick = async () => {
+    if (linhas().some(r => r.querySelector('.enc').value === '')) return toast('Preencha o "encontrado agora" de todos os sabores (0 se não tinha).');
+    const t = calc(), pg = document.querySelector('input[name=pg]:checked').value;
+    const contagens = linhas().map(r => ({ produto_id: +r.dataset.p, deixado_anterior: +r.dataset.ant, encontrado: +r.querySelector('.enc').value, troca: +r.querySelector('.trc').value || 0, reposto: +r.querySelector('.rep').value || 0 }));
+    const itens = cons ? linhas().map(r => ({ produto_id: +r.dataset.p, quantidade: Math.max(0, +r.dataset.ant - +r.querySelector('.enc').value), preco_unit: +r.dataset.pre, bonificado: 0 }))
+                       : contagens.map(c => ({ produto_id: c.produto_id, quantidade: c.reposto, preco_unit: +linhas().find(r => +r.dataset.p === c.produto_id).dataset.pre, bonificado: 0 }));
+    $('#fechar').disabled = true;
+    try {
+      await db.registrarReposicao({ pdvId: p.id, usuarioId: S.eu.id, contagens, itens,
+        pedido: { tipo: cons ? 'reposicao_consignado' : 'reposicao', condicao: pg, unidades: cons ? t.so : t.un, valor: t.val, pago_na_hora: pg.startsWith('À vista'), vencimento: prazoDias(pg) ? new Date(Date.now() + prazoDias(pg) * DIA).toISOString().slice(0, 10) : null } });
+      let n = await db.carregarPdv(p.id), extra = '';
+      const r = regraAval();
+      if (n.etapa === 'avaliacao' && (n.aval_reposicoes || 0) >= r.reposicoes) {
+        const novo = Number(n.aval_media) >= r.meta_minima_sellout ? 'ativo' : 'revisao';
+        await db.atualizarPdv(p.id, { etapa: novo }); extra = novo === 'ativo' ? ' Avaliação concluída: virou cliente ativo.' : ' Avaliação abaixo da meta: foi para revisão comercial.';
+      } else if (n.etapa === 'avaliacao') extra = ` Avaliação: ${n.aval_reposicoes} de ${r.reposicoes}.`;
+      await recarregar(); toast('Reposição registrada.' + extra); S.contando = null; irPara('rota');
+    } catch (e) { erro(e); $('#fechar').disabled = false; }
+  };
+}
+
+/* =================== resumo do dia =================== */
+async function telaResumo() {
+  $('#main').innerHTML = '<section class="view on"><div class="loading">Carregando…</div></section>';
+  const ini = new Date(); ini.setHours(0, 0, 0, 0);
+  let peds, trocas; try { [peds, trocas] = await Promise.all([db.carregarPedidosDesde(ini.toISOString()), db.carregarTrocas(28)]); } catch (e) { return erro(e); }
+  const rep = peds.filter(o => o.tipo !== 'abertura');
+  const tot = rep.reduce((a, o) => a + Number(o.valor), 0), rec = rep.filter(o => o.pago_na_hora).reduce((a, o) => a + Number(o.valor), 0);
+  const trHoje = trocas.filter(t => new Date(t.visitas.em) >= ini).reduce((a, t) => a + t.troca, 0);
+  const unHoje = rep.reduce((a, o) => a + o.unidades, 0);
+  const porProd = {}; trocas.forEach(t => porProd[t.produto_id] = (porProd[t.produto_id] || 0) + t.troca);
+  const totTr = Object.values(porProd).reduce((a, b) => a + b, 0);
+  const so4 = Object.values(S.sellouts).flat().filter(s => new Date(s.em) >= Date.now() - 28 * DIA).reduce((a, s) => a + s.sellout, 0);
+  const taxa = so4 + totTr ? totTr / (so4 + totTr) * 100 : 0, meta = Number(S.base.regras.meta_troca_pct || 3);
+  const ps = S.base.produtos.map(p => ({ n: p.sabor, l: p.linha, v: porProd[p.id] || 0 })).sort((a, b) => b.v - a.v), mx = Math.max(1, ps[0]?.v || 0);
+  const porPdv = {}; trocas.forEach(t => porPdv[t.visitas.pdv_id] = (porPdv[t.visitas.pdv_id] || 0) + t.troca);
+  const top = Object.entries(porPdv).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([id, v]) => ({ n: (S.pdvs.find(p => p.id === id) || {}).nome || '—', v }));
+  $('#main').innerHTML = `<section class="view on"><div class="tablewrap"><div class="tiles" style="margin-bottom:14px">
+  <div class="tile hi"><small>Reposições hoje</small><b>${rep.length}</b></div><div class="tile"><small>Total vendido</small><b>${brl(tot)}</b></div>
+  <div class="tile"><small>Recebido na hora</small><b>${brl(rec)}</b></div><div class="tile"><small>A receber</small><b>${brl(tot - rec)}</b></div>
+  <div class="tile"><small>Trocas hoje</small><b>${trHoje} un.</b><small>${unHoje ? dec(trHoje / unHoje * 100) + '% do reposto' : '—'}</small></div>
+  <div class="tile" style="background:${taxa > meta ? '#F3D6CF' : '#DCEBDF'}"><small>Taxa de troca · 4 semanas</small><b>${dec(taxa)}%</b><small>${taxa > meta ? 'acima' : 'dentro'} da meta de ${meta}%</small></div></div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin-bottom:14px">
+  <div class="panel"><h3>Trocas por sabor · 4 semanas</h3><div class="bars">${ps.map(x => `<div class="bar"><span>${esc(x.n)} <small style="color:var(--mute)">· ${esc(x.l.split(' ')[0])}</small></span><div class="tr"><div class="fl" style="width:${x.v / mx * 100}%;background:${x.l.startsWith('Cookie') ? '#B8402A' : x.l.startsWith('Palha') ? '#D08A3C' : '#2E1A12'}"></div></div><b>${x.v}</b></div>`).join('')}</div></div>
+  <div class="panel"><h3>PDVs com mais troca · 4 semanas</h3><div class="bars">${top.map(x => `<div class="bar" style="grid-template-columns:1fr 50px"><span>${esc(x.n)}</span><b>${x.v} un.</b></div>`).join('') || '<span style="color:var(--mute)">Sem trocas</span>'}</div></div></div>
+  <table><tr><th>Pedido</th><th>Tipo</th><th>PDV</th><th>Unidades</th><th>Valor</th><th>Pagamento</th><th>Situação</th><th>Bling</th></tr>${peds.map(o => `<tr><td>#${o.numero}</td><td>${o.tipo === 'abertura' ? 'Abertura' : o.tipo === 'reposicao_consignado' ? 'Reposição (consignado)' : 'Reposição'}</td><td>${esc(o.pdvs?.nome)}</td><td>${o.unidades}</td><td>${brl(o.valor)}</td><td>${esc(o.condicao)}</td><td>${o.pago_na_hora ? 'Pago' : 'A receber' + (o.vencimento ? ' · ' + dstr(o.vencimento + 'T12:00') : '')}</td><td>${esc(o.bling_status)}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">Nenhum pedido hoje.</td></tr>'}</table></div></section>`;
+}
+
+/* =================== início =================== */
+$('#modal').addEventListener('click', e => { if (e.target.id === 'modal') fecharModal(); });
+iniciar();
