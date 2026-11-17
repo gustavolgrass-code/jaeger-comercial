@@ -36,6 +36,26 @@ const regiaoDe = (lng, lat) => {
   for (const r of S.base.regioes) { const b = r.limites; if (b && lng >= b[0] && lng < b[2] && lat <= b[1] && lat > b[3]) return r.codigo; }
   return null;
 };
+const semAcento = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+const CORES = ['#3F6FA8', '#2F7D4E', '#C27A2C', '#B8402A', '#6B4FA0', '#8A4E17', '#2C7F8C', '#9A3B6E', '#5E6B2E'];
+async function geoReverso(lat, lng) {
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=16&accept-language=pt-BR&lat=${lat}&lon=${lng}`);
+    const a = (await r.json()).address || {};
+    return { cidade: a.city || a.town || a.village || a.municipality || '', bairro: a.suburb || a.neighbourhood || a.quarter || a.city_district || '', rua: [a.road, a.house_number].filter(Boolean).join(', ') };
+  } catch { return { cidade: '', bairro: '', rua: '' }; }
+}
+// região: as 6 zonas de POA e Canoas; fora delas, uma região por cidade (criada na hora)
+async function garantirRegiao(lng, lat, cidade) {
+  const z = regiaoDe(lng, lat); if (z) return z;
+  if (!cidade) return null;
+  const codigo = semAcento(cidade).toUpperCase().replace(/[^A-Z0-9]+/g, '-').slice(0, 24);
+  if (!S.base.regioes.some(g => g.codigo === codigo)) {
+    const nova = { codigo, nome: cidade, cor: CORES[S.base.regioes.length % CORES.length], dia_rota: null, limites: null };
+    await db.criarRegiao(nova); S.base.regioes.push(nova); S.base.regioes.sort((a, b) => a.codigo.localeCompare(b.codigo));
+  }
+  return codigo;
+}
 const regNome = c => (S.base.regioes.find(r => r.codigo === c) || {}).nome || 'sem região';
 const atraso = p => p.proxima_reposicao ? Math.floor((Date.now() - new Date(p.proxima_reposicao)) / DIA) : null;
 const prazoTxt = p => { const a = atraso(p); if (a === null) return '—'; return a > 0 ? `atrasada ${a} dia${a > 1 ? 's' : ''}` : a === 0 ? 'vence hoje' : `em ${-a} dia${a < -1 ? 's' : ''}`; };
@@ -128,12 +148,17 @@ function telaMapa() {
   $('#tReg').onchange = e => { mostrarReg = e.target.checked; desenhar(); };
   desenhar(); painel();
 }
+function pino(cor, k = 1, tracejado = false) {
+  const w = Math.round(30 * k), h = Math.round(40 * k);
+  return L.divIcon({ className: '', iconSize: [w, h], iconAnchor: [w / 2, h], tooltipAnchor: [0, -h * .8], popupAnchor: [0, -h * .85],
+    html: `<svg width="${w}" height="${h}" viewBox="0 0 30 40" style="filter:drop-shadow(0 2px 2px rgba(0,0,0,.35))"><path d="M15 1C7.3 1 1 7.2 1 14.9 1 25.3 15 39 15 39s14-13.7 14-24.1C29 7.2 22.7 1 15 1z" fill="${tracejado ? '#FBF7F0' : cor}" stroke="${tracejado ? cor : 'rgba(0,0,0,.25)'}" stroke-width="${tracejado ? 2.5 : 1}" ${tracejado ? 'stroke-dasharray="4 3"' : ''}/><circle cx="15" cy="14.5" r="6" fill="#FBF7F0" ${tracejado ? `stroke="${cor}" stroke-width="2"` : ''}/></svg>` });
+}
 function desenhar() {
   camada.clearLayers();
   if (mostrarReg) S.base.regioes.forEach(r => { const b = r.limites; if (!b) return; L.rectangle([[b[1], b[0]], [b[3], b[2]]], { color: r.cor, weight: 2, dashArray: '8 6', fillOpacity: .04, interactive: false }).addTo(camada).bindTooltip(`${r.codigo} · ${r.nome}`, { permanent: false }); });
   const fe = $('#fEt').value, fr = $('#fReg').value;
   S.pdvs.filter(p => p.lat && (!fe || p.etapa === fe) && (!fr || p.regiao === fr)).forEach(p => {
-    const m = L.circleMarker([p.lat, p.lng], { radius: p.classe === 'A' ? 9 : 7, color: S.sel === p.id ? '#2E1A12' : '#F6EFE4', weight: S.sel === p.id ? 3 : 2, fillColor: etapa(p.etapa).c, fillOpacity: 1 });
+    const m = L.marker([p.lat, p.lng], { icon: pino(etapa(p.etapa).c, S.sel === p.id ? 1.35 : p.classe === 'A' ? 1.15 : 1), zIndexOffset: S.sel === p.id ? 1000 : 0 });
     m.on('click', () => { S.sel = p.id; desenhar(); painel(); });
     m.bindTooltip(esc(p.nome)); m.addTo(camada);
   });
@@ -204,12 +229,17 @@ function abrirCadastro(loc) {
   <div class="row" style="margin-top:8px"><button class="btn" id="cGps" style="flex:1">Usar minha localização</button><button class="btn" id="cMarcar" style="flex:1">Marcar no mapa</button></div>
   <label>Nome do estabelecimento</label><input id="cNome">
   <label>Canal</label><select id="cCanal">${CANAIS.map(c => `<option>${c}</option>`).join('')}</select>
-  <div class="row"><div style="flex:1"><label>Bairro</label><input id="cBairro"></div><div style="flex:1"><label>Cidade</label><input id="cCidade" value="Canoas"></div></div>
+  <div class="row"><div style="flex:1"><label>Bairro</label><input id="cBairro"></div><div style="flex:1"><label>Cidade</label><input id="cCidade"></div></div>
   <label>Potencial (1 a 5)</label><select id="cPot"><option>3</option><option>1</option><option>2</option><option>4</option><option>5</option></select>
   <label>Observação</label><textarea id="cObs" rows="2" placeholder="Quem decide, melhor horário, espaço no caixa…"></textarea>
   <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="cSalvar">Salvar no funil</button></div>`);
   const msg = (t, okk) => { const m = $('#cMsg'); m.style.display = 'block'; m.style.background = okk ? '#E3F0E7' : '#F7E9DD'; m.style.color = okk ? '#1F5A37' : '#7A4A16'; m.innerHTML = t; };
-  const marcarPos = (lng, lat, origem) => { pos = [lng, lat]; const r = regiaoDe(lng, lat); if (lat > -29.975) $('#cCidade').value = 'Canoas'; else $('#cCidade').value = 'Porto Alegre'; msg(`Localização ${origem}: ${lat.toFixed(5)}, ${lng.toFixed(5)} · região ${r || 'fora das regiões'}`, true); };
+  let rua = '';
+  const marcarPos = async (lng, lat, origem) => { pos = [lng, lat]; msg(`Localização ${origem}: ${lat.toFixed(5)}, ${lng.toFixed(5)} · buscando endereço…`, true);
+    const g = await geoReverso(lat, lng); rua = g.rua;
+    if (g.cidade) $('#cCidade').value = g.cidade; if (g.bairro && !$('#cBairro').value) $('#cBairro').value = g.bairro;
+    const z = regiaoDe(lng, lat);
+    msg(`Localização ${origem}: ${g.rua ? esc(g.rua) + ', ' : ''}${esc(g.bairro ? g.bairro + ', ' : '')}${esc(g.cidade || '')} · região ${z ? z + ' · ' + esc(regNome(z)) : esc(g.cidade || '—')}`, true); };
   if (pos) marcarPos(pos[0], pos[1], 'marcada no mapa');
   $('#cLink').oninput = () => {
     const u = $('#cLink').value.trim(); if (!u) return;
@@ -225,7 +255,8 @@ function abrirCadastro(loc) {
     if (!pos) return msg('Informe a localização: link, localização do aparelho ou marcar no mapa.', false);
     const nome = $('#cNome').value.trim(); if (!nome) return msg('Coloque o nome do estabelecimento.', false);
     try {
-      const n = await db.criarPdv({ nome, canal: $('#cCanal').value, bairro: $('#cBairro').value.trim() || null, cidade: $('#cCidade').value.trim() || null, lng: pos[0], lat: pos[1], regiao: regiaoDe(pos[0], pos[1]), potencial: +$('#cPot').value, observacao: $('#cObs').value.trim() || null, origem: $('#cLink').value ? 'link_maps' : 'manual', link_maps: $('#cLink').value.trim() || null, criado_por: S.eu.id });
+      const cidade = $('#cCidade').value.trim() || null;
+      const n = await db.criarPdv({ nome, canal: $('#cCanal').value, endereco: rua || null, bairro: $('#cBairro').value.trim() || null, cidade, lng: pos[0], lat: pos[1], regiao: await garantirRegiao(pos[0], pos[1], cidade), potencial: +$('#cPot').value, observacao: $('#cObs').value.trim() || null, origem: $('#cLink').value ? 'link_maps' : 'manual', link_maps: $('#cLink').value.trim() || null, criado_por: S.eu.id });
       fecharModal(); await atualizarUm(n.id); S.sel = n.id; if (S.aba === 'mapa') { desenhar(); painel(); } toast(nome + ' entrou no funil como Mapeado');
     } catch (e) { erro(e); }
   };
@@ -253,7 +284,7 @@ function buscarProspects() {
       S.sugestoes = j.elements.map(e => ({ nome: e.tags?.name, lat: e.lat ?? e.center?.lat, lng: e.lon ?? e.center?.lon, canal, rua: [e.tags?.['addr:street'], e.tags?.['addr:housenumber']].filter(Boolean).join(', '), bairro: e.tags?.['addr:suburb'] || '' }))
         .filter(s => s.nome && s.lat && !perto(s.lat, s.lng));
       camadaSug.clearLayers();
-      S.sugestoes.forEach((s, i) => L.circleMarker([s.lat, s.lng], { radius: 7, color: '#D08A3C', weight: 2, dashArray: '3 3', fillColor: '#FBF7F0', fillOpacity: 1 })
+      S.sugestoes.forEach((s, i) => L.marker([s.lat, s.lng], { icon: pino('#D08A3C', .9, true) })
         .bindPopup(`<b>${esc(s.nome)}</b><br>${esc(s.canal)}${s.rua ? ' · ' + esc(s.rua) : ''}<br><button class="btn pri" style="margin-top:6px" onclick="addSug(${i})">Adicionar ao funil</button>`).addTo(camadaSug));
       toast(S.sugestoes.length ? `${S.sugestoes.length} prospects encontrados. Toque num ponto tracejado para adicionar.` : 'Nenhum prospect novo nessa área para esse canal.');
     } catch (e) { erro(e); $('#sGo').disabled = false; }
@@ -261,7 +292,7 @@ function buscarProspects() {
 }
 window.addSug = async i => {
   const s = S.sugestoes[i]; if (!s) return;
-  try { const n = await db.criarPdv({ nome: s.nome, canal: s.canal, endereco: s.rua || null, bairro: s.bairro || null, cidade: s.lat > -29.975 ? 'Canoas' : 'Porto Alegre', lat: s.lat, lng: s.lng, regiao: regiaoDe(s.lng, s.lat), potencial: 3, origem: 'sugestao', criado_por: S.eu.id });
+  try { const g = await geoReverso(s.lat, s.lng); const n = await db.criarPdv({ nome: s.nome, canal: s.canal, endereco: s.rua || g.rua || null, bairro: s.bairro || g.bairro || null, cidade: g.cidade || null, lat: s.lat, lng: s.lng, regiao: await garantirRegiao(s.lng, s.lat, g.cidade), potencial: 3, origem: 'sugestao', criado_por: S.eu.id });
     mapa.closePopup(); S.sugestoes[i] = null; await atualizarUm(n.id); S.sel = n.id; desenhar(); painel(); toast(s.nome + ' adicionado ao funil'); } catch (e) { erro(e); }
 };
 
@@ -365,11 +396,11 @@ function telaRegras() {
   $('#main').innerHTML = `<section class="view on"><div class="dash">
   <div class="panel" style="max-width:900px"><h3>Esteira de avaliação</h3><div class="row" style="flex-wrap:wrap;gap:10px">Avaliação de <input type="number" id="rRep" value="${r.reposicoes}" style="width:70px"> reposições. Aprova com sell-out médio de pelo menos <input type="number" id="rMin" value="${r.meta_minima_sellout}" style="width:70px"> un. por reposição.</div></div>
   <div class="panel" style="max-width:900px"><h3>Frequência padrão de reposição por etapa</h3><table><tr><th>Etapa</th><th>Repor a cada</th><th>PDVs</th></tr>${['avaliacao', 'ativo', 'risco', 'revisao'].map(k => `<tr><td><i class="dot" style="background:${etapa(k).c}"></i> ${etapa(k).n}</td><td><input type="number" class="rCad" data-k="${k}" value="${cp[k] || ''}" style="width:70px"> dias</td><td>${S.pdvs.filter(p => p.etapa === k).length}</td></tr>`).join('')}</table></div>
-  <div class="panel" style="max-width:900px"><h3>Dia de rota por região</h3><table><tr><th>Região</th><th>Dia</th><th>PDVs com reposição</th></tr>${S.base.regioes.map(g => `<tr><td><b style="color:${g.cor}">${g.codigo}</b> · ${esc(g.nome)}</td><td><select class="rDia" data-c="${g.codigo}">${DIAS.map((d, i) => `<option value="${i}" ${g.dia_rota === i ? 'selected' : ''}>${d}</option>`).join('')}</select></td><td>${S.pdvs.filter(p => p.regiao === g.codigo && ROTA_ETAPAS.includes(p.etapa)).length}</td></tr>`).join('')}</table></div></div></section>`;
+  <div class="panel" style="max-width:900px"><h3>Dia de rota por região</h3><table><tr><th>Região</th><th>Dia</th><th>PDVs com reposição</th></tr>${S.base.regioes.map(g => `<tr><td><b style="color:${g.cor}">${g.codigo}</b> · ${esc(g.nome)}</td><td><select class="rDia" data-c="${g.codigo}"><option value="" ${g.dia_rota == null ? 'selected' : ''}>Sem dia fixo</option>${DIAS.map((d, i) => `<option value="${i}" ${g.dia_rota === i ? 'selected' : ''}>${d}</option>`).join('')}</select></td><td>${S.pdvs.filter(p => p.regiao === g.codigo && ROTA_ETAPAS.includes(p.etapa)).length}</td></tr>`).join('')}</table></div></div></section>`;
   const salvarAval = async () => { const v = { reposicoes: +$('#rRep').value || 13, meta_minima_sellout: +$('#rMin').value || 6 }; try { await db.salvarRegra('avaliacao', v); S.base.regras.avaliacao = v; toast('Regra da avaliação salva'); } catch (e) { erro(e); } };
   $('#rRep').onchange = $('#rMin').onchange = salvarAval;
   document.querySelectorAll('.rCad').forEach(i => i.onchange = async () => { const v = { ...cadPadrao(), [i.dataset.k]: +i.value || 7 }; try { await db.salvarRegra('cadencia_padrao', v); S.base.regras.cadencia_padrao = v; await recarregar(); toast('Frequência salva'); } catch (e) { erro(e); } });
-  document.querySelectorAll('.rDia').forEach(s => s.onchange = async () => { try { await db.salvarRegiao(s.dataset.c, { dia_rota: +s.value }); S.base.regioes.find(g => g.codigo === s.dataset.c).dia_rota = +s.value; S.rotaReg = null; toast('Dia de rota salvo'); } catch (e) { erro(e); } });
+  document.querySelectorAll('.rDia').forEach(s => s.onchange = async () => { try { const v = s.value === '' ? null : +s.value; await db.salvarRegiao(s.dataset.c, { dia_rota: v }); S.base.regioes.find(g => g.codigo === s.dataset.c).dia_rota = v; S.rotaReg = null; toast('Dia de rota salvo'); } catch (e) { erro(e); } });
 }
 
 /* =================== rota (reposição) =================== */
