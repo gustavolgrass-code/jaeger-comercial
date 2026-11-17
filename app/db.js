@@ -92,3 +92,4 @@ export async function historico(pdvId) {
   ]);
   return { etapas, visitas, pedidos, sellouts };
 }
+export async function atualizarVisita(id, patch) { return ok(await sb.from('visitas').update(patch).eq('id', id).select().single()); }

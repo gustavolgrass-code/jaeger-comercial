@@ -190,6 +190,7 @@ function painel() {
   s.innerHTML = `<button class="btn" style="float:right;padding:4px 10px" id="xSide">✕</button>
   <small style="color:var(--mute)">${esc(p.canal || '')} · ${esc(p.cidade || '')}</small><h2>${esc(p.nome)}</h2>${p.contato_nome ? `<div style="color:var(--soft)">Contato: <b>${esc(p.contato_nome)}</b>${p.contato_telefone ? ' · ' + esc(p.contato_telefone) : ''}</div>` : ''}
   <div class="badges"><span class="badge st" style="background:${etapa(p.etapa).c}">${etapa(p.etapa).n}</span>${p.classe ? `<span class="badge">Classe ${p.classe}</span>` : ''}<span class="badge">${p.regiao || '—'} · ${esc(regNome(p.regiao))}</span>${p.expositor_id ? `<span class="badge">Expositor ${esc(expo(p.expositor_id).nome)}</span>` : ''}</div>
+  ${caixaComentario(p)}
   ${caixaEsteira(p)}
   <div class="sect"><h3>Potencial</h3><div class="stars">${[1, 2, 3, 4, 5].map(i => `<button data-pot="${i}" class="${i <= (p.potencial || 0) ? 'on' : ''}">★</button>`).join('')}</div></div>
   ${ultimos6(p)}
@@ -209,9 +210,8 @@ function painel() {
   $('#sEt').onchange = e => salvarPdv(p.id, { etapa: e.target.value }, 'Etapa: ' + etapa(e.target.value).n);
   if ($('#sCad')) $('#sCad').onchange = e => salvarPdv(p.id, { cadencia_dias: e.target.value ? +e.target.value : null }, 'Frequência atualizada');
   if ($('#bComprar')) $('#bComprar').onclick = () => { S.abPdv = p.id; irPara('abertura'); };
-  $('#bVisita').onclick = () => modal(`<h3>Visita em ${esc(p.nome)}</h3><label>Como foi?</label><textarea id="vObs" rows="3" placeholder="Com quem falou, objeções, próximo passo…"></textarea>
-    <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="vOk">Registrar</button></div>`) || ($('#vOk').onclick = async () => {
-    try { await db.registrarVisita(p.id, 'prospeccao', $('#vObs').value, S.eu.id); if (p.etapa === 'mapeado') await db.atualizarPdv(p.id, { etapa: 'visitado' }); fecharModal(); await atualizarUm(p.id); toast('Visita registrada. Se fechou, toque em Gerar compra.'); } catch (e) { erro(e); } });
+  $('#bVisita').onclick = () => visitaRapida(p);
+  ligarComentario(() => painel());
   s.querySelectorAll('[data-rev]').forEach(b => b.onclick = () => revisar(p, b.dataset.rev));
 }
 async function atualizarUm(id) { const n = await db.carregarPdv(id); const i = S.pdvs.findIndex(x => x.id === id); if (i >= 0) S.pdvs[i] = n; else S.pdvs.push(n); if (S.aba === 'mapa') { desenhar(); painel(); } }
@@ -229,13 +229,15 @@ function abrirCadastro(loc) {
   <label>Link do Google Maps</label><input id="cLink" placeholder="Cole o link do lugar no Google Maps">
   <div class="linkmsg" id="cMsg"></div>
   <div class="row" style="margin-top:8px"><button class="btn" id="cGps" style="flex:1">Usar minha localização</button><button class="btn" id="cMarcar" style="flex:1">Marcar no mapa</button></div>
-  <label>Nome do estabelecimento</label><input id="cNome">
-  <label>Canal</label><select id="cCanal">${CANAIS.map(c => `<option>${c}</option>`).join('')}</select>
+  <label>Nome fantasia</label><input id="cNome">
+  ${campoEmpresa('c')}
+  <label>Canal</label>${campoCanal('cCanal', 'Minimercado')}
   ${campoContato()}
   <div class="row"><div style="flex:1"><label>Bairro</label><input id="cBairro"></div><div style="flex:1"><label>Cidade</label><input id="cCidade"></div></div>
-  <label>Potencial (1 a 5)</label><select id="cPot"><option>3</option><option>1</option><option>2</option><option>4</option><option>5</option></select>
+  <label>Potencial (1 a 5)</label>${campoPot('cPot')}
   <label>Observação</label><textarea id="cObs" rows="2" placeholder="Quem decide, melhor horário, espaço no caixa…"></textarea>
   <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="cSalvar">Salvar no funil</button></div>`);
+  ligarCanal('cCanal'); ligarEmpresa('c', 'cNome');
   const msg = (t, okk) => { const m = $('#cMsg'); m.style.display = 'block'; m.style.background = okk ? '#E3F0E7' : '#F7E9DD'; m.style.color = okk ? '#1F5A37' : '#7A4A16'; m.innerHTML = t; };
   let rua = '';
   const marcarPos = async (lng, lat, origem) => { pos = [lng, lat]; msg(`Localização ${origem}: ${lat.toFixed(5)}, ${lng.toFixed(5)} · buscando endereço…`, true);
@@ -263,7 +265,7 @@ function abrirCadastro(loc) {
     try {
       const cidade = $('#cCidade').value.trim() || null;
       const contato_id = await contatoDoForm(nome);
-      const n = await db.criarPdv({ contato_id, geo_precisao: 'exata', nome, canal: $('#cCanal').value, endereco: rua || null, bairro: $('#cBairro').value.trim() || null, cidade, lng: pos[0], lat: pos[1], regiao: await garantirRegiao(pos[0], pos[1], cidade), potencial: +$('#cPot').value, observacao: $('#cObs').value.trim() || null, origem: $('#cLink').value ? 'link_maps' : 'manual', link_maps: $('#cLink').value.trim() || null, criado_por: S.eu.id });
+      const n = await db.criarPdv({ contato_id, geo_precisao: 'exata', nome, ...lerEmpresa('c'), canal: lerCanal('cCanal'), endereco: rua || null, bairro: $('#cBairro').value.trim() || null, cidade, lng: pos[0], lat: pos[1], regiao: await garantirRegiao(pos[0], pos[1], cidade), potencial: +$('#cPot').value, observacao: $('#cObs').value.trim() || null, origem: $('#cLink').value ? 'link_maps' : 'manual', link_maps: $('#cLink').value.trim() || null, criado_por: S.eu.id });
       fecharModal(); await atualizarUm(n.id); S.sel = n.id; if (S.aba === 'mapa') { desenhar(); painel(); } toast(nome + ' entrou no funil como Mapeado');
     } catch (e) { erro(e); $('#cSalvar').disabled = false; }
   };
@@ -509,6 +511,47 @@ async function telaResumo() {
   <table><tr><th>Pedido</th><th>Tipo</th><th>PDV</th><th>Unidades</th><th>Valor</th><th>Pagamento</th><th>Situação</th><th>Bling</th></tr>${peds.map(o => `<tr><td>#${o.numero}</td><td>${o.tipo === 'abertura' ? 'Abertura' : o.tipo === 'reposicao_consignado' ? 'Reposição (consignado)' : 'Reposição'}</td><td>${esc(o.pdvs?.nome)}</td><td>${o.unidades}</td><td>${brl(o.valor)}</td><td>${esc(o.condicao)}</td><td>${o.pago_na_hora ? 'Pago' : 'A receber' + (o.vencimento ? ' · ' + dstr(o.vencimento + 'T12:00') : '')}</td><td>${esc(o.bling_status)}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">Nenhum pedido hoje.</td></tr>'}</table></div></section>`;
 }
 
+/* =================== campos reutilizáveis =================== */
+const CARGOS = ['Dono', 'Gerente', 'Funcionário'];
+function campoCanal(id, valor) {
+  const custom = valor && !CANAIS.includes(valor);
+  return `<select id="${id}">${CANAIS.map(c => `<option ${(c === valor || (custom && c === 'Outro')) ? 'selected' : ''}>${c}</option>`).join('')}</select>
+  <input id="${id}Outro" placeholder="Descreva o canal (ex.: Bar, Academia, Hotel)" value="${custom ? esc(valor) : ''}" style="margin-top:6px;width:100%;display:${custom || valor === 'Outro' ? 'block' : 'none'}">`;
+}
+function ligarCanal(id) { const s = $('#' + id); if (s) s.onchange = () => { $('#' + id + 'Outro').style.display = s.value === 'Outro' ? 'block' : 'none'; if (s.value === 'Outro') $('#' + id + 'Outro').focus(); }; }
+const lerCanal = id => $('#' + id).value === 'Outro' ? ($('#' + id + 'Outro').value.trim() || 'Outro') : $('#' + id).value;
+const campoPot = (id, v = 3) => `<select id="${id}">${[1, 2, 3, 4, 5].map(x => `<option ${x === (v || 3) ? 'selected' : ''}>${x}</option>`).join('')}</select>`;
+function campoEmpresa(pre, p = {}) {
+  return `<div class="row"><div style="flex:1"><label>CNPJ</label><div class="row" style="gap:6px"><input id="${pre}Cnpj" inputmode="numeric" value="${esc(p.cnpj || '')}" style="flex:1"><button class="btn" type="button" id="${pre}BuscaCnpj" title="Preencher pelo CNPJ">Buscar</button></div></div><div style="flex:1"><label>Razão social</label><input id="${pre}Razao" value="${esc(p.razao_social || '')}"></div></div>`;
+}
+function ligarEmpresa(pre, nomeId) {
+  const b = $('#' + pre + 'BuscaCnpj'); if (!b) return;
+  b.onclick = async () => { const c = soDig($('#' + pre + 'Cnpj').value); if (c.length !== 14) return toast('CNPJ precisa ter 14 números');
+    b.disabled = true; b.textContent = '…';
+    try { const r = await fetch('https://brasilapi.com.br/api/cnpj/v1/' + c); if (!r.ok) throw new Error('CNPJ não encontrado'); const j = await r.json();
+      $('#' + pre + 'Razao').value = j.razao_social || ''; if (nomeId && !$('#' + nomeId).value) $('#' + nomeId).value = j.nome_fantasia || j.razao_social || '';
+      toast('Dados do CNPJ preenchidos' + (j.descricao_situacao_cadastral && j.descricao_situacao_cadastral !== 'ATIVA' ? ' · situação: ' + j.descricao_situacao_cadastral : '')); }
+    catch (e) { toast(e.message); } b.disabled = false; b.textContent = 'Buscar'; };
+}
+const lerEmpresa = pre => ({ cnpj: soDig($('#' + pre + 'Cnpj').value) || null, razao_social: $('#' + pre + 'Razao').value.trim() || null });
+
+/* ---------- visita rápida + comentário depois ---------- */
+async function visitaRapida(p, depois) {
+  try { const v = await db.registrarVisita(p.id, 'prospeccao', null, S.eu.id);
+    if (p.etapa === 'mapeado') await db.atualizarPdv(p.id, { etapa: 'visitado' });
+    S.ultimaVisita = { pdvId: p.id, id: v.id, em: new Date() }; await atualizarUm(p.id); toast('Visita registrada'); depois && depois(); } catch (e) { erro(e); }
+}
+function caixaComentario(p) {
+  const u = S.ultimaVisita; if (!u || u.pdvId !== p.id) return '';
+  return `<div class="esteira" style="background:#EEF3FA;border-color:#C9D7EA"><b>Visita registrada às ${u.em.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</b>
+  <textarea id="vCom" rows="2" placeholder="Comentário da visita (opcional): com quem falou, objeções, próximo passo…" style="width:100%;margin-top:6px">${esc(u.obs || '')}</textarea>
+  <div class="row" style="justify-content:flex-end;margin-top:6px"><button class="btn" id="vComOk">${u.obs ? 'Atualizar comentário' : 'Salvar comentário'}</button></div></div>`;
+}
+function ligarComentario(depois) {
+  const b = $('#vComOk'); if (!b) return;
+  b.onclick = async () => { const u = S.ultimaVisita, t = $('#vCom').value.trim(); try { await db.atualizarVisita(u.id, { observacao: t || null }); u.obs = t; toast('Comentário salvo'); depois && depois(); } catch (e) { erro(e); } };
+}
+
 /* =================== contatos, duplicidade e perfil =================== */
 const norm = s => semAcento(String(s || '')).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const soDig = s => String(s || '').replace(/\D/g, '');
@@ -516,27 +559,28 @@ function duplicado(nome, lat, lng, ignorar) {
   const n = norm(nome);
   return S.pdvs.find(p => p.id !== ignorar && ((n && norm(p.nome) === n) || (lat && p.lat && Math.abs(p.lat - lat) < 0.0003 && Math.abs(p.lng - lng) < 0.0003)));
 }
-function acharContato({ nome, telefone, email, empresa }) {
-  const t = soDig(telefone), e = (email || '').toLowerCase().trim(), n = norm(nome), em = norm(empresa);
-  return S.contatos.find(c => (t.length >= 8 && soDig(c.telefone).endsWith(t.slice(-8))) || (t.length >= 8 && soDig(c.whatsapp).endsWith(t.slice(-8))) || (e && (c.email || '').toLowerCase() === e) || (n && norm(c.nome) === n && norm(c.empresa) === em));
+function acharContato({ nome, telefone, whatsapp, email }, ignorar) {
+  const tels = [telefone, whatsapp].map(soDig).filter(t => t.length >= 8).map(t => t.slice(-8));
+  const e = (email || '').toLowerCase().trim(), n = norm(nome);
+  return S.contatos.find(c => c.id !== ignorar && (tels.some(t => soDig(c.telefone).endsWith(t) || soDig(c.whatsapp).endsWith(t)) || (e && (c.email || '').toLowerCase().trim() === e) || (n && norm(c.nome) === n)));
 }
 async function obterContato(dados) {
   if (!dados.nome && !dados.telefone) return null;
-  const achado = acharContato(dados); if (achado) return achado.id;
+  const achado = acharContato(dados); if (achado) { toast(`Contato ${achado.nome} já existia e foi vinculado`); return achado.id; }
   const c = await db.criarContato({ nome: dados.nome || dados.telefone, empresa: dados.empresa || null, cargo: dados.cargo || null, telefone: dados.telefone || null, whatsapp: dados.whatsapp || null, email: dados.email || null, cnpj: dados.cnpj || null, observacao: dados.observacao || null, criado_por: S.eu.id });
   S.contatos.push(c); return c.id;
 }
 function campoContato() {
   return `<details style="margin-top:10px;background:var(--sand);border-radius:10px;padding:8px 10px"><summary style="cursor:pointer;font-weight:700;font-size:13px">Contato (responsável)</summary>
   <label>Contato já cadastrado</label><select id="kSel"><option value="">— novo contato —</option>${S.contatos.map(c => `<option value="${c.id}">${esc(c.nome)}${c.empresa ? ' · ' + esc(c.empresa) : ''}</option>`).join('')}</select>
-  <div class="row"><div style="flex:1"><label>Nome</label><input id="kNome"></div><div style="flex:1"><label>Cargo</label><input id="kCargo" placeholder="Dono, gerente…"></div></div>
+  <div class="row"><div style="flex:1"><label>Nome</label><input id="kNome"></div><div style="flex:1"><label>Cargo</label><select id="kCargo"><option value="">—</option>${CARGOS.map(c => `<option>${c}</option>`).join('')}</select></div></div>
   <div class="row"><div style="flex:1"><label>Telefone / WhatsApp</label><input id="kTel" inputmode="tel"></div><div style="flex:1"><label>E-mail</label><input id="kEmail" type="email"></div></div></details>`;
 }
 async function contatoDoForm(empresa) {
   if ($('#kSel') && $('#kSel').value) return $('#kSel').value;
   const nome = $('#kNome')?.value.trim(), tel = $('#kTel')?.value.trim();
   if (!nome && !tel) return null;
-  return obterContato({ nome, telefone: tel, whatsapp: tel, email: $('#kEmail')?.value.trim(), cargo: $('#kCargo')?.value.trim(), empresa });
+  return obterContato({ nome, telefone: tel, whatsapp: tel, email: $('#kEmail')?.value.trim(), cargo: $('#kCargo')?.value || null, empresa });
 }
 function abrirPerfil(id) { if (!['perfil', 'contato'].includes(S.aba)) S.voltar = S.aba; S.perfilId = id; S.sel = id; irPara('perfil'); }
 function abrirContato(id) { S.contatoId = id; irPara('contato'); }
@@ -567,6 +611,7 @@ async function telaPerfil() {
     <div class="panel"><small style="color:var(--mute)">${esc(p.canal || '')} · ${esc([p.bairro, p.cidade].filter(Boolean).join(', '))}</small>
      <h2 style="font-family:Fraunces,Georgia,serif;margin:4px 0 8px;font-size:28px">${esc(p.nome)}</h2>
      <div class="badges"><span class="badge st" style="background:${etapa(p.etapa).c}">${etapa(p.etapa).n}</span>${p.classe ? `<span class="badge">Classe ${p.classe}</span>` : ''}<span class="badge">${p.regiao || '—'} · ${esc(regNome(p.regiao))}</span>${p.expositor_id ? `<span class="badge">Expositor ${esc(expo(p.expositor_id).nome)}</span>` : ''}<span class="badge">${'★'.repeat(p.potencial || 0) || 'sem potencial'}</span>${p.geo_precisao && p.geo_precisao !== 'exata' ? `<span class="badge" style="background:#F7E9DD">localização ${esc(p.geo_precisao)}</span>` : ''}</div>
+     ${p.razao_social || p.cnpj ? `<p style="color:var(--soft);margin:6px 0">${esc(p.razao_social || '')}${p.cnpj ? ' · CNPJ ' + esc(p.cnpj.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5')) : ''}</p>` : ''}
      <p style="color:var(--soft);margin:6px 0">${esc(p.endereco || 'Sem endereço')}${p.condicao ? ` · Condição: <b>${esc(p.condicao)}</b>` : ''}${p.proxima_reposicao ? ` · Próxima reposição: <b>${dstr(p.proxima_reposicao)}</b> (${prazoTxt(p)})` : ''}</p>
      ${p.observacao ? `<p style="background:var(--sand);padding:8px 10px;border-radius:8px;margin:8px 0 0">${esc(p.observacao)}</p>` : ''}
      <div class="row" style="flex-wrap:wrap;margin-top:12px">
@@ -575,6 +620,7 @@ async function telaPerfil() {
       <select id="pEtapa">${ETAPAS.map(e => `<option value="${e.k}" ${e.k === p.etapa ? 'selected' : ''}>${e.n}</option>`).join('')}</select>
       <button class="btn" id="pEditar">Editar dados</button><button class="btn" id="pMapa">Ver no mapa</button><button class="btn" id="pAjustar">Ajustar localização</button>
      </div></div>
+    ${caixaComentario(p) ? `<div class="panel" style="padding:4px 14px 14px">${caixaComentario(p)}</div>` : ''}
     ${caixaEsteira(p) ? `<div class="panel" style="padding:4px 14px 14px">${caixaEsteira(p)}</div>` : ''}
     ${ultimos6(p) ? `<div class="panel">${ultimos6(p)}</div>` : ''}
     <div class="panel"><h3>Histórico</h3>${ev.map(e => `<div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--sand)"><i style="width:12px;height:12px;border-radius:50%;background:${e.cor};flex:none;margin-top:4px"></i><div style="flex:1"><div>${e.t}</div>${e.obs ? `<div style="color:var(--soft);margin-top:2px">“${esc(e.obs)}”</div>` : ''}<small style="color:var(--mute)">${quando(e.em)}${e.quem ? ' · ' + esc(e.quem) : ''}</small></div></div>`).join('') || '<p class="empty">Sem histórico ainda.</p>'}</div>
@@ -589,17 +635,18 @@ async function telaPerfil() {
    </div></div></div></section>`;
   $('#pVoltar').onclick = () => irPara(S.voltar || 'carteira');
   if ($('#pComprar')) $('#pComprar').onclick = () => { S.abPdv = p.id; irPara('abertura'); };
-  $('#pVisita').onclick = () => { modal(`<h3>Visita em ${esc(p.nome)}</h3><label>Como foi?</label><textarea id="vObs" rows="3"></textarea><div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="vOk">Registrar</button></div>`);
-    $('#vOk').onclick = async () => { try { await db.registrarVisita(p.id, 'prospeccao', $('#vObs').value, S.eu.id); if (p.etapa === 'mapeado') await db.atualizarPdv(p.id, { etapa: 'visitado' }); fecharModal(); await atualizarUm(p.id); toast('Visita registrada'); telaPerfil(); } catch (e) { erro(e); } }; };
+  $('#pVisita').onclick = () => visitaRapida(p, telaPerfil);
+  ligarComentario(telaPerfil);
   $('#pEtapa').onchange = async e => { try { await db.atualizarPdv(p.id, { etapa: e.target.value }); await atualizarUm(p.id); toast('Etapa: ' + etapa(e.target.value).n); telaPerfil(); } catch (er) { erro(er); } };
   $('#pMapa').onclick = () => { S.sel = p.id; irPara('mapa'); if (p.lat) mapa.setView([p.lat, p.lng], 16); };
   $('#pAjustar').onclick = () => { irPara('mapa'); if (p.lat) mapa.setView([p.lat, p.lng], 17); marcando = true; $('#hint').textContent = 'Toque no lugar exato de ' + p.nome; $('#hint').style.display = 'block';
     aoMarcar = async ([lng, lat]) => { try { const g = await geoReverso(lat, lng); await db.atualizarPdv(p.id, { lat, lng, geo_precisao: 'manual', regiao: await garantirRegiao(lng, lat, g.cidade || p.cidade), endereco: g.rua || p.endereco, bairro: g.bairro || p.bairro, cidade: g.cidade || p.cidade }); $('#hint').textContent = 'Toque no mapa onde fica o ponto'; await atualizarUm(p.id); toast('Localização ajustada'); } catch (e) { erro(e); } }; };
-  $('#pEditar').onclick = () => { modal(`<h3>Editar ${esc(p.nome)}</h3><label>Nome</label><input id="eNome" value="${esc(p.nome)}"><label>Canal</label><select id="eCanal">${CANAIS.map(x => `<option ${x === p.canal ? 'selected' : ''}>${x}</option>`).join('')}</select>
+  $('#pEditar').onclick = () => { modal(`<h3>Editar ${esc(p.nome)}</h3><label>Nome fantasia</label><input id="eNome" value="${esc(p.nome)}">${campoEmpresa('e', p)}<label>Canal</label>${campoCanal('eCanal', p.canal)}
     <label>Endereço</label><input id="eEnd" value="${esc(p.endereco || '')}"><div class="row"><div style="flex:1"><label>Bairro</label><input id="eBai" value="${esc(p.bairro || '')}"></div><div style="flex:1"><label>Cidade</label><input id="eCid" value="${esc(p.cidade || '')}"></div></div>
-    <div class="row"><div style="flex:1"><label>Classe</label><select id="eCla"><option value="">—</option>${['A', 'B', 'C'].map(x => `<option ${x === p.classe ? 'selected' : ''}>${x}</option>`).join('')}</select></div><div style="flex:1"><label>Potencial</label><select id="ePot">${[1, 2, 3, 4, 5].map(x => `<option ${x === p.potencial ? 'selected' : ''}>${x}</option>`).join('')}</select></div></div>
+    <div class="row"><div style="flex:1"><label>Classe</label><select id="eCla"><option value="">—</option>${['A', 'B', 'C'].map(x => `<option ${x === p.classe ? 'selected' : ''}>${x}</option>`).join('')}</select></div><div style="flex:1"><label>Potencial</label>${campoPot('ePot', p.potencial)}</div></div>
     <label>Observação</label><textarea id="eObs" rows="3">${esc(p.observacao || '')}</textarea><div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="eOk">Salvar</button></div>`);
-    $('#eOk').onclick = async () => { try { await db.atualizarPdv(p.id, { nome: $('#eNome').value.trim() || p.nome, canal: $('#eCanal').value, endereco: $('#eEnd').value.trim() || null, bairro: $('#eBai').value.trim() || null, cidade: $('#eCid').value.trim() || null, classe: $('#eCla').value || null, potencial: +$('#ePot').value, observacao: $('#eObs').value.trim() || null }); fecharModal(); await atualizarUm(p.id); toast('Dados salvos'); telaPerfil(); } catch (e) { erro(e); } }; };
+    ligarCanal('eCanal'); ligarEmpresa('e', 'eNome');
+    $('#eOk').onclick = async () => { try { await db.atualizarPdv(p.id, { nome: $('#eNome').value.trim() || p.nome, ...lerEmpresa('e'), canal: lerCanal('eCanal'), endereco: $('#eEnd').value.trim() || null, bairro: $('#eBai').value.trim() || null, cidade: $('#eCid').value.trim() || null, classe: $('#eCla').value || null, potencial: +$('#ePot').value, observacao: $('#eObs').value.trim() || null }); fecharModal(); await atualizarUm(p.id); toast('Dados salvos'); telaPerfil(); } catch (e) { erro(e); } }; };
   if ($('#pVerContato')) $('#pVerContato').onclick = () => abrirContato(c.id);
   $('#pTrocarContato').onclick = () => { modal(`<h3>Contato de ${esc(p.nome)}</h3>${campoContato()}<div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="kOk">Vincular</button></div>`); document.querySelector('#modalBox details').open = true;
     $('#kOk').onclick = async () => { try { const id = await contatoDoForm(p.nome); if (!id) return toast('Escolha um contato ou preencha o nome'); await db.atualizarPdv(p.id, { contato_id: id }); fecharModal(); await atualizarUm(p.id); toast('Contato vinculado'); telaPerfil(); } catch (e) { erro(e); } }; };
@@ -620,14 +667,15 @@ function telaContatos() {
 }
 function formContato(c) {
   modal(`<h3>${c ? 'Editar contato' : 'Novo contato'}</h3><label>Nome</label><input id="fNome" value="${esc(c?.nome || '')}">
-  <div class="row"><div style="flex:1"><label>Empresa</label><input id="fEmp" value="${esc(c?.empresa || '')}"></div><div style="flex:1"><label>Cargo</label><input id="fCargo" value="${esc(c?.cargo || '')}"></div></div>
+  <div class="row"><div style="flex:1"><label>Empresa</label><input id="fEmp" value="${esc(c?.empresa || '')}"></div><div style="flex:1"><label>Cargo</label><select id="fCargo"><option value="">—</option>${CARGOS.map(x => `<option ${x === c?.cargo ? 'selected' : ''}>${x}</option>`).join('')}</select></div></div>
   <div class="row"><div style="flex:1"><label>Telefone</label><input id="fTel" value="${esc(c?.telefone || '')}"></div><div style="flex:1"><label>WhatsApp</label><input id="fWpp" value="${esc(c?.whatsapp || '')}"></div></div>
-  <div class="row"><div style="flex:1"><label>E-mail</label><input id="fEmail" value="${esc(c?.email || '')}"></div><div style="flex:1"><label>CNPJ</label><input id="fCnpj" value="${esc(c?.cnpj || '')}"></div></div>
+  <label>E-mail</label><input id="fEmail" value="${esc(c?.email || '')}">
   <label>Observação</label><textarea id="fObs" rows="2">${esc(c?.observacao || '')}</textarea>
   <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="fOk">Salvar</button></div>`);
-  $('#fOk').onclick = async () => { const o = { nome: $('#fNome').value.trim(), empresa: $('#fEmp').value.trim() || null, cargo: $('#fCargo').value.trim() || null, telefone: $('#fTel').value.trim() || null, whatsapp: $('#fWpp').value.trim() || null, email: $('#fEmail').value.trim() || null, cnpj: $('#fCnpj').value.trim() || null, observacao: $('#fObs').value.trim() || null };
+  $('#fOk').onclick = async () => { const o = { nome: $('#fNome').value.trim(), empresa: $('#fEmp').value.trim() || null, cargo: $('#fCargo').value || null, telefone: $('#fTel').value.trim() || null, whatsapp: $('#fWpp').value.trim() || null, email: $('#fEmail').value.trim() || null, observacao: $('#fObs').value.trim() || null };
     if (!o.nome) return toast('Coloque o nome');
-    try { if (c) { const n = await db.atualizarContato(c.id, o); Object.assign(c, n); } else { if (acharContato(o)) return toast('Já existe um contato com esse telefone, e-mail ou nome.'); S.contatos.push(await db.criarContato({ ...o, criado_por: S.eu.id })); }
+    const ja = acharContato(o, c?.id); if (ja) return toast(`Já existe o contato ${ja.nome} com esse nome, telefone ou e-mail.`);
+    try { if (c) { const n = await db.atualizarContato(c.id, o); Object.assign(c, n); } else { S.contatos.push(await db.criarContato({ ...o, criado_por: S.eu.id })); }
       fecharModal(); toast('Contato salvo'); S.aba === 'contato' ? telaContato() : telaContatos(); } catch (e) { erro(e); } };
 }
 function telaContato() {
@@ -635,7 +683,7 @@ function telaContato() {
   const negs = S.pdvs.filter(p => p.contato_id === c.id), w = linkWpp(c.whatsapp || c.telefone);
   $('#main').innerHTML = `<section class="view on"><div class="dash" style="max-width:900px"><div class="row"><button class="btn" id="cVoltar">← Contatos</button></div>
   <div class="panel"><small style="color:var(--mute)">Contato</small><h2 style="font-family:Fraunces,Georgia,serif;margin:4px 0">${esc(c.nome)}</h2><div style="color:var(--soft)">${esc([c.cargo, c.empresa].filter(Boolean).join(' · '))}</div>
-   <div class="kv"><div><small>Telefone</small><b>${esc(c.telefone || '—')}</b></div><div><small>WhatsApp</small><b>${esc(c.whatsapp || '—')}</b></div><div><small>E-mail</small><b style="font-size:14px">${esc(c.email || '—')}</b></div><div><small>CNPJ</small><b style="font-size:14px">${esc(c.cnpj || '—')}</b></div></div>
+   <div class="kv"><div><small>Telefone</small><b>${esc(c.telefone || '—')}</b></div><div><small>WhatsApp</small><b>${esc(c.whatsapp || '—')}</b></div><div style="grid-column:1/-1"><small>E-mail</small><b style="font-size:14px">${esc(c.email || '—')}</b></div></div>
    ${c.observacao ? `<p style="color:var(--soft)">${esc(c.observacao)}</p>` : ''}
    <div class="row">${w ? `<a class="btn car" style="text-decoration:none" target="_blank" rel="noopener" href="${w}">WhatsApp ↗</a>` : ''}<button class="btn" id="cEditar">Editar</button></div></div>
   <div class="panel"><h3>Negócios deste contato</h3>${negs.map(p => `<div class="stop" data-id="${p.id}" style="cursor:pointer"><div class="info"><b>${esc(p.nome)}</b><br><small style="color:var(--mute)">${esc(p.canal || '')} · ${esc(p.cidade || '')}</small></div><span class="badge st" style="background:${etapa(p.etapa).c}">${etapa(p.etapa).n}</span></div>`).join('') || '<p class="empty">Nenhum negócio vinculado.</p>'}</div></div></section>`;
@@ -692,9 +740,9 @@ async function geocodificar(endereco) {
   return null;
 }
 const MODELOS = {
-  contatos: { titulo: 'Contatos', desc: 'Pessoas: dono, gerente, comprador. Contatos repetidos (mesmo telefone, e-mail ou nome + empresa) são ignorados.', cols: ['nome', 'empresa', 'cargo', 'telefone', 'whatsapp', 'email', 'cnpj', 'observacao'], ex: ['Maria Souza', 'Padaria Pão Quente', 'Dona', '(51) 99999-0000', '(51) 99999-0000', 'maria@email.com', '', 'Prefere visita de manhã'] },
-  negocios: { titulo: 'Negócios', desc: 'Clientes e negócios já em andamento, em qualquer etapa do funil. A localização é buscada pelo endereço.', cols: ['nome', 'canal', 'etapa', 'localizacao', 'contato_nome', 'contato_telefone', 'classe', 'potencial', 'expositor', 'condicao', 'observacao'], ex: ['Passos Home Market', 'Minimercado', 'Ativo', 'RUA JOAO WOBETO, 350 - MATO GRANDE - Canoas/RS - 92320-160', 'João', '(51) 98888-0000', 'A', '5', '3 andares', 'À vista · Pix', ''] },
-  prospectos: { titulo: 'Prospectos', desc: 'Lista de alvos. Cada endereço é localizado; os encontrados no número exato entram no funil como Mapeado. Os aproximados ficam para você confirmar.', cols: ['nome', 'canal', 'localizacao', 'contato_nome', 'contato_telefone', 'potencial', 'observacao'], ex: ['Padaria Exemplo', 'Padaria', 'RUA JOAO WOBETO, 350 - MATO GRANDE - Canoas/RS - 92320-160', '', '', '3', ''] } };
+  contatos: { titulo: 'Contatos', desc: 'Pessoas: dono, gerente, funcionário. Não entram contatos repetidos (mesmo nome, telefone ou e-mail).', cols: ['nome', 'empresa', 'cargo', 'telefone', 'whatsapp', 'email', 'observacao'], ex: ['Maria Souza', 'Padaria Pão Quente', 'Dono', '(51) 99999-0000', '(51) 99999-0000', 'maria@email.com', 'Prefere visita de manhã'] },
+  negocios: { titulo: 'Negócios', desc: 'Clientes e negócios já em andamento, em qualquer etapa do funil. "nome" é o nome fantasia. A localização é buscada pelo endereço.', cols: ['nome', 'razao_social', 'cnpj', 'canal', 'etapa', 'localizacao', 'contato_nome', 'contato_cargo', 'contato_telefone', 'classe', 'potencial', 'expositor', 'condicao', 'observacao'], ex: ['Mercado Bom Dia', 'Mercado Bom Dia Ltda', '00.000.000/0001-00', 'Minimercado', 'Ativo', 'RUA JOAO WOBETO, 350 - MATO GRANDE - Canoas/RS - 92320-160', 'João', 'Dono', '(51) 98888-0000', 'A', '5', '3 andares', 'À vista · Pix', ''] },
+  prospectos: { titulo: 'Prospectos', desc: 'Lista de alvos. "nome" é o nome fantasia. Cada endereço é localizado; os encontrados no número exato entram como Mapeado, os aproximados ficam para você confirmar. Canal fora da lista entra com o texto que você escrever.', cols: ['nome', 'razao_social', 'cnpj', 'canal', 'localizacao', 'contato_nome', 'contato_cargo', 'contato_telefone', 'potencial', 'observacao'], ex: ['Padaria Exemplo', '', '', 'Padaria', 'RUA JOAO WOBETO, 350 - MATO GRANDE - Canoas/RS - 92320-160', '', '', '', '3', ''] } };
 function baixarModelo(k) {
   const m = MODELOS[k], q = v => /[;"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
   const csv = '﻿' + m.cols.join(';') + '\n' + m.ex.map(q).join(';') + '\n';
@@ -702,7 +750,8 @@ function baixarModelo(k) {
 }
 const etapaDe = t => { const n = norm(t); return (ETAPAS.find(e => norm(e.n) === n || e.k === n.replace(/ /g, '')) || ETAPAS.find(e => n && norm(e.n).startsWith(n)) || {}).k; };
 const expoDe = t => { const n = norm(t); return (S.base.expositores.find(e => norm(e.nome) === n || String(e.capacidade) === soDig(t)) || {}).id || null; };
-const canalDe = t => CANAIS.find(c => norm(c) === norm(t)) || (t ? 'Outro' : null);
+const canalDe = t => CANAIS.find(c => norm(c) === norm(t)) || (t ? t.trim() : null);
+const cargoDe = t => CARGOS.find(c => norm(c) === norm(t)) || (t ? t.trim() : null);
 let pendentes = [];
 function telaUploads() {
   $('#main').innerHTML = `<section class="view on"><div class="dash" style="max-width:1000px">
@@ -727,14 +776,14 @@ async function importar(k, linhas, el) {
       if (k === 'contatos') {
         if (!l.nome) { falhas.push({ l, motivo: 'sem nome' }); continue; }
         if (acharContato(l)) { ignorados++; continue; }
-        await obterContato(l); feitos++; continue;
+        await obterContato({ ...l, cargo: cargoDe(l.cargo) }); feitos++; continue;
       }
       if (!l.nome) { falhas.push({ l, motivo: 'sem nome' }); continue; }
       if (S.pdvs.some(p => norm(p.nome) === norm(l.nome))) { ignorados++; continue; }
       if (!l.localizacao) { falhas.push({ l, motivo: 'sem localização' }); continue; }
       const g = await geocodificar(l.localizacao);
       if (!g) { falhas.push({ l, motivo: 'endereço não encontrado' }); continue; }
-      const base = { nome: l.nome, canal: canalDe(l.canal), endereco: g.rua || null, bairro: g.bairro || null, cidade: g.cidade || null, lat: g.lat, lng: g.lng, geo_precisao: g.precisao, potencial: +l.potencial || 3, observacao: l.observacao || null, criado_por: S.eu.id };
+      const base = { nome: l.nome, razao_social: l.razao_social || null, cnpj: soDig(l.cnpj) || null, canal: canalDe(l.canal), endereco: g.rua || null, bairro: g.bairro || null, cidade: g.cidade || null, lat: g.lat, lng: g.lng, geo_precisao: g.precisao, potencial: +l.potencial || 3, observacao: l.observacao || null, criado_por: S.eu.id };
       if (k === 'prospectos' && g.precisao !== 'exata') { pendentes.push({ l, g, base }); continue; }
       await gravarImportado(k, l, g, base); feitos++;
     } catch (e) { falhas.push({ l, motivo: e.message }); }
@@ -749,7 +798,7 @@ async function importar(k, linhas, el) {
   await recarregar();
 }
 async function gravarImportado(k, l, g, base) {
-  const contato_id = (l.contato_nome || l.contato_telefone) ? await obterContato({ nome: l.contato_nome, telefone: l.contato_telefone, whatsapp: l.contato_telefone, empresa: l.nome }) : null;
+  const contato_id = (l.contato_nome || l.contato_telefone) ? await obterContato({ nome: l.contato_nome, cargo: cargoDe(l.contato_cargo), telefone: l.contato_telefone, whatsapp: l.contato_telefone, empresa: l.nome }) : null;
   const extra = k === 'negocios' ? { etapa: etapaDe(l.etapa) || 'mapeado', classe: ['A', 'B', 'C'].includes((l.classe || '').toUpperCase()) ? l.classe.toUpperCase() : null, expositor_id: expoDe(l.expositor), condicao: l.condicao || null, origem: 'importacao' } : { etapa: 'mapeado', origem: 'importacao' };
   const n = await db.criarPdv({ ...base, ...extra, contato_id, regiao: await garantirRegiao(g.lng, g.lat, g.cidade) });
   S.pdvs.push({ ...n }); return n;
