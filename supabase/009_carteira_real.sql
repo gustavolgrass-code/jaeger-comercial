@@ -12,8 +12,7 @@ delete from pdvs where origem = 'teste';
 delete from contatos where observacao = '[TESTE] contato fictício';
 
 -- 2) clientes (se já existir um negócio com o mesmo CNPJ, ele é atualizado em vez de duplicado)
-create temp table _cli (id uuid, nome text, razao_social text, cnpj text, telefone text, endereco text, bairro text, cidade text, canal text, etapa etapa_pdv, motivo text, observacao text) on commit drop;
-insert into _cli values
+create or replace view _cli_carteira as select id::uuid, nome, razao_social, cnpj, telefone, endereco, bairro, cidade, canal, etapa::etapa_pdv as etapa, motivo, observacao from (values
 ('c8f2c03f-b4cb-5004-a684-d28ec50b1886','Paulo Aquinel Oliveira Matias','24.459.444 PAULO AQUINEL OLIVEIRA MATIAS','24459444000158','(51) 9631-0072','R Anita Garibaldi, 2020','Boa Vista','Porto Alegre',null,'ativo','Importação da carteira · último pedido 2026-10-02','Pedidook cód. 101 · CEP 90480-200'),
 ('68d6ea70-013e-5717-aed3-8e65d28ffc8f','Julio Cesar Pere Belarmino','55.659.690 JULIO CESAR PERE BELARMINO','55659690000187','(11) 9961-9922','Rua Coronel Aparicio Borges, 910','Gloria','Porto Alegre',null,'inativo','Importação da carteira · último pedido 2026-05-12','Pedidook cód. 106 · CEP 90680-570'),
 ('ebbd42f9-d333-5533-bf1d-782662fde6c0','Flavia','57.230.410 FLAVIA VANESSA DA SILVA BONAZZA','57230410000146','(51) 8477-8007','Rua Argentina, 851','Sao Jose','Canoas',null,'ativo','Importação da carteira · último pedido 2026-09-12','Pedidook cód. 57 · Atendimento: CAN N · CEP 92420-020'),
@@ -98,17 +97,17 @@ insert into _cli values
 ('531a3bbc-d9cd-58ef-a837-260e4c411e55','Vera Lúcia','Vera lúcia','36442364020',null,null,null,null,null,'ativo','Importação da carteira · último pedido 2026-09-08','Pedidook cód. 126'),
 ('52722c3e-13f9-54f2-a016-b68145e9cd8b','Vicco Burguer Hamburgueria','VICCO BURGUER COMERCIO E SERVICOS DE ALIMENTOS LTDA','48550663000106','(51) 8576-0317','Avenida Sao Pedro, 1354','Sao Geraldo','Porto Alegre','Lancheria','inativo','Importação da carteira · último pedido 2026-04-30','Pedidook cód. 54 · Atendimento: POA N · CEP 90230-124'),
 ('b3a45515-b8b4-531d-9db9-4d440e5b9fea','Snoop Dog','Vitor','00287592065','51982565523',null,null,null,'Lancheria','inativo','Importação da carteira · último pedido 2026-08-19','Pedidook cód. 98'),
-('f65b50e7-82cc-5242-bee4-daf1adeb87b3','Xis Rei','XIS REI LTDA','62243641000124','(51) 9778-0657','Avenida Armando Fajardo, 1480','Igara','Canoas','Lancheria','ativo','Importação da carteira · último pedido 2026-11-10','Pedidook cód. 121 · CEP 92410-040');
+('f65b50e7-82cc-5242-bee4-daf1adeb87b3','Xis Rei','XIS REI LTDA','62243641000124','(51) 9778-0657','Avenida Armando Fajardo, 1480','Igara','Canoas','Lancheria','ativo','Importação da carteira · último pedido 2026-11-10','Pedidook cód. 121 · CEP 92410-040')
+) as v(id, nome, razao_social, cnpj, telefone, endereco, bairro, cidade, canal, etapa, motivo, observacao);
 
 update pdvs p set etapa = c.etapa, etapa_motivo = c.motivo, telefone = coalesce(p.telefone, c.telefone), razao_social = coalesce(p.razao_social, c.razao_social)
-  from _cli c where c.cnpj is not null and p.cnpj is not null and regexp_replace(p.cnpj, '\D', '', 'g') = c.cnpj and p.id <> c.id;
+  from _cli_carteira c where c.cnpj is not null and p.cnpj is not null and regexp_replace(p.cnpj, '\D', '', 'g') = c.cnpj and p.id <> c.id;
 insert into pdvs (id, nome, razao_social, cnpj, telefone, endereco, bairro, cidade, canal, etapa, etapa_motivo, origem, potencial, observacao)
-select c.id, c.nome, c.razao_social, c.cnpj, c.telefone, c.endereco, c.bairro, c.cidade, c.canal, c.etapa, c.motivo, 'carteira_atual', 3, c.observacao from _cli c
+select c.id, c.nome, c.razao_social, c.cnpj, c.telefone, c.endereco, c.bairro, c.cidade, c.canal, c.etapa, c.motivo, 'carteira_atual', 3, c.observacao from _cli_carteira c
 where not exists (select 1 from pdvs p where p.id = c.id or (c.cnpj is not null and regexp_replace(coalesce(p.cnpj, ''), '\D', '', 'g') = c.cnpj));
 
 -- 3) pedidos do Bling (o primeiro de cada cliente conta como abertura)
-create temp table _ped (id uuid, cli uuid, cnpj text, num text, dia date, valor numeric, tipo tipo_pedido) on commit drop;
-insert into _ped values
+create or replace view _ped_carteira as select id::uuid, cli::uuid, cnpj, num, dia::date, valor::numeric, tipo::tipo_pedido as tipo from (values
 ('b8f952d5-c347-50cd-a473-8856c98a02b1','c8f2c03f-b4cb-5004-a684-d28ec50b1886','24459444000158','154','2026-04-13',81.0,'abertura'),
 ('d22c36e4-8dcc-5ab8-8320-d0b96605d0e5','c8f2c03f-b4cb-5004-a684-d28ec50b1886','24459444000158','188','2026-05-07',144.0,'reposicao'),
 ('5fd0b178-59b5-55a8-93d4-57d1c63282ea','c8f2c03f-b4cb-5004-a684-d28ec50b1886','24459444000158','229','2026-06-10',144.0,'reposicao'),
@@ -464,12 +463,14 @@ insert into _ped values
 ('8fabe91f-2516-5734-977d-506111e5d5fa','f65b50e7-82cc-5242-bee4-daf1adeb87b3','62243641000124','344','2026-09-08',144.0,'reposicao'),
 ('2f0ad0cc-b08c-5301-b689-8b54de72057d','f65b50e7-82cc-5242-bee4-daf1adeb87b3','62243641000124','372','2026-10-12',144.0,'reposicao'),
 ('3c2c1040-3042-583b-b5e7-829bbce908ca','f65b50e7-82cc-5242-bee4-daf1adeb87b3','62243641000124','380','2026-10-27',144.0,'reposicao'),
-('6a005f15-3a12-53c6-abce-40204a2d8d8f','f65b50e7-82cc-5242-bee4-daf1adeb87b3','62243641000124','388','2026-11-10',144.0,'reposicao');
+('6a005f15-3a12-53c6-abce-40204a2d8d8f','f65b50e7-82cc-5242-bee4-daf1adeb87b3','62243641000124','388','2026-11-10',144.0,'reposicao')
+) as v(id, cli, cnpj, num, dia, valor, tipo);
 insert into pedidos (id, pdv_id, tipo, condicao, unidades, valor, pago_na_hora, bling_pedido_id, bling_status, criado_em)
 select x.id, coalesce((select p.id from pdvs p where p.id = x.cli), (select p.id from pdvs p where x.cnpj is not null and regexp_replace(coalesce(p.cnpj, ''), '\D', '', 'g') = x.cnpj limit 1)),
   x.tipo, 'Importado do Bling', 0, x.valor, false, x.num, 'importado', (x.dia + time '12:00') at time zone 'America/Sao_Paulo'
-from _ped x where not exists (select 1 from pedidos o where o.id = x.id);
+from _ped_carteira x where not exists (select 1 from pedidos o where o.id = x.id);
 
+drop view _cli_carteira; drop view _ped_carteira;
 commit;
 
 -- conferência
