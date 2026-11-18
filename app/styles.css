@@ -251,3 +251,4 @@ tr:hover td{background:var(--sand)}
 table.peds{width:100%;border-collapse:collapse;font-size:13px}
 table.peds td{padding:5px 2px;border-bottom:1px solid var(--line);background:none;color:var(--choc)}
 table.peds tr:last-child td{border-bottom:0}
+.aviso-ct{display:inline-block;margin-top:4px;font-size:11px;font-weight:600;color:#8A4E17;background:#FBEBD3;border:1px solid #F0D2A6;border-radius:6px;padding:2px 6px;line-height:1.3}

@@ -363,6 +363,13 @@ window.addSug = async i => {
 /* =================== funil =================== */
 const PROSP = ['mapeado', 'visitado', 'negociacao', 'perdido'];
 const CART = ['avaliacao', 'ativo', 'risco', 'revisao', 'inativo'];
+// dados fundamentais do cliente: cargo do contato, nome da pessoa, telefone e e-mail
+function faltaContato(p) {
+  if (!CART.includes(p.etapa)) return [];
+  const c = S.contatos.find(x => x.id === p.contato_id) || {};
+  return [!c.nome && 'pessoa de contato', !c.cargo && 'cargo', !(c.telefone || c.whatsapp || p.telefone) && 'telefone', !c.email && 'e-mail'].filter(Boolean);
+}
+const avisoContato = (p, curto) => { const f = faltaContato(p); return f.length ? `<span class="aviso-ct" title="Faltam dados do contato: ${f.join(', ')}">⚠️ ${curto ? 'Falta ' : 'Faltam dados: '}${f.join(', ')}</span>` : ''; };
 const MOTIVOS = ['Preço', 'Sem espaço', 'Concorrente', 'Dono não decide', 'Sem interesse', 'Outro'];
 const ymd = x => !x ? '' : typeof x === 'object' && x.toISOString ? x.toISOString().slice(0, 10) : String(x).slice(0, 10);
 const hojeISO = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10); };
@@ -474,7 +481,7 @@ async function telaFunil() {
   const card = (p, e, extra = '') => { const dias = diasNaEtapa(p), parado = p.etapa === 'negociacao' && dias > 7;
     const so = (S.sellouts[p.id] || []).slice(-1)[0];
     return `<div class="card ${parado ? 'parado' : ''}" draggable="true" data-id="${p.id}" style="border-left-color:${e.c}"><div class="cardtop"><b>${esc(p.nome)}</b><button class="mini" data-tarefa="${p.id}" title="Criar tarefa">+ tarefa</button></div><small>${esc(p.canal || '')} · ${p.regiao || '—'} · ${'★'.repeat(p.potencial || 0)}</small>
-    <div class="cardmeta"><span>${dias === null ? '' : `${dias === 0 ? 'hoje' : 'há ' + dias + (dias === 1 ? ' dia' : ' dias')} na etapa`}</span>${p.etapa === 'perdido' && p.motivo_perda ? `<span>· ${esc(p.motivo_perda)}${p.retomar_em ? ' · retomar ' + dstr(ymd(p.retomar_em) + 'T12:00') : ''}</span>` : ''}${CART.includes(p.etapa) && so ? `<span>· último sell-out ${so.sellout} un.</span>` : ''}${CART.includes(p.etapa) && p.proxima_reposicao ? `<span>· reposição ${prazoTxt(p)}</span>` : ''}</div>${extra}${chipAcao(p)}</div>`; };
+    <div class="cardmeta"><span>${dias === null ? '' : `${dias === 0 ? 'hoje' : 'há ' + dias + (dias === 1 ? ' dia' : ' dias')} na etapa`}</span>${p.etapa === 'perdido' && p.motivo_perda ? `<span>· ${esc(p.motivo_perda)}${p.retomar_em ? ' · retomar ' + dstr(ymd(p.retomar_em) + 'T12:00') : ''}</span>` : ''}${CART.includes(p.etapa) && so ? `<span>· último sell-out ${so.sellout} un.</span>` : ''}${CART.includes(p.etapa) && p.proxima_reposicao ? `<span>· reposição ${prazoTxt(p)}</span>` : ''}</div>${avisoContato(p, true)}${extra}${chipAcao(p)}</div>`; };
   const ord = (a, b) => (ymd(a.acao_data) || '9').localeCompare(ymd(b.acao_data) || '9') || (b.potencial || 0) - (a.potencial || 0);
   let html = cols.map(k => { const e = etapa(k), its = S.pdvs.filter(p => p.etapa === k && filtra(p)).sort(ord);
     let corpo = its.slice(0, 100).map(p => card(p, e)).join(''), cab = `${its.length}`;
@@ -578,18 +585,18 @@ function listaTarefas(ts, vazio) {
 /* =================== carteira =================== */
 let ord = { k: 'nome', d: 1 };
 function telaCarteira() {
-  $('#main').innerHTML = `<section class="view on"><div class="tablewrap"><div class="toolbar"><input id="q" placeholder="Buscar PDV…" style="width:240px"><select id="tEt"><option value="">Todas as etapas</option>${ETAPAS.map(e => `<option value="${e.k}">${e.n}</option>`).join('')}</select><span id="tN" style="color:var(--mute)"></span></div><table id="tbl"></table></div></section>`;
+  $('#main').innerHTML = `<section class="view on"><div class="tablewrap"><div class="toolbar"><input id="q" placeholder="Buscar PDV…" style="width:240px"><select id="tEt"><option value="">Todas as etapas</option>${ETAPAS.map(e => `<option value="${e.k}">${e.n}</option>`).join('')}</select><label class="regchk" style="margin:0"><input type="checkbox" id="tFalta" style="width:auto"> ⚠️ Só com dados de contato faltando</label><span id="tN" style="color:var(--mute)"></span></div><table id="tbl"></table></div></section>`;
   const cols = [['nome', 'PDV'], ['regiao', 'Região'], ['canal', 'Canal'], ['etapa', 'Etapa'], ['classe', 'Classe'], ['potencial', 'Potencial'], ['so', 'Sell-out médio'], ['ultima_visita', 'Última visita'], ['proxima_reposicao', 'Próx. reposição']];
   const desenhaT = () => {
     const q = $('#q').value.toLowerCase(), et = $('#tEt').value;
-    let ds = S.pdvs.filter(p => (!et || p.etapa === et) && (!q || p.nome.toLowerCase().includes(q))).map(p => { const s = (S.sellouts[p.id] || []).slice(-6); return { ...p, so: s.length ? s.reduce((a, x) => a + x.sellout, 0) / s.length : null }; });
+    let ds = S.pdvs.filter(p => (!et || p.etapa === et) && (!q || p.nome.toLowerCase().includes(q)) && (!$('#tFalta').checked || faltaContato(p).length)).map(p => { const s = (S.sellouts[p.id] || []).slice(-6); return { ...p, so: s.length ? s.reduce((a, x) => a + x.sellout, 0) / s.length : null }; });
     ds.sort((a, b) => { const x = a[ord.k] ?? '', y = b[ord.k] ?? ''; return (x > y ? 1 : x < y ? -1 : 0) * ord.d; });
     $('#tN').textContent = ds.length + ' pontos';
-    $('#tbl').innerHTML = `<tr>${cols.map(([k, n]) => `<th data-k="${k}">${n}${ord.k === k ? (ord.d > 0 ? ' ↑' : ' ↓') : ''}</th>`).join('')}</tr>` + ds.map(p => `<tr data-id="${p.id}" style="cursor:pointer"><td><b>${esc(p.nome)}</b></td><td>${p.regiao || '—'}</td><td>${esc(p.canal || '')}</td><td><i class="dot" style="background:${etapa(p.etapa).c}"></i> ${etapa(p.etapa).n}</td><td>${p.classe || '—'}</td><td>${'★'.repeat(p.potencial || 0)}</td><td>${p.so === null ? '—' : dec(p.so) + ' un.'}</td><td>${dstr(p.ultima_visita)}</td><td>${p.proxima_reposicao ? dstr(p.proxima_reposicao) + ' · ' + prazoTxt(p) : '—'}</td></tr>`).join('');
+    $('#tbl').innerHTML = `<tr>${cols.map(([k, n]) => `<th data-k="${k}">${n}${ord.k === k ? (ord.d > 0 ? ' ↑' : ' ↓') : ''}</th>`).join('')}</tr>` + ds.map(p => `<tr data-id="${p.id}" style="cursor:pointer"><td><b>${esc(p.nome)}</b>${faltaContato(p).length ? `<br>${avisoContato(p, true)}` : ''}</td><td>${p.regiao || '—'}</td><td>${esc(p.canal || '')}</td><td><i class="dot" style="background:${etapa(p.etapa).c}"></i> ${etapa(p.etapa).n}</td><td>${p.classe || '—'}</td><td>${'★'.repeat(p.potencial || 0)}</td><td>${p.so === null ? '—' : dec(p.so) + ' un.'}</td><td>${dstr(p.ultima_visita)}</td><td>${p.proxima_reposicao ? dstr(p.proxima_reposicao) + ' · ' + prazoTxt(p) : '—'}</td></tr>`).join('');
     $('#tbl').querySelectorAll('th').forEach(th => th.onclick = () => { ord = { k: th.dataset.k, d: ord.k === th.dataset.k ? -ord.d : 1 }; desenhaT(); });
     $('#tbl').querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => abrirPerfil(tr.dataset.id));
   };
-  $('#q').oninput = $('#tEt').onchange = desenhaT; desenhaT();
+  $('#q').oninput = $('#tEt').onchange = $('#tFalta').onchange = desenhaT; desenhaT();
 }
 
 /* =================== abertura de cliente =================== */
