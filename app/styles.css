@@ -228,3 +228,4 @@ tr:hover td{background:var(--sand)}
 .card.copia{opacity:.75;background:#F7F2EA;border-left-style:dashed}
 .metas{display:flex;flex-direction:column;gap:8px}
 .metas label{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;background:var(--sand);padding:8px 12px;border-radius:10px}
+.funilnum b .meta{font-size:15px;color:var(--mute);font-family:'DM Sans',Arial,sans-serif;font-weight:600}

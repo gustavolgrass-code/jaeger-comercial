@@ -412,13 +412,14 @@ let periodo = { k: 'mes', de: '', ate: '' };
 function intervalo() {
   const hoje = new Date(); hoje.setHours(12, 0, 0, 0); const iso = isoDe;
   if (periodo.k === 'hoje') return { de: iso(hoje), ate: iso(hoje), n: 'Hoje' };
-  if (periodo.k === 'semana') { const i = inicioSemana(hoje); return { de: iso(new Date(+i + 12 * 36e5)), ate: iso(hoje), n: 'Esta semana' }; }
-  if (periodo.k === 'mes') return { de: iso(new Date(hoje.getFullYear(), hoje.getMonth(), 1, 12)), ate: iso(hoje), n: 'Este mês' };
+  if (periodo.k === 'semana') { const i = inicioSemana(hoje); return { de: iso(new Date(+i + 12 * 36e5)), ate: iso(new Date(+i + 6 * DIA + 12 * 36e5)), n: 'Esta semana' }; }
+  if (periodo.k === 'mes') return { de: iso(new Date(hoje.getFullYear(), hoje.getMonth(), 1, 12)), ate: iso(new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0, 12)), n: 'Este mês' };
   if (periodo.k === 'mespassado') return { de: iso(new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1, 12)), ate: iso(new Date(hoje.getFullYear(), hoje.getMonth(), 0, 12)), n: 'Mês passado' };
   if (periodo.k === '3meses') return { de: iso(new Date(hoje.getFullYear(), hoje.getMonth() - 2, 1, 12)), ate: iso(hoje), n: 'Últimos 3 meses' };
   return { de: periodo.de || iso(hoje), ate: periodo.ate || iso(hoje), n: 'Personalizado' };
 }
 // dias de trabalho no intervalo (segunda a sábado), até hoje
+function diasPeriodo(de, ate) { let n = 0; for (let d = new Date(de + 'T12:00'); d <= new Date(ate + 'T12:00'); d = new Date(+d + DIA)) if (d.getDay() !== 0) n++; return Math.max(n, 1); }
 function diasTrab(de, ate) { let n = 0; const fim = new Date(Math.min(new Date(ate + 'T12:00'), Date.now())); for (let d = new Date(de + 'T12:00'); d <= fim; d = new Date(+d + DIA)) if (d.getDay() !== 0) n++; return Math.max(n, 1); }
 const pct = (a, b) => b ? Math.round(a / b * 100) : 0;
 const barra = (v, meta) => `<div class="mbar"><i style="width:${Math.min(100, pct(v, meta))}%;background:${v >= meta ? '#2F7D4E' : '#D08A3C'}"></i></div>`;
@@ -440,6 +441,11 @@ async function telaFunil() {
   const valorPer = ganPer.reduce((s, o) => s + Number(o.valor), 0), dt = diasTrab(per.de, per.ate);
   const valorMes = aber.filter(o => isoDe(new Date(o.criado_em)).slice(0, 7) === h.slice(0, 7)).reduce((s, o) => s + Number(o.valor), 0);
   const iniSem = isoDe(new Date(+inicioSemana(new Date()) + 12 * 36e5));
+  // metas do período: diárias em "Hoje", semanais em "Semana", mensais em "Mês"; nos outros, proporcionais aos dias de trabalho
+  const dp = diasPeriodo(per.de, per.ate), rot = { hoje: 'do dia', semana: 'da semana', mes: 'do mês', mespassado: 'do mês' }[periodo.k] || `do período (${dp} dias)`;
+  const mVis = Math.round(M.visitas_dia * dp), mVen = Math.round(M.vendas_dia * dp);
+  const mCad = periodo.k === 'semana' ? M.cadastros_semana : Math.round(M.cadastros_semana / 6 * dp);
+  const mVal = ['mes', 'mespassado'].includes(periodo.k) ? M.valor_mes : Math.round(M.valor_mes / 26 * dp);
   const cadPer = S.pdvs.filter(p => p.criado_em && noPer(p.criado_em) && filtra(p)).length, cadSem = S.pdvs.filter(p => p.criado_em && isoDe(new Date(p.criado_em)) >= iniSem).length;
   const canais = [...new Set(S.pdvs.map(p => p.canal).filter(Boolean))].sort();
   const per_ = ['hoje', 'Hoje', 'semana', 'Semana', 'mes', 'Mês', 'mespassado', 'Mês passado', '3meses', 'Últimos 3 meses', 'custom', 'Personalizado'];
@@ -451,12 +457,11 @@ async function telaFunil() {
    <select id="ffCanal"><option value="">Todos os canais</option>${canais.map(c => `<option ${funilFiltro.canal === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
    <label class="regchk"><input type="checkbox" id="ffHoje" ${funilFiltro.hoje ? 'checked' : ''}> Ações de hoje e atrasadas</label></div>
   ${funilVisao === 'prospeccao' ? `<div class="funilnum">
-   <div><small>Visitas · ${per.n.toLowerCase()}</small><b>${visPer.length}</b><small>hoje ${visHoje} de ${M.visitas_dia}</small>${barra(visHoje, M.visitas_dia)}</div>
+   <div><small>Visitas · ${per.n.toLowerCase()}</small><b>${visPer.length} <span class="meta">/ ${mVis}</span></b><small>meta ${rot}</small>${barra(visPer.length, mVis)}</div>
    <div><small>Conversão visitado → ganho</small><b>${conv === null ? '—' : conv + '%'}</b><small>${visitadosPer.length} negócios visitados no período</small></div>
-   <div><small>Vendas (ganhos) · ${per.n.toLowerCase()}</small><b>${ganPer.length}</b><small>meta ${M.vendas_dia * dt} (${M.vendas_dia}/dia × ${dt} dias)</small>${barra(ganPer.length, M.vendas_dia * dt)}</div>
-   <div><small>Meta diária de vendas</small><b>${ganHoje} / ${M.vendas_dia}</b><small>vendas hoje</small>${barra(ganHoje, M.vendas_dia)}</div>
-   <div><small>Novos pontos cadastrados · ${per.n.toLowerCase()}</small><b>${cadPer}</b><small>esta semana ${cadSem} de ${M.cadastros_semana}</small>${barra(cadSem, M.cadastros_semana)}</div>
-   <div><small>Valor em vendas · ${per.n.toLowerCase()}</small><b>${brl(valorPer)}</b><small>no mês: ${brl(valorMes)} de ${brl(M.valor_mes)}</small>${barra(valorMes, M.valor_mes)}</div></div>`
+   <div><small>Vendas (ganhos) · ${per.n.toLowerCase()}</small><b>${ganPer.length} <span class="meta">/ ${mVen}</span></b><small>meta ${rot}</small>${barra(ganPer.length, mVen)}</div>
+   <div><small>Novos pontos cadastrados · ${per.n.toLowerCase()}</small><b>${cadPer} <span class="meta">/ ${mCad}</span></b><small>meta ${rot}</small>${barra(cadPer, mCad)}</div>
+   <div><small>Valor em vendas · ${per.n.toLowerCase()}</small><b>${brl(valorPer)}</b><small>meta ${rot}: ${brl(mVal)}</small>${barra(valorPer, mVal)}</div>`
     : `<div class="funilnum"><div><small>Em avaliação</small><b>${S.pdvs.filter(p => p.etapa === 'avaliacao').length}</b></div><div><small>Ativos</small><b>${S.pdvs.filter(p => p.etapa === 'ativo').length}</b></div><div><small>Em risco</small><b>${S.pdvs.filter(p => p.etapa === 'risco').length}</b></div><div><small>Reposições pendentes</small><b>${repPendentes().length}</b></div><div style="flex:2"><small>Regra de risco automático</small><b style="font-size:13px;font-family:inherit">2 sell-outs abaixo de ${regraAval().meta_minima_sellout} un., reposição atrasada > 7 dias ou queda > 50% da média</b></div></div>`}
   <div class="kanban" id="kanban" style="flex:1;min-height:0"></div></section>`;
   const card = (p, e, extra = '') => { const dias = diasNaEtapa(p), parado = p.etapa === 'negociacao' && dias > 7;
