@@ -81,6 +81,8 @@ async function iniciar() {
     await recarregar();
     montar();
     avaliarRisco();
+    if (location.hash.startsWith('#bling=')) { const h = new URLSearchParams(location.hash.slice(1)); history.replaceState(null, '', location.pathname); if (h.get('bling') === 'ok') { toast('Bling conectado! Lendo os pedidos…'); irPara('regras'); try { const r = await db.bling('sincronizar'); S.blingSync = Date.now(); await recarregar(); toast('Bling: ' + resumoSync(r)); irPara('regras'); } catch (e) { erro(e); } } else { irPara('regras'); toast('Não conectou ao Bling: ' + (h.get('msg') || 'erro')); } }
+    else setTimeout(syncBlingAuto, 3000);
   } catch (e) { $('#raiz').innerHTML = `<div class="loading">Não foi possível carregar: ${esc(e.message)}</div>`; }
 }
 function telaLogin() {
@@ -653,16 +655,23 @@ function telaPainel() {
   <div class="tile"><small>Revisão comercial</small><b>${cont('revisao')}</b><small>decidir preço, mínimo ou retirada</small></div>
   <div class="tile"><small>Reposições atrasadas</small><b>${atras}</b><small>passaram da data</small></div>
   <div class="tile"><small>Sell-out · 4 semanas</small><b>${fmt(un4)}</b><small>${brl(val4)}</small></div></div>
+  <div id="orfaosBling"></div>
   ${(() => { const al = alertasProsp(); return al.length ? `<div class="panel alertas"><h3>Alertas de prospecção (${al.length}) · visitados sem próxima ação</h3>${al.slice(0, 30).map(p => `<div class="trow" style="cursor:default"><i style="background:${p.ultimo_resultado === 'nao_estava' ? '#3F6FA8' : etapa(p.etapa).c}"></i><div style="flex:1"><b>${esc(p.nome)}</b><br><small style="color:var(--mute)">${RESULTADOS[p.ultimo_resultado]?.n || 'Visitado'} em ${dstr(p.ultima_prospeccao)}${p.melhor_horario ? ' · melhor horário: ' + esc(p.melhor_horario) : ''}</small></div><button class="mini" data-altar="${p.id}">+ tarefa</button><button class="mini" data-alab="${p.id}">abrir</button></div>`).join('')}</div>` : ''; })()}
   <div class="panel"><h3>Funil</h3><div class="bars">${ETAPAS.map(e => { const n = cont(e.k); return `<div class="bar"><span>${e.n}</span><div class="tr"><div class="fl" style="width:${S.pdvs.length ? n / S.pdvs.length * 100 : 0}%;background:${e.c}"></div></div><b>${n}</b></div>`; }).join('')}</div></div></div></section>`;
   document.querySelectorAll('[data-altar]').forEach(b => b.onclick = () => { const p = S.pdvs.find(x => x.id === b.dataset.altar); modalTarefa({ data: hojeISO(), titulo: 'Retorno: ' + p.nome, pdv_id: p.id, contato_id: p.contato_id }, telaPainel); });
   document.querySelectorAll('[data-alab]').forEach(b => b.onclick = () => abrirPerfil(b.dataset.alab));
+  db.blingOrfaos().then(ls => { const el = $('#orfaosBling'); if (!el || !ls.length) return;
+    el.innerHTML = `<div class="panel alertas"><h3>Pedidos do Bling sem cliente no app (${ls.length})</h3><p style="color:var(--soft);margin-top:0">Cadastre o cliente (com o mesmo CNPJ) e o pedido entra na próxima sincronização, ou ignore.</p>${ls.slice(0, 30).map(o => `<div class="trow" style="cursor:default"><div style="flex:1"><b>${esc(o.contato_nome || '—')}</b><br><small style="color:var(--mute)">nº ${esc(o.numero)} · ${o.data ? new Date(o.data + 'T12:00').toLocaleDateString('pt-BR') : ''} · ${brl(o.total)} · ${esc(o.situacao || '')}${o.documento ? ' · doc ' + esc(o.documento) : ''}</small></div><button class="mini" data-orign="${o.bling_id}">ignorar</button></div>`).join('')}</div>`;
+    el.querySelectorAll('[data-orign]').forEach(b => b.onclick = async () => { try { await db.blingIgnorar(b.dataset.orign); b.closest('.trow').remove(); } catch (e) { erro(e); } });
+  }).catch(() => { });
 }
 
 /* =================== regras =================== */
 function telaRegras() {
   const r = regraAval(), cp = cadPadrao();
+  setTimeout(painelBling, 0);
   $('#main').innerHTML = `<section class="view on"><div class="dash">
+  <div class="panel" style="max-width:900px" id="blingPanel"><h3>Integração com o Bling</h3><small style="color:var(--mute)">verificando…</small></div>
   <div class="panel" style="max-width:900px"><h3>Metas do comercial</h3><p style="color:var(--soft);margin-top:0">Aparecem no topo do CRM, com barra de progresso. Os dias de trabalho contam de segunda a sábado.</p>
    <div class="metas">${[['visitas_dia', 'Visitas de prospecção por dia', 'visitas'], ['vendas_dia', 'Vendas (novos clientes) por dia', 'vendas'], ['valor_mes', 'Valor em vendas novas por mês', 'R$'], ['cadastros_semana', 'Novos pontos cadastrados por semana', 'pontos']].map(([k, n, u]) => `<label><span>${n}</span><span class="row" style="gap:6px"><input type="number" min="0" class="rMeta" data-k="${k}" value="${metas()[k]}" style="width:110px"> <small>${u}</small></span></label>`).join('')}</div></div>
   <div class="panel" style="max-width:900px"><h3>Esteira de avaliação</h3><div class="row" style="flex-wrap:wrap;gap:10px">Avaliação de <input type="number" id="rRep" value="${r.reposicoes}" style="width:70px"> reposições. Aprova com sell-out médio de pelo menos <input type="number" id="rMin" value="${r.meta_minima_sellout}" style="width:70px"> un. por reposição.</div></div>
@@ -1407,6 +1416,30 @@ function alertasProsp() {
     .sort((a, b) => (b.ultimo_resultado === 'nao_estava') - (a.ultimo_resultado === 'nao_estava') || new Date(b.ultima_prospeccao) - new Date(a.ultima_prospeccao));
 }
 
+
+/* =================== integração Bling =================== */
+const quandoB = d => d ? new Date(d).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+const resumoSync = r => r ? `${r.lidos ?? 0} pedidos lidos · ${r.novos ?? 0} novos · ${r.atualizados ?? 0} atualizados${r.cancelados ? ` · ${r.cancelados} cancelados removidos` : ''}${r.sem_cliente ? ` · ${r.sem_cliente} sem cliente no app` : ''}${r.status_mudou ? ` · ${r.status_mudou} mudaram de ativo/inativo` : ''}` : '';
+async function painelBling() {
+  const el = $('#blingPanel'); if (!el) return;
+  let s; try { s = await db.bling('status'); } catch (e) { el.innerHTML = `<h3>Integração com o Bling</h3><p style="color:var(--soft)">A função do Bling ainda não está instalada no Supabase.</p><small style="color:var(--mute)">${esc(e.message)}</small>`; return; }
+  el.innerHTML = `<h3>Integração com o Bling</h3>
+   ${!s.configurado ? '<p style="color:#7A2414">Falta cadastrar BLING_CLIENT_ID e BLING_CLIENT_SECRET nos segredos do Supabase.</p>' : ''}
+   <div class="kv" style="margin:6px 0 10px"><div><small>Situação</small><b>${s.conectado ? 'Conectado' : 'Não conectado'}</b><small>${s.conectado ? 'desde ' + quandoB(s.conectado_em) : ''}</small></div><div><small>Última sincronização</small><b>${quandoB(s.ultima_sync)}</b><small>${esc(resumoSync(s.ultimo_resultado))}</small></div></div>
+   ${s.ultimo_erro ? `<p style="color:#7A2414;font-size:13px">Último erro: ${esc(s.ultimo_erro)}</p>` : ''}
+   <p style="color:var(--soft);margin-top:0">Os pedidos do Bling entram sozinhos ao abrir o app (no máximo a cada 15 minutos). Clientes ficam Ativos ou Inativos pela regra dos 90 dias.</p>
+   <div class="row" style="flex-wrap:wrap">${s.conectado ? '<button class="btn pri" id="bSync">Sincronizar agora</button><button class="btn" id="bCon">Reconectar</button>' : `<button class="btn pri" id="bCon" ${s.configurado ? '' : 'disabled'}>Conectar ao Bling</button>`}</div><div id="bRes" style="margin-top:8px"></div>`;
+  $('#bCon').onclick = async () => { try { const r = await db.bling('conectar'); location.href = r.url; } catch (e) { erro(e); } };
+  if ($('#bSync')) $('#bSync').onclick = async () => { const b = $('#bSync'); b.disabled = true; $('#bRes').innerHTML = '<small>Lendo pedidos do Bling…</small>'; try { const r = await db.bling('sincronizar'); S.blingSync = Date.now(); await recarregar(); toast('Bling sincronizado'); $('#bRes').innerHTML = `<b>${esc(resumoSync(r))}</b>`; setTimeout(painelBling, 1500); } catch (e) { $('#bRes').innerHTML = `<span style="color:#7A2414">${esc(e.message)}</span>`; b.disabled = false; } };
+}
+async function syncBlingAuto() {
+  try { if (S.blingSync && Date.now() - S.blingSync < 15 * 60000) return;
+    const s = await db.bling('status'); if (!s.conectado) return;
+    if (s.ultima_sync && Date.now() - new Date(s.ultima_sync) < 15 * 60000) { S.blingSync = new Date(s.ultima_sync).getTime(); return; }
+    S.blingSync = Date.now(); const r = await db.bling('sincronizar');
+    if (r.novos || r.cancelados || r.status_mudou) { await recarregar(); if (S.aba === 'mapa' && !S.prosp) { desenhar(); } toast(`Bling: ${r.novos} pedido${r.novos === 1 ? '' : 's'} novo${r.novos === 1 ? '' : 's'}`); }
+  } catch (e) { console.warn('Bling', e); }
+}
 /* =================== início =================== */
 $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') fecharModal(); });
 iniciar();
