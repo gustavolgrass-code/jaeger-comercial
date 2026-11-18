@@ -1006,7 +1006,7 @@ async function nominatim(params) {
 function limparRua(s) {
   return String(s || '').replace(/^(R|Rua)\.?\s+/i, 'Rua ').replace(/^(Av|Avda|Avenida)\.?\s+/i, 'Avenida ').replace(/^(Tv|Trav)\.?\s+/i, 'Travessa ').replace(/^(Al)\.?\s+/i, 'Alameda ').replace(/^(Est)\.?\s+/i, 'Estrada ')
     .replace(/\bDr\.?\s/gi, 'Doutor ').replace(/\bCel\.?\s/gi, 'Coronel ').replace(/\bDes\.?\s/gi, 'Desembargador ').replace(/\bPres\.?\s/gi, 'Presidente ').replace(/\bGal\.?\s/gi, 'General ').replace(/\bSto\.?\s/gi, 'Santo ').replace(/\bN\.?\s?Sra\.?\s/gi, 'Nossa Senhora ')
-    .replace(/,\s*(\d+)[^,]*$/, ', $1').trim();
+    .replace(/,\s*(\d{1,3})\.(\d{3})\b/, ', $1$2').replace(/,\s*(\d+)[^,]*$/, ', $1').trim();
 }
 // devolve { lat, lng, precisao: 'exata' | 'rua' | 'cidade', ... } ou null
 async function geocodificar(endereco) {
@@ -1099,7 +1099,7 @@ async function localizarPeloOutscraper(linhas, el) {
     if (!p) { semPar.push(l.query || l.name || '—'); continue; }
     if (usados.has(p.id) || !isFinite(lat) || !isFinite(lng)) continue; usados.add(p.id);
     const nomeG = l.name || '', tel = l.phone || '';
-    const patch = { lat, lng, geo_precisao: 'exata', regiao: p.regiao || await garantirRegiao(lng, lat, p.cidade || l.city), ...(p.telefone || !tel ? {} : { telefone: tel }), ...(l.location_link ? { link_maps: l.location_link } : {}), ...(l.place_id ? { place_id: l.place_id } : {}) };
+    const patch = { lat, lng, geo_precisao: 'exata', regiao: p.regiao || await garantirRegiao(lng, lat, p.cidade || l.city), ...(p.telefone || !tel ? {} : { telefone: tel }), ...(l.location_link ? { link_maps: l.location_link } : {}), ...(!p.endereco && l.street ? { endereco: l.street, cidade: p.cidade || l.city || null } : {}), ...(l.place_id ? { place_id: l.place_id } : {}) };
     try { await db.atualizarPdv(p.id, patch); ok++; const ng = norm(nomeG).replace(/[^a-z0-9 ]/g, ''), np = norm(p.nome + ' ' + (p.razao_social || '')).replace(/[^a-z0-9 ]/g, ''); if (ng && !np.includes(ng) && !ng.includes(norm(p.nome).replace(/[^a-z0-9 ]/g, '')) && !ng.split(' ').some(w => w.length >= 3 && np.includes(w))) longe.push([p, nomeG]); } catch (e) { semPar.push(p.nome + ': ' + e.message); }
   }
   await recarregar();
