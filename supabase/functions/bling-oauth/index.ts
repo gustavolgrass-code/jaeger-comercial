@@ -60,9 +60,18 @@ async function chamar(caminho: string, token: string) {
 async function sincronizar() {
   const token = await tokenValido();
   const { data: cx } = await db.from('bling_conexao').select('ultima_sync').eq('id', 1).maybeSingle();
-  const filtro = cx?.ultima_sync
-    ? `dataAlteracaoInicial=${new Date(new Date(cx.ultima_sync).getTime() - 2 * 864e5).toISOString().slice(0, 10)}`
-    : 'dataInicial=2025-11-01';
+  // o Bling aceita no máximo 366 dias por filtro: na primeira leitura vamos em janelas de 180 dias
+  const dia = (d: Date) => d.toISOString().slice(0, 10);
+  const amanha = new Date(Date.now() + 864e5);
+  const filtros: string[] = [];
+  if (cx?.ultima_sync) {
+    filtros.push(`dataAlteracaoInicial=${dia(new Date(new Date(cx.ultima_sync).getTime() - 2 * 864e5))}&dataAlteracaoFinal=${dia(amanha)}`);
+  } else {
+    for (let ini = new Date('2025-11-01T00:00:00Z'); ini <= amanha; ini = new Date(ini.getTime() + 180 * 864e5)) {
+      const fim = new Date(Math.min(ini.getTime() + 179 * 864e5, amanha.getTime()));
+      filtros.push(`dataInicial=${dia(ini)}&dataFinal=${dia(fim)}`);
+    }
+  }
   const situacoes = new Map<number, string>();
   const nomeSituacao = async (id?: number) => {
     if (!id) return null;
@@ -73,10 +82,12 @@ async function sincronizar() {
     return situacoes.get(id)!;
   };
   const lista: unknown[] = [];
-  for (let pagina = 1; pagina <= 50; pagina++) {
+  const vistos = new Set<number>();
+  for (const filtro of filtros) for (let pagina = 1; pagina <= 50; pagina++) {
     const r = await chamar(`/pedidos/vendas?pagina=${pagina}&limite=100&${filtro}`, token);
     const itens = r?.data ?? [];
     for (const p of itens) {
+      if (vistos.has(p.id)) continue; vistos.add(p.id);
       lista.push({ id: p.id, numero: String(p.numero ?? ''), data: p.data, total: p.total ?? p.totalProdutos ?? 0,
         situacao: await nomeSituacao(p.situacao?.id), contato: p.contato ?? {} });
     }
