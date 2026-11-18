@@ -461,7 +461,7 @@ async function telaFunil() {
    <div><small>Conversão visitado → ganho</small><b>${conv === null ? '—' : conv + '%'}</b><small>${visitadosPer.length} negócios visitados no período</small></div>
    <div><small>Vendas (ganhos) · ${per.n.toLowerCase()}</small><b>${ganPer.length} <span class="meta">/ ${mVen}</span></b><small>meta ${rot}</small>${barra(ganPer.length, mVen)}</div>
    <div><small>Novos pontos cadastrados · ${per.n.toLowerCase()}</small><b>${cadPer} <span class="meta">/ ${mCad}</span></b><small>meta ${rot}</small>${barra(cadPer, mCad)}</div>
-   <div><small>Valor em vendas · ${per.n.toLowerCase()}</small><b>${brl(valorPer)}</b><small>meta ${rot}: ${brl(mVal)}</small>${barra(valorPer, mVal)}</div>`
+   <div><small>Valor em vendas · ${per.n.toLowerCase()}</small><b>${brl(valorPer)}</b><small>meta ${rot}: ${brl(mVal)}</small>${barra(valorPer, mVal)}</div></div>`
     : `<div class="funilnum"><div><small>Em avaliação</small><b>${S.pdvs.filter(p => p.etapa === 'avaliacao').length}</b></div><div><small>Ativos</small><b>${S.pdvs.filter(p => p.etapa === 'ativo').length}</b></div><div><small>Em risco</small><b>${S.pdvs.filter(p => p.etapa === 'risco').length}</b></div><div><small>Reposições pendentes</small><b>${repPendentes().length}</b></div><div style="flex:2"><small>Regra de risco automático</small><b style="font-size:13px;font-family:inherit">2 sell-outs abaixo de ${regraAval().meta_minima_sellout} un., reposição atrasada > 7 dias ou queda > 50% da média</b></div></div>`}
   <div class="kanban" id="kanban" style="flex:1;min-height:0"></div></section>`;
   const card = (p, e, extra = '') => { const dias = diasNaEtapa(p), parado = p.etapa === 'negociacao' && dias > 7;
