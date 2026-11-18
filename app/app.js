@@ -1087,7 +1087,8 @@ function prepararGoogle(linhas, el) {
 // busca usada no Outscraper para achar um negócio já cadastrado: nome + endereço + bairro + cidade
 function buscaGoogle(p) {
   if (!p.endereco && !p.cidade) return null;
-  return [p.nome, p.endereco ? limparRua(p.endereco) : null, p.bairro, (p.cidade || '') + ' RS'].filter(Boolean).join(', ').replace(/\s+/g, ' ').trim();
+  const cep = ((p.observacao || '').match(/\d{5}-?\d{3}/) || [null])[0];
+  return [p.nome, p.endereco ? limparRua(p.endereco) : null, p.bairro, (p.cidade || '') + ' RS', cep].filter(Boolean).join(', ').replace(/\s+/g, ' ').trim();
 }
 async function localizarPeloOutscraper(linhas, el) {
   const porBusca = new Map(S.pdvs.filter(x => !x.lat).map(p => [norm(buscaGoogle(p) || ''), p]));
