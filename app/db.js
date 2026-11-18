@@ -80,7 +80,8 @@ export async function salvarRegiao(codigo, patch) { return ok(await sb.from('reg
 export async function listarContatos() { return ok(await sb.from('contatos').select('*').order('nome')); }
 export async function criarContato(obj) { return ok(await sb.from('contatos').insert(obj).select().single()); }
 export async function atualizarContato(id, patch) { return ok(await sb.from('contatos').update(patch).eq('id', id).select().single()); }
-export async function excluirPdv(id) { return ok(await sb.from('pdvs').delete().eq('id', id)); }
+export async function excluirPdv(id) { ok(await sb.from('pedidos').delete().eq('pdv_id', id)); return ok(await sb.from('pdvs').delete().eq('id', id)); }
+export async function excluirContato(id) { return ok(await sb.from('contatos').delete().eq('id', id)); }
 
 /* ---------- histórico do negócio ---------- */
 export async function historico(pdvId) {
