@@ -215,3 +215,16 @@ tr:hover td{background:var(--sand)}
  .stp button{width:38px;height:42px}
  .stp input{width:36px}
 }
+
+/* CRM */
+.seg.per button{padding:7px 10px;font-size:12.5px}
+.funilnum>div small+small{margin-top:2px}
+.mbar{height:6px;background:var(--sand);border-radius:3px;overflow:hidden;margin-top:6px}
+.mbar i{display:block;height:100%;border-radius:3px}
+.cardtop{display:flex;justify-content:space-between;gap:6px;align-items:flex-start}
+.cardtop b{margin-bottom:2px}
+.mini{border:1px solid var(--line);background:#FBF7F0;border-radius:8px;font-size:11px;padding:2px 7px;color:var(--car-d);white-space:nowrap;flex:none}
+.mini:hover{background:var(--car);color:var(--choc)}
+.card.copia{opacity:.75;background:#F7F2EA;border-left-style:dashed}
+.metas{display:flex;flex-direction:column;gap:8px}
+.metas label{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;background:var(--sand);padding:8px 12px;border-radius:10px}

@@ -106,7 +106,7 @@ function telaPrimeiroAcesso(user) {
 
 /* =================== estrutura =================== */
 const ABAS = {
-  comercial: [['mapa', 'Mapa'], ['funil', 'Funil'], ['agenda', 'Agenda'], ['carteira', 'Negócios'], ['contatos', 'Contatos'], ['abertura', 'Abertura de cliente'], ['painel', 'Painel'], ['uploads', 'Uploads'], ['regras', 'Regras']],
+  comercial: [['mapa', 'Mapa'], ['funil', 'CRM'], ['agenda', 'Agenda'], ['carteira', 'Negócios'], ['contatos', 'Contatos'], ['abertura', 'Abertura de cliente'], ['painel', 'Painel'], ['uploads', 'Uploads'], ['regras', 'Regras e metas']],
   operacao: [['rota', 'Rota de hoje'], ['reposicao', 'Reposição'], ['resumo', 'Resumo do dia']] };
 let lado = 'comercial';
 function montar() {
@@ -312,7 +312,7 @@ function abrirCadastro(loc) {
       const cidade = $('#cCidade').value.trim() || null;
       const contato_id = await contatoDoForm(nome);
       const n = await db.criarPdv({ contato_id, geo_precisao: 'exata', nome, ...lerEmpresa('c'), canal: lerCanal('cCanal'), endereco: rua || null, bairro: $('#cBairro').value.trim() || null, cidade, lng: pos[0], lat: pos[1], regiao: await garantirRegiao(pos[0], pos[1], cidade), potencial: +$('#cPot').value, observacao: $('#cObs').value.trim() || null, origem: $('#cLink').value ? 'link_maps' : 'manual', link_maps: $('#cLink').value.trim() || null, criado_por: S.eu.id });
-      fecharModal(); await atualizarUm(n.id); S.sel = n.id; if (S.aba === 'mapa') { desenhar(); painel(); } toast(nome + ' entrou no funil como Mapeado');
+      fecharModal(); await atualizarUm(n.id); S.sel = n.id; if (S.aba === 'mapa') { desenhar(); painel(); } if (S.aba === 'abertura') { S.abPdv = n.id; telaAbertura(); } toast(nome + ' entrou no funil como Mapeado');
     } catch (e) { erro(e); $('#cSalvar').disabled = false; }
   };
 }
@@ -407,42 +407,80 @@ async function avaliarRisco() {
 }
 
 let funilVisao = 'prospeccao', funilFiltro = { reg: '', canal: '', hoje: false }, etapasHist = null;
+const metas = () => ({ visitas_dia: 15, vendas_dia: 2, valor_mes: 10000, cadastros_semana: 30, ...(S.base.regras.metas || {}) });
+let periodo = { k: 'mes', de: '', ate: '' };
+function intervalo() {
+  const hoje = new Date(); hoje.setHours(12, 0, 0, 0); const iso = isoDe;
+  if (periodo.k === 'hoje') return { de: iso(hoje), ate: iso(hoje), n: 'Hoje' };
+  if (periodo.k === 'semana') { const i = inicioSemana(hoje); return { de: iso(new Date(+i + 12 * 36e5)), ate: iso(hoje), n: 'Esta semana' }; }
+  if (periodo.k === 'mes') return { de: iso(new Date(hoje.getFullYear(), hoje.getMonth(), 1, 12)), ate: iso(hoje), n: 'Este mês' };
+  if (periodo.k === 'mespassado') return { de: iso(new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1, 12)), ate: iso(new Date(hoje.getFullYear(), hoje.getMonth(), 0, 12)), n: 'Mês passado' };
+  if (periodo.k === '3meses') return { de: iso(new Date(hoje.getFullYear(), hoje.getMonth() - 2, 1, 12)), ate: iso(hoje), n: 'Últimos 3 meses' };
+  return { de: periodo.de || iso(hoje), ate: periodo.ate || iso(hoje), n: 'Personalizado' };
+}
+// dias de trabalho no intervalo (segunda a sábado), até hoje
+function diasTrab(de, ate) { let n = 0; const fim = new Date(Math.min(new Date(ate + 'T12:00'), Date.now())); for (let d = new Date(de + 'T12:00'); d <= fim; d = new Date(+d + DIA)) if (d.getDay() !== 0) n++; return Math.max(n, 1); }
+const pct = (a, b) => b ? Math.round(a / b * 100) : 0;
+const barra = (v, meta) => `<div class="mbar"><i style="width:${Math.min(100, pct(v, meta))}%;background:${v >= meta ? '#2F7D4E' : '#D08A3C'}"></i></div>`;
+
 async function telaFunil() {
-  $('#main').innerHTML = '<section class="view on"><div class="loading">Carregando o funil…</div></section>';
-  try { etapasHist = await db.carregarEtapasTodas(); } catch (e) { etapasHist = []; }
-  const cols = funilVisao === 'prospeccao' ? PROSP : CART, h = hojeISO();
-  const filtra = p => (!funilFiltro.reg || p.regiao === funilFiltro.reg) && (!funilFiltro.canal || p.canal === funilFiltro.canal) && (!funilFiltro.hoje || (p.acao_data && ymd(p.acao_data) <= h));
-  // números: conversão por etapa (chegou até X ou além) e tempo até a 1ª venda
-  const rank = { mapeado: 0, visitado: 1, negociacao: 2 }; CART.forEach(k => rank[k] = 3);
-  const maxR = {}; etapasHist.forEach(e => { const r = rank[e.para]; if (r !== undefined) maxR[e.pdv_id] = Math.max(maxR[e.pdv_id] ?? -1, r); });
-  S.pdvs.forEach(p => { const r = rank[p.etapa]; if (r !== undefined) maxR[p.id] = Math.max(maxR[p.id] ?? -1, r); });
-  const chegou = r => Object.values(maxR).filter(v => v >= r).length;
-  const conv = (a, b) => chegou(a) ? Math.round(chegou(b) / chegou(a) * 100) + '%' : '—';
-  const vendas = S.pdvs.filter(p => p.avaliacao_inicio && p.criado_em), tMed = vendas.length ? vendas.reduce((s, p) => s + Math.max(0, (new Date(ymd(p.avaliacao_inicio) + 'T12:00') - new Date(p.criado_em)) / DIA), 0) / vendas.length : null;
-  const ganhosMes = S.pdvs.filter(p => p.avaliacao_inicio && ymd(p.avaliacao_inicio).slice(0, 7) === h.slice(0, 7));
-  const perd = S.pdvs.filter(p => p.etapa === 'perdido'), porMot = {}; perd.forEach(p => porMot[p.motivo_perda || '—'] = (porMot[p.motivo_perda || '—'] || 0) + 1);
+  $('#main').innerHTML = '<section class="view on"><div class="loading">Carregando o CRM…</div></section>';
+  const per = intervalo(), h = hojeISO(), de = per.de < h ? per.de : h, ate = per.ate > h ? per.ate : h;
+  let vis = [], aber = [];
+  try { [vis, aber] = await Promise.all([db.visitasEntre(de, ate, 'prospeccao'), db.pedidosEntre(de, ate, 'abertura')]); } catch (e) { console.warn(e); }
+  const noPer = x => { const d = ymd(isoDe(new Date(x))); return d >= per.de && d <= per.ate; }, ehHoje = x => isoDe(new Date(x)) === h;
+  const cols = funilVisao === 'prospeccao' ? PROSP : CART, M = metas();
+  const filtra = p => p && (!funilFiltro.reg || p.regiao === funilFiltro.reg) && (!funilFiltro.canal || p.canal === funilFiltro.canal) && (!funilFiltro.hoje || (p.acao_data && ymd(p.acao_data) <= h));
+  const pdv = id => S.pdvs.find(p => p.id === id);
+  const visPer = vis.filter(v => noPer(v.em) && filtra(pdv(v.pdv_id))), visHoje = vis.filter(v => ehHoje(v.em)).length;
+  const visitadosPer = [...new Set(visPer.map(v => v.pdv_id))];
+  const jaGanhou = p => p && (CART.includes(p.etapa) || p.avaliacao_inicio);
+  const conv = visitadosPer.length ? pct(visitadosPer.filter(id => jaGanhou(pdv(id))).length, visitadosPer.length) : null;
+  const ganPer = aber.filter(o => noPer(o.criado_em) && filtra(pdv(o.pdv_id))), ganHoje = aber.filter(o => ehHoje(o.criado_em)).length;
+  const valorPer = ganPer.reduce((s, o) => s + Number(o.valor), 0), dt = diasTrab(per.de, per.ate);
+  const valorMes = aber.filter(o => isoDe(new Date(o.criado_em)).slice(0, 7) === h.slice(0, 7)).reduce((s, o) => s + Number(o.valor), 0);
   const canais = [...new Set(S.pdvs.map(p => p.canal).filter(Boolean))].sort();
+  const per_ = ['hoje', 'Hoje', 'semana', 'Semana', 'mes', 'Mês', 'mespassado', 'Mês passado', '3meses', 'Últimos 3 meses', 'custom', 'Personalizado'];
   $('#main').innerHTML = `<section class="view on" style="flex-direction:column;height:100%">
   <div class="funilbar"><div class="seg"><button data-v="prospeccao" class="${funilVisao === 'prospeccao' ? 'on' : ''}">Prospecção</button><button data-v="carteira" class="${funilVisao === 'carteira' ? 'on' : ''}">Carteira</button></div>
+   <div class="seg per">${[...Array(per_.length / 2)].map((_, i) => `<button data-p="${per_[i * 2]}" class="${periodo.k === per_[i * 2] ? 'on' : ''}">${per_[i * 2 + 1]}</button>`).join('')}</div>
+   ${periodo.k === 'custom' ? `<input type="date" id="pDe" value="${per.de}"> até <input type="date" id="pAte" value="${per.ate}">` : ''}
    <select id="ffReg"><option value="">Todas as regiões</option>${S.base.regioes.map(r => `<option value="${r.codigo}" ${funilFiltro.reg === r.codigo ? 'selected' : ''}>${r.codigo} · ${esc(r.nome)}</option>`).join('')}</select>
    <select id="ffCanal"><option value="">Todos os canais</option>${canais.map(c => `<option ${funilFiltro.canal === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
    <label class="regchk"><input type="checkbox" id="ffHoje" ${funilFiltro.hoje ? 'checked' : ''}> Ações de hoje e atrasadas</label></div>
-  ${funilVisao === 'prospeccao' ? `<div class="funilnum"><div><small>Mapeado → Visitado</small><b>${conv(0, 1)}</b></div><div><small>Visitado → Negociação</small><b>${conv(1, 2)}</b></div><div><small>Negociação → Venda</small><b>${conv(2, 3)}</b></div><div><small>Tempo médio até a 1ª venda</small><b>${tMed === null ? '—' : Math.round(tMed) + ' dias'}</b></div><div><small>Vendas no mês</small><b>${ganhosMes.length}</b></div><div><small>Perdidos por motivo</small><b style="font-size:13px;font-family:inherit">${Object.entries(porMot).sort((a, b) => b[1] - a[1]).map(([m, n]) => `${esc(m)} ${n}`).join(' · ') || '—'}</b></div></div>`
+  ${funilVisao === 'prospeccao' ? `<div class="funilnum">
+   <div><small>Visitas · ${per.n.toLowerCase()}</small><b>${visPer.length}</b><small>hoje ${visHoje} de ${M.visitas_dia}</small>${barra(visHoje, M.visitas_dia)}</div>
+   <div><small>Conversão visitado → ganho</small><b>${conv === null ? '—' : conv + '%'}</b><small>${visitadosPer.length} negócios visitados no período</small></div>
+   <div><small>Vendas (ganhos) · ${per.n.toLowerCase()}</small><b>${ganPer.length}</b><small>meta ${M.vendas_dia * dt} (${M.vendas_dia}/dia × ${dt} dias)</small>${barra(ganPer.length, M.vendas_dia * dt)}</div>
+   <div><small>Meta diária de vendas</small><b>${ganHoje} / ${M.vendas_dia}</b><small>vendas hoje</small>${barra(ganHoje, M.vendas_dia)}</div>
+   <div><small>Valor em vendas · ${per.n.toLowerCase()}</small><b>${brl(valorPer)}</b><small>no mês: ${brl(valorMes)} de ${brl(M.valor_mes)}</small>${barra(valorMes, M.valor_mes)}</div></div>`
     : `<div class="funilnum"><div><small>Em avaliação</small><b>${S.pdvs.filter(p => p.etapa === 'avaliacao').length}</b></div><div><small>Ativos</small><b>${S.pdvs.filter(p => p.etapa === 'ativo').length}</b></div><div><small>Em risco</small><b>${S.pdvs.filter(p => p.etapa === 'risco').length}</b></div><div><small>Reposições pendentes</small><b>${repPendentes().length}</b></div><div style="flex:2"><small>Regra de risco automático</small><b style="font-size:13px;font-family:inherit">2 sell-outs abaixo de ${regraAval().meta_minima_sellout} un., reposição atrasada > 7 dias ou queda > 50% da média</b></div></div>`}
   <div class="kanban" id="kanban" style="flex:1;min-height:0"></div></section>`;
-  const card = (p, e) => { const dias = diasNaEtapa(p), parado = p.etapa === 'negociacao' && dias > 7;
+  const card = (p, e, extra = '') => { const dias = diasNaEtapa(p), parado = p.etapa === 'negociacao' && dias > 7;
     const so = (S.sellouts[p.id] || []).slice(-1)[0];
-    return `<div class="card ${parado ? 'parado' : ''}" draggable="true" data-id="${p.id}" style="border-left-color:${e.c}"><b>${esc(p.nome)}</b><small>${esc(p.canal || '')} · ${p.regiao || '—'} · ${'★'.repeat(p.potencial || 0)}</small>
-    <div class="cardmeta"><span>${dias === null ? '' : `${dias === 0 ? 'hoje' : 'há ' + dias + (dias === 1 ? ' dia' : ' dias')} na etapa`}</span>${p.etapa === 'perdido' && p.motivo_perda ? `<span>· ${esc(p.motivo_perda)}${p.retomar_em ? ' · retomar ' + dstr(ymd(p.retomar_em) + 'T12:00') : ''}</span>` : ''}${CART.includes(p.etapa) && so ? `<span>· último sell-out ${so.sellout} un.</span>` : ''}${CART.includes(p.etapa) && p.proxima_reposicao ? `<span>· reposição ${prazoTxt(p)}</span>` : ''}</div>${chipAcao(p)}</div>`; };
-  let html = cols.map(k => { const e = etapa(k), its = S.pdvs.filter(p => p.etapa === k && filtra(p)).sort((a, b) => (ymd(a.acao_data) || '9').localeCompare(ymd(b.acao_data) || '9') || (b.potencial || 0) - (a.potencial || 0));
-    return `<div class="col" data-et="${k}"><h4><span><i class="dot" style="background:${e.c}"></i> ${e.n}</span><span>${its.length}</span></h4><div class="list">${its.slice(0, 100).map(p => card(p, e)).join('')}</div></div>`; }).join('');
-  if (funilVisao === 'prospeccao') html = html.replace('<div class="col" data-et="perdido">', `<div class="col ganho" data-et="ganho"><h4><span><i class="dot" style="background:#2F7D4E"></i> Venda (ganho)</span><span>${ganhosMes.length} no mês</span></h4><div class="list"><p class="dica">Arraste um negócio para cá para lançar a primeira venda.</p>${ganhosMes.map(p => `<div class="card" data-id="${p.id}" style="border-left-color:#2F7D4E;cursor:pointer"><b>${esc(p.nome)}</b><small>venda em ${dstr(ymd(p.avaliacao_inicio) + 'T12:00')} · ${etapa(p.etapa).n}</small></div>`).join('')}</div></div><div class="col" data-et="perdido">`);
+    return `<div class="card ${parado ? 'parado' : ''}" draggable="true" data-id="${p.id}" style="border-left-color:${e.c}"><div class="cardtop"><b>${esc(p.nome)}</b><button class="mini" data-tarefa="${p.id}" title="Criar tarefa">+ tarefa</button></div><small>${esc(p.canal || '')} · ${p.regiao || '—'} · ${'★'.repeat(p.potencial || 0)}</small>
+    <div class="cardmeta"><span>${dias === null ? '' : `${dias === 0 ? 'hoje' : 'há ' + dias + (dias === 1 ? ' dia' : ' dias')} na etapa`}</span>${p.etapa === 'perdido' && p.motivo_perda ? `<span>· ${esc(p.motivo_perda)}${p.retomar_em ? ' · retomar ' + dstr(ymd(p.retomar_em) + 'T12:00') : ''}</span>` : ''}${CART.includes(p.etapa) && so ? `<span>· último sell-out ${so.sellout} un.</span>` : ''}${CART.includes(p.etapa) && p.proxima_reposicao ? `<span>· reposição ${prazoTxt(p)}</span>` : ''}</div>${extra}${chipAcao(p)}</div>`; };
+  const ord = (a, b) => (ymd(a.acao_data) || '9').localeCompare(ymd(b.acao_data) || '9') || (b.potencial || 0) - (a.potencial || 0);
+  let html = cols.map(k => { const e = etapa(k), its = S.pdvs.filter(p => p.etapa === k && filtra(p)).sort(ord);
+    let corpo = its.slice(0, 100).map(p => card(p, e)).join(''), cab = `${its.length}`;
+    if (k === 'visitado') {
+      // cópia de quem foi visitado no período e já andou para outra etapa
+      const ultima = {}; visPer.forEach(v => { if (!ultima[v.pdv_id] || v.em > ultima[v.pdv_id]) ultima[v.pdv_id] = v.em; });
+      const copias = Object.keys(ultima).map(pdv).filter(p => p && p.etapa !== 'visitado');
+      cab = `${its.length} · ${visPer.length} visita${visPer.length === 1 ? '' : 's'} no período`;
+      if (copias.length) corpo += `<p class="dica" style="color:var(--mute)">Visitados no período que já avançaram</p>` + copias.map(p => `<div class="card copia" data-id="${p.id}" style="border-left-color:${etapa(p.etapa).c}"><b>${esc(p.nome)}</b><small>visitado ${dstr(ultima[p.id])} · agora: <span style="color:${etapa(p.etapa).c};font-weight:700">${etapa(p.etapa).n}</span></small></div>`).join('');
+    }
+    return `<div class="col" data-et="${k}"><h4><span><i class="dot" style="background:${e.c}"></i> ${e.n}</span><span>${cab}</span></h4><div class="list">${corpo}</div></div>`; }).join('');
+  if (funilVisao === 'prospeccao') html = html.replace('<div class="col" data-et="perdido">', `<div class="col ganho" data-et="ganho"><h4><span><i class="dot" style="background:#2F7D4E"></i> Venda (ganho)</span><span>${ganPer.length} · ${brl(valorPer)}</span></h4><div class="list"><p class="dica">Arraste um negócio para cá para lançar a primeira venda.</p>${ganPer.map(o => { const p = pdv(o.pdv_id); return p ? `<div class="card" data-id="${p.id}" style="border-left-color:#2F7D4E"><b>${esc(p.nome)}</b><small>venda em ${dstr(o.criado_em)} · ${brl(o.valor)} · agora: ${etapa(p.etapa).n}</small></div>` : ''; }).join('')}</div></div><div class="col" data-et="perdido">`);
   $('#kanban').innerHTML = html;
   let arr = null;
-  document.querySelectorAll('.funilbar .seg button').forEach(b => b.onclick = () => { funilVisao = b.dataset.v; telaFunil(); });
+  document.querySelectorAll('.funilbar .seg:not(.per) button').forEach(b => b.onclick = () => { funilVisao = b.dataset.v; telaFunil(); });
+  document.querySelectorAll('.funilbar .per button').forEach(b => b.onclick = () => { if (b.dataset.p === 'custom' && !periodo.de) { const x = intervalo(); periodo.de = x.de; periodo.ate = x.ate; } periodo.k = b.dataset.p; telaFunil(); });
+  if ($('#pDe')) { $('#pDe').onchange = e => { periodo.de = e.target.value; telaFunil(); }; $('#pAte').onchange = e => { periodo.ate = e.target.value; telaFunil(); }; }
   $('#ffReg').onchange = e => { funilFiltro.reg = e.target.value; telaFunil(); };
   $('#ffCanal').onchange = e => { funilFiltro.canal = e.target.value; telaFunil(); };
   $('#ffHoje').onchange = e => { funilFiltro.hoje = e.target.checked; telaFunil(); };
+  document.querySelectorAll('#kanban [data-tarefa]').forEach(b => b.onclick = e => { e.stopPropagation(); const p = pdv(b.dataset.tarefa); modalTarefa({ data: h, pdv_id: p.id, contato_id: p.contato_id }, telaFunil); });
   document.querySelectorAll('#kanban .card').forEach(c => { c.ondragstart = () => arr = c.dataset.id; c.onclick = () => abrirPerfil(c.dataset.id); });
   document.querySelectorAll('#kanban .col').forEach(c => { c.ondragover = e => { e.preventDefault(); c.classList.add('drop'); }; c.ondragleave = () => c.classList.remove('drop');
     c.ondrop = e => { e.preventDefault(); c.classList.remove('drop'); if (arr) mudarEtapa(arr, c.dataset.et, telaFunil); arr = null; }; });
@@ -546,7 +584,7 @@ function telaAbertura() {
   const p = S.pdvs.find(x => x.id === S.abPdv);
   const ex = S.base.expositores;
   $('#main').innerHTML = `<section class="view on"><div class="dash"><div class="panel" style="max-width:980px">
-  <h3 style="font-family:Fraunces,Georgia,serif;font-size:22px;font-weight:600">Abertura de cliente</h3>
+  <div class="row" style="justify-content:space-between;flex-wrap:wrap"><h3 style="font-family:Fraunces,Georgia,serif;font-size:22px;font-weight:600;margin:0">Abertura de cliente</h3><button class="btn" id="oCad">+ Cadastrar ponto</button></div>
   ${p ? '' : '<p class="empty">Nenhum PDV disponível. Cadastre um ponto no mapa primeiro.</p>'}
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
    <div><label class="lb">PDV</label><select id="oPdv" style="width:100%">${elig.map(x => `<option value="${x.id}" ${x.id === S.abPdv ? 'selected' : ''}>${esc(x.nome)} · ${etapa(x.etapa).n}</option>`).join('')}</select></div>
@@ -568,6 +606,7 @@ function telaAbertura() {
     $('#oInfo').textContent = c === 'Consignado' ? `consignado: cobra ${brl(un * pre)} conforme vender` : bon ? `${bon} bonificadas` : tot < (+$('#oMin').value || 0) ? 'abaixo do pedido mínimo' : '';
     $('#oOutra').style.display = c === 'Outra' ? 'block' : 'none'; $('#oBon').style.display = c === 'Bonificação na abertura' ? 'block' : 'none'; return { un, tot, bon, c, pre }; };
   $('#oPdv') && ($('#oPdv').onchange = e => { S.abPdv = e.target.value; telaAbertura(); });
+  $('#oCad').onclick = () => abrirCadastro(null);
   $('#oExp').onchange = fill; const sec = $('#main section'); sec.addEventListener('input', calc); sec.addEventListener('change', calc); fill();
   $('#oSave').onclick = async () => {
     const t = calc(); if (!t.un) return toast('Coloque os itens do pedido');
@@ -608,11 +647,14 @@ function telaPainel() {
 function telaRegras() {
   const r = regraAval(), cp = cadPadrao();
   $('#main').innerHTML = `<section class="view on"><div class="dash">
+  <div class="panel" style="max-width:900px"><h3>Metas do comercial</h3><p style="color:var(--soft);margin-top:0">Aparecem no topo do CRM, com barra de progresso. Os dias de trabalho contam de segunda a sábado.</p>
+   <div class="metas">${[['visitas_dia', 'Visitas de prospecção por dia', 'visitas'], ['vendas_dia', 'Vendas (novos clientes) por dia', 'vendas'], ['valor_mes', 'Valor em vendas novas por mês', 'R$'], ['cadastros_semana', 'Novos pontos cadastrados por semana', 'pontos']].map(([k, n, u]) => `<label><span>${n}</span><span class="row" style="gap:6px"><input type="number" min="0" class="rMeta" data-k="${k}" value="${metas()[k]}" style="width:110px"> <small>${u}</small></span></label>`).join('')}</div></div>
   <div class="panel" style="max-width:900px"><h3>Esteira de avaliação</h3><div class="row" style="flex-wrap:wrap;gap:10px">Avaliação de <input type="number" id="rRep" value="${r.reposicoes}" style="width:70px"> reposições. Aprova com sell-out médio de pelo menos <input type="number" id="rMin" value="${r.meta_minima_sellout}" style="width:70px"> un. por reposição.</div></div>
   <div class="panel" style="max-width:900px"><h3>Frequência padrão de reposição por etapa</h3><table><tr><th>Etapa</th><th>Repor a cada</th><th>PDVs</th></tr>${['avaliacao', 'ativo', 'risco', 'revisao'].map(k => `<tr><td><i class="dot" style="background:${etapa(k).c}"></i> ${etapa(k).n}</td><td><input type="number" class="rCad" data-k="${k}" value="${cp[k] || ''}" style="width:70px"> dias</td><td>${S.pdvs.filter(p => p.etapa === k).length}</td></tr>`).join('')}</table></div>
   <div class="panel" style="max-width:900px"><h3>Dia de rota por região</h3><table><tr><th>Região</th><th>Dia</th><th>PDVs com reposição</th></tr>${S.base.regioes.map(g => `<tr><td><b style="color:${g.cor}">${g.codigo}</b> · ${esc(g.nome)}</td><td><select class="rDia" data-c="${g.codigo}"><option value="" ${g.dia_rota == null ? 'selected' : ''}>Sem dia fixo</option>${DIAS.map((d, i) => `<option value="${i}" ${g.dia_rota === i ? 'selected' : ''}>${d}</option>`).join('')}</select></td><td>${S.pdvs.filter(p => p.regiao === g.codigo && ROTA_ETAPAS.includes(p.etapa)).length}</td></tr>`).join('')}</table></div></div></section>`;
   const salvarAval = async () => { const v = { reposicoes: +$('#rRep').value || 13, meta_minima_sellout: +$('#rMin').value || 6 }; try { await db.salvarRegra('avaliacao', v); S.base.regras.avaliacao = v; toast('Regra da avaliação salva'); } catch (e) { erro(e); } };
   $('#rRep').onchange = $('#rMin').onchange = salvarAval;
+  document.querySelectorAll('.rMeta').forEach(i => i.onchange = async () => { const v = { ...metas(), [i.dataset.k]: +i.value || 0 }; try { await db.salvarRegra('metas', v); S.base.regras.metas = v; toast('Meta salva'); } catch (e) { erro(e); } });
   document.querySelectorAll('.rCad').forEach(i => i.onchange = async () => { const v = { ...cadPadrao(), [i.dataset.k]: +i.value || 7 }; try { await db.salvarRegra('cadencia_padrao', v); S.base.regras.cadencia_padrao = v; await recarregar(); toast('Frequência salva'); } catch (e) { erro(e); } });
   document.querySelectorAll('.rDia').forEach(s => s.onchange = async () => { try { const v = s.value === '' ? null : +s.value; await db.salvarRegiao(s.dataset.c, { dia_rota: v }); S.base.regioes.find(g => g.codigo === s.dataset.c).dia_rota = v; S.rotaReg = null; toast('Dia de rota salvo'); } catch (e) { erro(e); } });
 }
@@ -826,7 +868,7 @@ async function telaPerfil() {
   <div style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:16px;align-items:start">
    <div style="display:flex;flex-direction:column;gap:16px">
     <div class="panel"><small style="color:var(--mute)">${esc(p.canal || '')} · ${esc([p.bairro, p.cidade].filter(Boolean).join(', '))}</small>
-     <h2 style="font-family:Fraunces,Georgia,serif;margin:4px 0 8px;font-size:28px">${esc(p.nome)}</h2>
+     <div class="row" style="justify-content:space-between;align-items:flex-start;gap:10px"><h2 style="font-family:Fraunces,Georgia,serif;margin:4px 0 8px;font-size:28px">${esc(p.nome)}</h2><button class="btn car" id="pTarTopo" style="white-space:nowrap">+ Tarefa</button></div>
      <div class="badges"><span class="badge st" style="background:${etapa(p.etapa).c}">${etapa(p.etapa).n}</span>${p.classe ? `<span class="badge">Classe ${p.classe}</span>` : ''}<span class="badge">${p.regiao || '—'} · ${esc(regNome(p.regiao))}</span>${p.expositor_id ? `<span class="badge">Expositor ${esc(expo(p.expositor_id).nome)}</span>` : ''}<span class="badge">${'★'.repeat(p.potencial || 0) || 'sem potencial'}</span>${p.geo_precisao && p.geo_precisao !== 'exata' ? `<span class="badge" style="background:#F7E9DD">localização ${esc(p.geo_precisao)}</span>` : ''}</div>
      ${p.razao_social || p.cnpj ? `<p style="color:var(--soft);margin:6px 0">${esc(p.razao_social || '')}${p.cnpj ? ' · CNPJ ' + esc(p.cnpj.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5')) : ''}</p>` : ''}
      <p style="color:var(--soft);margin:6px 0">${esc(p.endereco || 'Sem endereço')}${p.condicao ? ` · Condição: <b>${esc(p.condicao)}</b>` : ''}${p.proxima_reposicao ? ` · Próxima reposição: <b>${dstr(p.proxima_reposicao)}</b> (${prazoTxt(p)})` : ''}</p>
@@ -852,7 +894,7 @@ async function telaPerfil() {
     <div class="panel"><button class="btn" id="pExcluir" style="width:100%;color:#7A2414">Excluir negócio</button><small style="color:var(--mute);display:block;margin-top:6px">Use para apagar cadastro duplicado ou errado. Negócio com pedidos não pode ser excluído: mude para Inativo.</small></div>
    </div></div></div></section>`;
   $('#pVoltar').onclick = () => irPara(S.voltar || 'carteira');
-  $('#pNovaTar').onclick = () => modalTarefa({ data: hojeISO(), pdv_id: p.id, contato_id: p.contato_id });
+  $('#pNovaTar').onclick = $('#pTarTopo').onclick = () => modalTarefa({ data: hojeISO(), pdv_id: p.id, contato_id: p.contato_id });
   document.querySelectorAll('[data-tid]').forEach(el => el.onclick = () => modalTarefa(tars.find(t => t.id === el.dataset.tid)));
   if ($('#pComprar')) $('#pComprar').onclick = () => { S.abPdv = p.id; irPara('abertura'); };
   $('#pVisita').onclick = () => visitaRapida(p, telaPerfil);

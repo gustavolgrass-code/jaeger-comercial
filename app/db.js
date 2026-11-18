@@ -103,3 +103,6 @@ export async function criarTarefa(obj) { return ok(await sb.from('tarefas').inse
 export async function atualizarTarefa(id, patch) { return ok(await sb.from('tarefas').update(patch).eq('id', id).select().single()); }
 export async function excluirTarefa(id) { return ok(await sb.from('tarefas').delete().eq('id', id)); }
 export async function carregarEtapasTodas() { return ok(await sb.from('pdv_etapas').select('pdv_id, para, em')); }
+const dia0 = d => new Date(d + 'T00:00:00').toISOString(), diaFim = d => new Date(new Date(d + 'T00:00:00').getTime() + 864e5).toISOString();
+export async function visitasEntre(de, ate, tipo) { return ok(await sb.from('visitas').select('pdv_id, em').eq('tipo', tipo).gte('em', dia0(de)).lt('em', diaFim(ate))); }
+export async function pedidosEntre(de, ate, tipo) { return ok(await sb.from('pedidos').select('pdv_id, valor, criado_em').eq('tipo', tipo).gte('criado_em', dia0(de)).lt('criado_em', diaFim(ate))); }
