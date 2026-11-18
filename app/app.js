@@ -998,11 +998,19 @@ function partesEndereco(s) {
 const esperar = ms => new Promise(r => setTimeout(r, ms));
 async function nominatim(params) {
   const u = 'https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=1&countrycodes=br&accept-language=pt-BR&' + new URLSearchParams(params);
-  const r = await fetch(u); return (await r.json())[0];
+  let r; try { r = await fetch(u); } catch { throw new Error('LIMITE'); }
+  if (r.status === 429 || r.status === 403 || r.status >= 500) throw new Error('LIMITE');
+  return (await r.json())[0];
+}
+// expande abreviações comuns de endereço e tira complementos (loja, fundos…)
+function limparRua(s) {
+  return String(s || '').replace(/^(R|Rua)\.?\s+/i, 'Rua ').replace(/^(Av|Avda|Avenida)\.?\s+/i, 'Avenida ').replace(/^(Tv|Trav)\.?\s+/i, 'Travessa ').replace(/^(Al)\.?\s+/i, 'Alameda ').replace(/^(Est)\.?\s+/i, 'Estrada ')
+    .replace(/\bDr\.?\s/gi, 'Doutor ').replace(/\bCel\.?\s/gi, 'Coronel ').replace(/\bDes\.?\s/gi, 'Desembargador ').replace(/\bPres\.?\s/gi, 'Presidente ').replace(/\bGal\.?\s/gi, 'General ').replace(/\bSto\.?\s/gi, 'Santo ').replace(/\bN\.?\s?Sra\.?\s/gi, 'Nossa Senhora ')
+    .replace(/,\s*(\d+)[^,]*$/, ', $1').trim();
 }
 // devolve { lat, lng, precisao: 'exata' | 'rua' | 'cidade', ... } ou null
 async function geocodificar(endereco) {
-  const e = partesEndereco(endereco);
+  const e = partesEndereco(endereco); e.rua = limparRua(e.rua + (e.numero ? ', ' + e.numero : '')).replace(/,\s*\d+$/, '');
   const tentativas = [
     e.numero ? { street: `${e.numero} ${e.rua}`, city: e.cidade, state: e.uf, ...(e.cep ? { postalcode: e.cep } : {}) } : null,
     e.numero ? { street: `${e.numero} ${e.rua}`, city: e.cidade, state: e.uf } : null,
@@ -1010,7 +1018,7 @@ async function geocodificar(endereco) {
     { street: e.rua, city: e.cidade, state: e.uf },
   ].filter(Boolean);
   for (const t of tentativas) {
-    let r; try { r = await nominatim(t); } catch { r = null; } await esperar(1100);
+    let r; try { r = await nominatim(t); } catch (er) { await esperar(30000); try { r = await nominatim(t); } catch { throw new Error('LIMITE'); } } await esperar(1500);
     if (!r) continue;
     const a = r.address || {};
     const precisao = (a.house_number && e.numero && soDig(a.house_number) === soDig(e.numero)) || ['house', 'building'].includes(r.type) || r.category === 'building' ? 'exata' : (a.road ? 'rua' : 'cidade');
@@ -1077,7 +1085,7 @@ function prepararGoogle(linhas, el) {
   };
 }
 async function localizarSemCoord(el, bt) {
-  bt.disabled = true; const sem = S.pdvs.filter(x => !x.lat); let ok = 0; const aprox = [], falha = [];
+  bt.disabled = true; const sem = S.pdvs.filter(x => !x.lat); let ok = 0, parou = false; const aprox = [], falha = [];
   for (let i = 0; i < sem.length; i++) { const p = sem[i];
     el.innerHTML = `<div class="prog" style="height:12px"><i style="width:${i / sem.length * 100}%;background:var(--car)"></i></div><small>${i} de ${sem.length} · ${ok} localizados · ${p.nome}</small>`;
     if (!p.endereco || !p.cidade) { falha.push([p, 'sem endereço']); continue; }
@@ -1085,8 +1093,9 @@ async function localizarSemCoord(el, bt) {
     try { const g = await geocodificar(`${p.endereco}${p.bairro ? ' - ' + p.bairro : ''} - ${p.cidade}/RS${cep ? ' - ' + cep : ''}`);
       if (!g || g.precisao === 'cidade') { falha.push([p, 'endereço não encontrado']); continue; }
       await db.atualizarPdv(p.id, { lat: g.lat, lng: g.lng, geo_precisao: g.precisao, regiao: p.regiao || await garantirRegiao(g.lng, g.lat, p.cidade) }); ok++; if (g.precisao !== 'exata') aprox.push(p);
-    } catch (e) { falha.push([p, e.message]); } }
+    } catch (e) { if (e.message === 'LIMITE') { parou = true; break; } falha.push([p, e.message]); } }
   await recarregar(); bt.disabled = false;
+  if (parou) { el.innerHTML = `<p><b>${ok} localizados.</b> O serviço de mapas gratuito pediu uma pausa. Espere uns 10 minutos e clique de novo: ele continua só com os que faltam.</p>`; return; }
   el.innerHTML = `<p><b>${ok} localizados</b>${aprox.length ? ` · ${aprox.length} só pela rua (confira o pino)` : ''}${falha.length ? ` · <b style="color:#7A2414">${falha.length} sem localização</b>` : ''}</p>
    ${aprox.length || falha.length ? `<table><tr><th>Negócio</th><th>Endereço</th><th>Situação</th><th></th></tr>${[...aprox.map(p => [p, 'aproximado pela rua']), ...falha].map(([p, m]) => `<tr><td>${esc(p.nome)}</td><td>${esc([p.endereco, p.bairro, p.cidade].filter(Boolean).join(' · ') || '—')}</td><td>${esc(m)}</td><td><button class="mini" data-gper="${p.id}">abrir</button></td></tr>`).join('')}</table>` : ''}`;
   el.querySelectorAll('[data-gper]').forEach(b => b.onclick = () => abrirPerfil(b.dataset.gper));
