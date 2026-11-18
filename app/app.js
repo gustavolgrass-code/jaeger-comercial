@@ -131,19 +131,19 @@ window.irPara = irPara;
 let aoMarcar = null, mapa = null, camada = null, camadaSug = null, marcando = false, mostrarReg = true;
 function telaMapa() {
   $('#main').innerHTML = `<section class="view on" style="display:flex;height:100%"><div id="mapa"><div id="lmap"></div>
-   <div class="maptools"><button class="btn pri" id="bAdd">+ Cadastrar ponto</button><button class="btn car" id="bSug">Buscar prospects aqui</button><button class="btn" id="bPend">Reposições pendentes <b id="nPend"></b></button><button class="btn" id="bLoc">📍 Minha localização</button>
+   <div class="maptools"><button class="btn pri" id="bAdd">+ Cadastrar ponto</button><button class="btn" id="bPend">Reposições pendentes <b id="nPend"></b></button><button class="btn" id="bLoc">📍 Minha localização</button>
    <select id="fEt"><option value="">Todas as etapas</option>${ETAPAS.map(e => `<option value="${e.k}">${e.n}</option>`).join('')}</select>
    <select id="fReg"><option value="">Todas as regiões</option>${S.base.regioes.map(r => `<option value="${r.codigo}">${r.codigo} · ${esc(r.nome)}</option>`).join('')}</select>
    <label class="regchk"><input type="checkbox" id="tReg" ${mostrarReg ? 'checked' : ''}> Regiões</label></div>
    <div class="hint" id="hint">Toque no mapa onde fica o ponto</div>
    <div class="legend" id="legend"></div></div><aside id="side"></aside></section>`;
   if (mapa) { mapa.remove(); mapa = null; }
-  mapa = L.map('lmap', { zoomControl: true }).setView([-29.98, -51.18], 12);
+  mapa = L.map('lmap', { zoomControl: false }).setView([-29.98, -51.18], 12);
+  L.control.zoom({ position: 'bottomright' }).addTo(mapa);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(mapa);
   camada = L.layerGroup().addTo(mapa); camadaSug = L.layerGroup().addTo(mapa);
   mapa.on('click', e => { if (!marcando) return; marcando = false; $('#hint').style.display = 'none'; const f = aoMarcar || (ll => abrirCadastro(ll)); aoMarcar = null; f([e.latlng.lng, e.latlng.lat]); });
   $('#bAdd').onclick = () => abrirCadastro(null);
-  $('#bSug').onclick = buscarProspects;
   $('#bPend').onclick = () => { S.modoPend = !S.modoPend; S.sel = null; desenhar(); painel(); };
   $('#bLoc').onclick = () => alternarLocalizacao();
   if (S.rastreando) { mostrarEu(false); $('#bLoc').classList.add('pri'); }
@@ -228,7 +228,7 @@ function painel() {
   const s = $('#side'); if (!s) return;
   const p = S.pdvs.find(x => x.id === S.sel);
   if (!p && S.modoPend) return listaPendentes(s);
-  if (!p) { s.classList.remove('open'); s.innerHTML = `<div class="empty"><b>Selecione um ponto no mapa.</b><br>A cor mostra a etapa do funil.<br><br><b>+ Cadastrar ponto</b>: pela sua localização, marcando no mapa ou colando o link do Google Maps.<br><b>Buscar prospects aqui</b>: procura estabelecimentos na área visível do mapa.</div>`; return; }
+  if (!p) { s.classList.remove('open'); s.innerHTML = `<div class="empty"><b>Selecione um ponto no mapa.</b><br>A cor mostra a etapa do funil.<br><br><b>+ Cadastrar ponto</b>: pela sua localização, marcando no mapa ou colando o link do Google Maps.<br><b>Reposições pendentes</b>: mostra quem precisa de reposição hoje ou está atrasado.</div>`; return; }
   s.classList.add('open');
   const podeComprar = ['visitado', 'negociacao'].includes(p.etapa);
   const gm = p.lat ? `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}` : null;
