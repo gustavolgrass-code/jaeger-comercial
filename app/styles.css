@@ -229,3 +229,22 @@ tr:hover td{background:var(--sand)}
 .metas{display:flex;flex-direction:column;gap:8px}
 .metas label{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;background:var(--sand);padding:8px 12px;border-radius:10px}
 .funilnum b .meta{font-size:15px;color:var(--mute);font-family:'DM Sans',Arial,sans-serif;font-weight:600}
+
+/* modo prospecção */
+.modo-prosp .leaflet-tile-pane{filter:grayscale(.9) brightness(1.06) contrast(.92)}
+.prosp-tag{position:absolute;top:66px;left:12px;z-index:500;background:var(--car);color:var(--choc);font-weight:700;font-size:11px;letter-spacing:2px;padding:4px 10px;border-radius:12px}
+.pcarro{width:26px;height:26px;border-radius:7px;background:var(--choc);color:var(--cream);font:700 11px 'DM Sans',sans-serif;display:flex;align-items:center;justify-content:center;border:2px solid #FBF7F0;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.grupo{background:var(--sand);border-radius:12px;padding:8px 10px;margin-bottom:8px}
+.grupo a{color:var(--car-d)}
+.parada{display:flex;gap:10px;align-items:center;padding:7px 4px;border-radius:8px;cursor:pointer}
+.parada:hover{background:rgba(255,255,255,.5)}
+.parada small{color:var(--mute)}
+.parada.feita b{color:var(--mute)}
+.parada .num{width:26px;height:26px;border-radius:50%;color:#fff;font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center;flex:none}
+.resultados{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.resultados button{border:2px solid var(--c);background:#FBF7F0;color:var(--choc);border-radius:12px;padding:12px 8px;font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px;min-height:52px}
+.resultados button span{width:26px;height:26px;border-radius:50%;background:var(--c);color:#fff;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.resultados button:first-child{grid-column:1/-1;background:var(--c);color:#fff;justify-content:center}
+.resultados button:first-child span{background:#fff;color:var(--c)}
+.alertas{border-color:#C9D7EA;background:#F4F7FB}
+.alertas .mini{margin-left:4px}

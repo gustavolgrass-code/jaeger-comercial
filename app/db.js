@@ -52,8 +52,8 @@ export async function ultimoDeixado(pdvId) {
 /* ---------- gravações ---------- */
 export async function criarPdv(obj) { return ok(await sb.from('pdvs').insert(obj).select().single()); }
 export async function atualizarPdv(id, patch) { if ('etapa' in patch && !('etapa_motivo' in patch)) patch = { ...patch, etapa_motivo: null }; return ok(await sb.from('pdvs').update(patch).eq('id', id).select().single()); }
-export async function registrarVisita(pdvId, tipo, observacao, usuarioId) {
-  return ok(await sb.from('visitas').insert({ pdv_id: pdvId, tipo, observacao, usuario_id: usuarioId }).select().single());
+export async function registrarVisita(pdvId, tipo, observacao, usuarioId, resultado = null) {
+  return ok(await sb.from('visitas').insert({ pdv_id: pdvId, tipo, observacao, usuario_id: usuarioId, resultado }).select().single());
 }
 async function gravarContagemEPedido({ pdvId, tipoVisita, usuarioId, contagens, pedido, itens, observacao }) {
   const visita = await registrarVisita(pdvId, tipoVisita, observacao, usuarioId);
@@ -106,3 +106,8 @@ export async function carregarEtapasTodas() { return ok(await sb.from('pdv_etapa
 const dia0 = d => new Date(d + 'T00:00:00').toISOString(), diaFim = d => new Date(new Date(d + 'T00:00:00').getTime() + 864e5).toISOString();
 export async function visitasEntre(de, ate, tipo) { return ok(await sb.from('visitas').select('pdv_id, em').eq('tipo', tipo).gte('em', dia0(de)).lt('em', diaFim(ate))); }
 export async function pedidosEntre(de, ate, tipo) { return ok(await sb.from('pedidos').select('pdv_id, valor, criado_em').eq('tipo', tipo).gte('criado_em', dia0(de)).lt('criado_em', diaFim(ate))); }
+
+/* ---------- plano do dia (modo prospecção) ---------- */
+export async function obterPlano(dono, data) { return ok(await sb.from('planos').select('*').eq('dono', dono).eq('data', data).maybeSingle()); }
+export async function salvarPlano(dono, data, paradas) { return ok(await sb.from('planos').upsert({ dono, data, paradas, atualizado_em: new Date().toISOString() }).select().single()); }
+export async function visitasDoDia(dia) { const de = new Date(dia + 'T00:00:00'); return ok(await sb.from('visitas').select('id, pdv_id, em, resultado, tipo').gte('em', de.toISOString()).lt('em', new Date(+de + 864e5).toISOString())); }
