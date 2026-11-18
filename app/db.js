@@ -51,7 +51,7 @@ export async function ultimoDeixado(pdvId) {
 
 /* ---------- gravações ---------- */
 export async function criarPdv(obj) { return ok(await sb.from('pdvs').insert(obj).select().single()); }
-export async function atualizarPdv(id, patch) { return ok(await sb.from('pdvs').update(patch).eq('id', id).select().single()); }
+export async function atualizarPdv(id, patch) { if ('etapa' in patch && !('etapa_motivo' in patch)) patch = { ...patch, etapa_motivo: null }; return ok(await sb.from('pdvs').update(patch).eq('id', id).select().single()); }
 export async function registrarVisita(pdvId, tipo, observacao, usuarioId) {
   return ok(await sb.from('visitas').insert({ pdv_id: pdvId, tipo, observacao, usuario_id: usuarioId }).select().single());
 }
@@ -93,3 +93,13 @@ export async function historico(pdvId) {
   return { etapas, visitas, pedidos, sellouts };
 }
 export async function atualizarVisita(id, patch) { return ok(await sb.from('visitas').update(patch).eq('id', id).select().single()); }
+
+/* ---------- tarefas (agenda) ---------- */
+export async function listarTarefas(dono, de, ate) { return ok(await sb.from('tarefas').select('*').eq('dono', dono).gte('data', de).lte('data', ate).order('data').order('hora', { nullsFirst: true })); }
+export async function tarefasAbertasAte(dono, ate) { return ok(await sb.from('tarefas').select('*').eq('dono', dono).eq('concluida', false).lte('data', ate).order('data')); }
+export async function tarefasDoPdv(pdvId) { return ok(await sb.from('tarefas').select('*').eq('pdv_id', pdvId).order('data')); }
+export async function tarefasDoContato(id) { return ok(await sb.from('tarefas').select('*').eq('contato_id', id).order('data')); }
+export async function criarTarefa(obj) { return ok(await sb.from('tarefas').insert(obj).select().single()); }
+export async function atualizarTarefa(id, patch) { return ok(await sb.from('tarefas').update(patch).eq('id', id).select().single()); }
+export async function excluirTarefa(id) { return ok(await sb.from('tarefas').delete().eq('id', id)); }
+export async function carregarEtapasTodas() { return ok(await sb.from('pdv_etapas').select('pdv_id, para, em')); }

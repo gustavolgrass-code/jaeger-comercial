@@ -18,7 +18,7 @@ window.fecharModal = fecharModal;
 /* =================== catálogos =================== */
 const ETAPAS = [
   { k: 'mapeado', n: 'Mapeado', c: '#8C7E74' }, { k: 'visitado', n: 'Visitado', c: '#3F6FA8' },
-  { k: 'negociacao', n: 'Em negociação', c: '#D08A3C' }, { k: 'avaliacao', n: 'Em avaliação', c: '#6B4FA0' },
+  { k: 'negociacao', n: 'Em negociação', c: '#D08A3C' }, { k: 'perdido', n: 'Perdido', c: '#9A8F86' }, { k: 'avaliacao', n: 'Em avaliação', c: '#6B4FA0' },
   { k: 'revisao', n: 'Revisão comercial', c: '#A23B72' }, { k: 'ativo', n: 'Ativo', c: '#2F7D4E' },
   { k: 'risco', n: 'Em risco', c: '#B8402A' }, { k: 'inativo', n: 'Inativo', c: '#4A3A31' }];
 const etapa = k => ETAPAS.find(e => e.k === k) || ETAPAS[0];
@@ -80,6 +80,7 @@ async function iniciar() {
     S.base = await db.carregarBase();
     await recarregar();
     montar();
+    avaliarRisco();
   } catch (e) { $('#raiz').innerHTML = `<div class="loading">Não foi possível carregar: ${esc(e.message)}</div>`; }
 }
 function telaLogin() {
@@ -105,7 +106,7 @@ function telaPrimeiroAcesso(user) {
 
 /* =================== estrutura =================== */
 const ABAS = {
-  comercial: [['mapa', 'Mapa'], ['funil', 'Funil'], ['carteira', 'Negócios'], ['contatos', 'Contatos'], ['abertura', 'Abertura de cliente'], ['painel', 'Painel'], ['uploads', 'Uploads'], ['regras', 'Regras']],
+  comercial: [['mapa', 'Mapa'], ['funil', 'Funil'], ['agenda', 'Agenda'], ['carteira', 'Negócios'], ['contatos', 'Contatos'], ['abertura', 'Abertura de cliente'], ['painel', 'Painel'], ['uploads', 'Uploads'], ['regras', 'Regras']],
   operacao: [['rota', 'Rota de hoje'], ['reposicao', 'Reposição'], ['resumo', 'Resumo do dia']] };
 let lado = 'comercial';
 function montar() {
@@ -123,7 +124,7 @@ function irPara(a) {
   S.aba = a;
   $('#nav').innerHTML = ABAS[lado].map(([k, n]) => `<button data-a="${k}" class="${k === a ? 'on' : ''}">${n}</button>`).join('');
   $('#nav').onclick = e => { const k = e.target.dataset.a; if (k) irPara(k); };
-  ({ perfil: telaPerfil, contato: telaContato, contatos: telaContatos, uploads: telaUploads, mapa: telaMapa, funil: telaFunil, carteira: telaCarteira, abertura: telaAbertura, painel: telaPainel, regras: telaRegras, rota: telaRota, reposicao: telaReposicao, resumo: telaResumo })[a]();
+  ({ agenda: telaAgenda, perfil: telaPerfil, contato: telaContato, contatos: telaContatos, uploads: telaUploads, mapa: telaMapa, funil: telaFunil, carteira: telaCarteira, abertura: telaAbertura, painel: telaPainel, regras: telaRegras, rota: telaRota, reposicao: telaReposicao, resumo: telaResumo })[a]();
 }
 window.irPara = irPara;
 
@@ -252,7 +253,7 @@ function painel() {
   $('#bPerfil').onclick = () => abrirPerfil(p.id);
   $('#xSide').onclick = () => { S.sel = null; desenhar(); painel(); };
   s.querySelectorAll('[data-pot]').forEach(b => b.onclick = () => salvarPdv(p.id, { potencial: +b.dataset.pot }, 'Potencial atualizado'));
-  $('#sEt').onchange = e => salvarPdv(p.id, { etapa: e.target.value }, 'Etapa: ' + etapa(e.target.value).n);
+  $('#sEt').onchange = e => mudarEtapa(p.id, e.target.value, () => { desenhar(); painel(); });
   if ($('#sCad')) $('#sCad').onchange = e => salvarPdv(p.id, { cadencia_dias: e.target.value ? +e.target.value : null }, 'Frequência atualizada');
   if ($('#bComprar')) $('#bComprar').onclick = () => { S.abPdv = p.id; irPara('abertura'); };
   $('#bVisita').onclick = () => visitaRapida(p);
@@ -353,15 +354,172 @@ window.addSug = async i => {
 };
 
 /* =================== funil =================== */
-function telaFunil() {
-  const r = regraAval();
-  $('#main').innerHTML = `<section class="view on" style="flex-direction:column;height:100%"><div class="rules">Avaliação de ${r.reposicoes} reposições semanais após a 1ª compra, meta de ${r.meta_minima_sellout} un. por sell-out. Ajuste na aba <b>&nbsp;Regras</b>.</div><div class="kanban" id="kanban" style="flex:1;min-height:0"></div></section>`;
-  $('#kanban').innerHTML = ETAPAS.map(e => { const its = S.pdvs.filter(p => p.etapa === e.k).sort((a, b) => (b.potencial || 0) - (a.potencial || 0));
-    return `<div class="col" data-et="${e.k}"><h4><span><i class="dot" style="background:${e.c}"></i> ${e.n}</span><span>${its.length}</span></h4><div class="list">${its.slice(0, 80).map(p => `<div class="card" draggable="true" data-id="${p.id}" style="border-left-color:${e.c}"><b>${esc(p.nome)}</b><small>${esc(p.canal || '')} · ${p.regiao || '—'} · ${'★'.repeat(p.potencial || 0)}</small></div>`).join('')}</div></div>`; }).join('');
+const PROSP = ['mapeado', 'visitado', 'negociacao', 'perdido'];
+const CART = ['avaliacao', 'ativo', 'risco', 'revisao', 'inativo'];
+const MOTIVOS = ['Preço', 'Sem espaço', 'Concorrente', 'Dono não decide', 'Sem interesse', 'Outro'];
+const ymd = x => !x ? '' : typeof x === 'object' && x.toISOString ? x.toISOString().slice(0, 10) : String(x).slice(0, 10);
+const hojeISO = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10); };
+const isoDe = d => new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+const diasNaEtapa = p => p.etapa_desde ? Math.floor((Date.now() - new Date(p.etapa_desde)) / DIA) : null;
+function chipAcao(p) {
+  if (!p.acao_data) return PROSP.slice(0, 3).includes(p.etapa) ? '<span class="chip-acao sem">sem próxima ação</span>' : '';
+  const h = hojeISO(), d = ymd(p.acao_data), cls = d < h ? 'atrasada' : d === h ? 'hoje' : '';
+  return `<span class="chip-acao ${cls}" title="${esc(p.acao_titulo)}">${d < h ? 'atrasada · ' : d === h ? 'hoje · ' : ''}${dstr(d + 'T12:00')} · ${esc(p.acao_titulo)}</span>`;
+}
+// toda mudança de etapa passa por aqui (Perdido pede motivo; Ganho abre o lançamento de venda)
+async function mudarEtapa(id, nova, depois) {
+  const p = S.pdvs.find(x => x.id === id); if (!p || p.etapa === nova) return depois && depois();
+  if (nova === 'ganho') { S.abPdv = id; return irPara('abertura'); }
+  if (nova === 'perdido') {
+    const ret = isoDe(new Date(Date.now() + 60 * DIA));
+    modal(`<h3>${esc(p.nome)} · perdido</h3><label>Motivo</label><select id="mMot">${MOTIVOS.map(m => `<option>${m}</option>`).join('')}</select>
+    <input id="mOutro" placeholder="Descreva o motivo" style="display:none;margin-top:6px;width:100%">
+    <label>Retomar o contato em</label><input id="mRet" type="date" value="${ret}">
+    <p style="color:var(--soft);font-size:12px;margin:6px 0 0">Cria uma tarefa na sua agenda para essa data. Deixe em branco para não retomar.</p>
+    <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="mOk">Marcar como perdido</button></div>`);
+    $('#mMot').onchange = () => $('#mOutro').style.display = $('#mMot').value === 'Outro' ? 'block' : 'none';
+    $('#mOk').onclick = async () => {
+      const mot = $('#mMot').value === 'Outro' ? ($('#mOutro').value.trim() || 'Outro') : $('#mMot').value, ret = $('#mRet').value || null;
+      try { await db.atualizarPdv(id, { etapa: 'perdido', motivo_perda: mot, retomar_em: ret, etapa_motivo: 'Perdido: ' + mot });
+        if (ret) await db.criarTarefa({ titulo: 'Retomar contato com ' + p.nome, tipo: 'visita', data: ret, pdv_id: id, contato_id: p.contato_id || null, descricao: 'Perdido por: ' + mot, dono: S.eu.id });
+        fecharModal(); await atualizarUm(id); toast(`${p.nome} marcado como perdido (${mot})`); depois && depois(); } catch (e) { erro(e); } };
+    return;
+  }
+  try { await db.atualizarPdv(id, { etapa: nova, ...(p.etapa === 'perdido' ? { motivo_perda: null, retomar_em: null } : {}) }); await atualizarUm(id); toast('Etapa: ' + etapa(nova).n); depois && depois(); } catch (e) { erro(e); }
+}
+window.mudarEtapa = mudarEtapa;
+
+// "Em risco" automático e recuperação
+async function avaliarRisco() {
+  const meta = regraAval().meta_minima_sellout, mud = [];
+  for (const p of S.pdvs.filter(x => x.etapa === 'ativo' || x.etapa === 'risco')) {
+    const so = (S.sellouts[p.id] || []).map(s => s.sellout), ult2 = so.slice(-2), a = atraso(p) ?? 0;
+    const media = so.length >= 5 ? so.slice(-7, -1).reduce((x, y) => x + y, 0) / so.slice(-7, -1).length : null;
+    let motivo = null;
+    if (ult2.length === 2 && ult2.every(v => v < meta)) motivo = `Risco automático: 2 sell-outs seguidos abaixo de ${meta} un.`;
+    else if (a > 7) motivo = `Risco automático: reposição atrasada há ${a} dias`;
+    else if (media && so[so.length - 1] < media * 0.5) motivo = `Risco automático: sell-out caiu para menos da metade da média (${dec(media)} un.)`;
+    if (p.etapa === 'ativo' && motivo) mud.push([p, 'risco', motivo]);
+    if (p.etapa === 'risco' && !motivo && ult2.length === 2 && ult2.every(v => v >= meta)) mud.push([p, 'ativo', 'Recuperou o giro']);
+  }
+  for (const [p, e, m] of mud) { try { await db.atualizarPdv(p.id, { etapa: e, etapa_motivo: m }); } catch (er) { console.warn(er); } }
+  if (mud.length) { await recarregar(); toast(mud.map(([p, e]) => `${p.nome} → ${etapa(e).n}`).join(' · ')); }
+}
+
+let funilVisao = 'prospeccao', funilFiltro = { reg: '', canal: '', hoje: false }, etapasHist = null;
+async function telaFunil() {
+  $('#main').innerHTML = '<section class="view on"><div class="loading">Carregando o funil…</div></section>';
+  try { etapasHist = await db.carregarEtapasTodas(); } catch (e) { etapasHist = []; }
+  const cols = funilVisao === 'prospeccao' ? PROSP : CART, h = hojeISO();
+  const filtra = p => (!funilFiltro.reg || p.regiao === funilFiltro.reg) && (!funilFiltro.canal || p.canal === funilFiltro.canal) && (!funilFiltro.hoje || (p.acao_data && ymd(p.acao_data) <= h));
+  // números: conversão por etapa (chegou até X ou além) e tempo até a 1ª venda
+  const rank = { mapeado: 0, visitado: 1, negociacao: 2 }; CART.forEach(k => rank[k] = 3);
+  const maxR = {}; etapasHist.forEach(e => { const r = rank[e.para]; if (r !== undefined) maxR[e.pdv_id] = Math.max(maxR[e.pdv_id] ?? -1, r); });
+  S.pdvs.forEach(p => { const r = rank[p.etapa]; if (r !== undefined) maxR[p.id] = Math.max(maxR[p.id] ?? -1, r); });
+  const chegou = r => Object.values(maxR).filter(v => v >= r).length;
+  const conv = (a, b) => chegou(a) ? Math.round(chegou(b) / chegou(a) * 100) + '%' : '—';
+  const vendas = S.pdvs.filter(p => p.avaliacao_inicio && p.criado_em), tMed = vendas.length ? vendas.reduce((s, p) => s + Math.max(0, (new Date(ymd(p.avaliacao_inicio) + 'T12:00') - new Date(p.criado_em)) / DIA), 0) / vendas.length : null;
+  const ganhosMes = S.pdvs.filter(p => p.avaliacao_inicio && ymd(p.avaliacao_inicio).slice(0, 7) === h.slice(0, 7));
+  const perd = S.pdvs.filter(p => p.etapa === 'perdido'), porMot = {}; perd.forEach(p => porMot[p.motivo_perda || '—'] = (porMot[p.motivo_perda || '—'] || 0) + 1);
+  const canais = [...new Set(S.pdvs.map(p => p.canal).filter(Boolean))].sort();
+  $('#main').innerHTML = `<section class="view on" style="flex-direction:column;height:100%">
+  <div class="funilbar"><div class="seg"><button data-v="prospeccao" class="${funilVisao === 'prospeccao' ? 'on' : ''}">Prospecção</button><button data-v="carteira" class="${funilVisao === 'carteira' ? 'on' : ''}">Carteira</button></div>
+   <select id="ffReg"><option value="">Todas as regiões</option>${S.base.regioes.map(r => `<option value="${r.codigo}" ${funilFiltro.reg === r.codigo ? 'selected' : ''}>${r.codigo} · ${esc(r.nome)}</option>`).join('')}</select>
+   <select id="ffCanal"><option value="">Todos os canais</option>${canais.map(c => `<option ${funilFiltro.canal === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+   <label class="regchk"><input type="checkbox" id="ffHoje" ${funilFiltro.hoje ? 'checked' : ''}> Ações de hoje e atrasadas</label></div>
+  ${funilVisao === 'prospeccao' ? `<div class="funilnum"><div><small>Mapeado → Visitado</small><b>${conv(0, 1)}</b></div><div><small>Visitado → Negociação</small><b>${conv(1, 2)}</b></div><div><small>Negociação → Venda</small><b>${conv(2, 3)}</b></div><div><small>Tempo médio até a 1ª venda</small><b>${tMed === null ? '—' : Math.round(tMed) + ' dias'}</b></div><div><small>Vendas no mês</small><b>${ganhosMes.length}</b></div><div><small>Perdidos por motivo</small><b style="font-size:13px;font-family:inherit">${Object.entries(porMot).sort((a, b) => b[1] - a[1]).map(([m, n]) => `${esc(m)} ${n}`).join(' · ') || '—'}</b></div></div>`
+    : `<div class="funilnum"><div><small>Em avaliação</small><b>${S.pdvs.filter(p => p.etapa === 'avaliacao').length}</b></div><div><small>Ativos</small><b>${S.pdvs.filter(p => p.etapa === 'ativo').length}</b></div><div><small>Em risco</small><b>${S.pdvs.filter(p => p.etapa === 'risco').length}</b></div><div><small>Reposições pendentes</small><b>${repPendentes().length}</b></div><div style="flex:2"><small>Regra de risco automático</small><b style="font-size:13px;font-family:inherit">2 sell-outs abaixo de ${regraAval().meta_minima_sellout} un., reposição atrasada > 7 dias ou queda > 50% da média</b></div></div>`}
+  <div class="kanban" id="kanban" style="flex:1;min-height:0"></div></section>`;
+  const card = (p, e) => { const dias = diasNaEtapa(p), parado = p.etapa === 'negociacao' && dias > 7;
+    const so = (S.sellouts[p.id] || []).slice(-1)[0];
+    return `<div class="card ${parado ? 'parado' : ''}" draggable="true" data-id="${p.id}" style="border-left-color:${e.c}"><b>${esc(p.nome)}</b><small>${esc(p.canal || '')} · ${p.regiao || '—'} · ${'★'.repeat(p.potencial || 0)}</small>
+    <div class="cardmeta"><span>${dias === null ? '' : `${dias === 0 ? 'hoje' : 'há ' + dias + (dias === 1 ? ' dia' : ' dias')} na etapa`}</span>${p.etapa === 'perdido' && p.motivo_perda ? `<span>· ${esc(p.motivo_perda)}${p.retomar_em ? ' · retomar ' + dstr(ymd(p.retomar_em) + 'T12:00') : ''}</span>` : ''}${CART.includes(p.etapa) && so ? `<span>· último sell-out ${so.sellout} un.</span>` : ''}${CART.includes(p.etapa) && p.proxima_reposicao ? `<span>· reposição ${prazoTxt(p)}</span>` : ''}</div>${chipAcao(p)}</div>`; };
+  let html = cols.map(k => { const e = etapa(k), its = S.pdvs.filter(p => p.etapa === k && filtra(p)).sort((a, b) => (ymd(a.acao_data) || '9').localeCompare(ymd(b.acao_data) || '9') || (b.potencial || 0) - (a.potencial || 0));
+    return `<div class="col" data-et="${k}"><h4><span><i class="dot" style="background:${e.c}"></i> ${e.n}</span><span>${its.length}</span></h4><div class="list">${its.slice(0, 100).map(p => card(p, e)).join('')}</div></div>`; }).join('');
+  if (funilVisao === 'prospeccao') html = html.replace('<div class="col" data-et="perdido">', `<div class="col ganho" data-et="ganho"><h4><span><i class="dot" style="background:#2F7D4E"></i> Venda (ganho)</span><span>${ganhosMes.length} no mês</span></h4><div class="list"><p class="dica">Arraste um negócio para cá para lançar a primeira venda.</p>${ganhosMes.map(p => `<div class="card" data-id="${p.id}" style="border-left-color:#2F7D4E;cursor:pointer"><b>${esc(p.nome)}</b><small>venda em ${dstr(ymd(p.avaliacao_inicio) + 'T12:00')} · ${etapa(p.etapa).n}</small></div>`).join('')}</div></div><div class="col" data-et="perdido">`);
+  $('#kanban').innerHTML = html;
   let arr = null;
-  document.querySelectorAll('.card').forEach(c => { c.ondragstart = () => arr = c.dataset.id; c.onclick = () => abrirPerfil(c.dataset.id); });
-  document.querySelectorAll('.col').forEach(c => { c.ondragover = e => { e.preventDefault(); c.classList.add('drop'); }; c.ondragleave = () => c.classList.remove('drop');
-    c.ondrop = e => { e.preventDefault(); c.classList.remove('drop'); if (arr) salvarPdv(arr, { etapa: c.dataset.et }, 'Etapa: ' + etapa(c.dataset.et).n); arr = null; }; });
+  document.querySelectorAll('.funilbar .seg button').forEach(b => b.onclick = () => { funilVisao = b.dataset.v; telaFunil(); });
+  $('#ffReg').onchange = e => { funilFiltro.reg = e.target.value; telaFunil(); };
+  $('#ffCanal').onchange = e => { funilFiltro.canal = e.target.value; telaFunil(); };
+  $('#ffHoje').onchange = e => { funilFiltro.hoje = e.target.checked; telaFunil(); };
+  document.querySelectorAll('#kanban .card').forEach(c => { c.ondragstart = () => arr = c.dataset.id; c.onclick = () => abrirPerfil(c.dataset.id); });
+  document.querySelectorAll('#kanban .col').forEach(c => { c.ondragover = e => { e.preventDefault(); c.classList.add('drop'); }; c.ondragleave = () => c.classList.remove('drop');
+    c.ondrop = e => { e.preventDefault(); c.classList.remove('drop'); if (arr) mudarEtapa(arr, c.dataset.et, telaFunil); arr = null; }; });
+}
+
+/* =================== agenda =================== */
+const TIPOS = { visita: { n: 'Visita', c: '#D08A3C' }, ligacao: { n: 'Ligação', c: '#3F6FA8' }, whatsapp: { n: 'WhatsApp', c: '#2F7D4E' }, reuniao: { n: 'Reunião', c: '#6B4FA0' }, outro: { n: 'Outro', c: '#8C7E74' } };
+const H0 = 7, H1 = 21, HPX = 56;
+let semanaIni = null;
+function inicioSemana(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; }
+async function telaAgenda() {
+  if (!semanaIni) semanaIni = inicioSemana(new Date());
+  const dias = [...Array(7)].map((_, i) => new Date(+semanaIni + i * DIA + 12 * 36e5)), de = isoDe(dias[0]), ate = isoDe(dias[6]), h = hojeISO();
+  $('#main').innerHTML = '<section class="view on"><div class="loading">Carregando a agenda…</div></section>';
+  let tar, atras; try { [tar, atras] = await Promise.all([db.listarTarefas(S.eu.id, de, ate), db.tarefasAbertasAte(S.eu.id, isoDe(new Date(Date.now() - DIA)))]); } catch (e) { return erro(e); }
+  S.tarefas = Object.fromEntries([...tar, ...atras].map(t => [t.id, t]));
+  const nomePdv = id => (S.pdvs.find(p => p.id === id) || {}).nome, nomeCt = id => (S.contatos.find(c => c.id === id) || {}).nome;
+  const sub = t => [nomePdv(t.pdv_id), nomeCt(t.contato_id)].filter(Boolean).map(esc).join(' · ');
+  const mesTxt = dias[0].toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' }) + ' – ' + dias[6].toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', year: 'numeric' });
+  const bloco = t => { const [hh, mm] = String(t.hora).split(':').map(Number), top = (hh - H0) * HPX + mm / 60 * HPX, alt = Math.max(26, (t.duracao_min || 30) / 60 * HPX - 3), c = TIPOS[t.tipo]?.c || '#8C7E74';
+    return `<div class="tarefa ${t.concluida ? 'feita' : ''}" draggable="true" data-t="${t.id}" style="top:${Math.max(0, top)}px;height:${alt}px;border-left-color:${c};background:${c}22"><b>${String(t.hora).slice(0, 5)} ${esc(t.titulo)}</b>${alt > 34 && sub(t) ? `<small>${sub(t)}</small>` : ''}</div>`; };
+  const agora = new Date(), linhaAgora = (agora.getHours() + agora.getMinutes() / 60 - H0) * HPX;
+  $('#main').innerHTML = `<section class="view on"><div class="agenda">
+  <div class="agtopo"><div class="row"><button class="btn" id="agAnt">‹</button><button class="btn" id="agHoje">Hoje</button><button class="btn" id="agProx">›</button><h2>${mesTxt}</h2></div>
+   <div class="row"><span class="leg">${Object.values(TIPOS).map(t => `<i style="background:${t.c}"></i>${t.n}`).join('')}</span><button class="btn pri" id="agNova">+ Nova tarefa</button></div></div>
+  ${atras.length ? `<div class="atrasadas"><b>Atrasadas (${atras.length})</b>${atras.map(t => `<span class="tchip" data-t="${t.id}" style="border-color:${TIPOS[t.tipo]?.c}">${dstr(ymd(t.data) + 'T12:00')} · ${esc(t.titulo)}</span>`).join('')}</div>` : ''}
+  <div class="cal"><div class="calhead"><div></div>${dias.map(d => { const iso = isoDe(d); return `<div class="${iso === h ? 'hoje' : ''}"><small>${d.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '')}</small><b>${d.getDate()}</b></div>`; }).join('')}</div>
+   <div class="caldia"><div class="lbl">sem horário</div>${dias.map(d => { const iso = isoDe(d); return `<div class="slotdia" data-dia="${iso}">${tar.filter(t => ymd(t.data) === iso && !t.hora).map(t => `<span class="tchip ${t.concluida ? 'feita' : ''}" draggable="true" data-t="${t.id}" style="border-color:${TIPOS[t.tipo]?.c}">${esc(t.titulo)}</span>`).join('')}</div>`; }).join('')}</div>
+   <div class="calcorpo"><div class="horas">${[...Array(H1 - H0)].map((_, i) => `<div style="height:${HPX}px">${String(H0 + i).padStart(2, '0')}:00</div>`).join('')}</div>
+    ${dias.map(d => { const iso = isoDe(d); return `<div class="coldia ${iso === h ? 'hoje' : ''}" data-dia="${iso}" style="height:${(H1 - H0) * HPX}px">${[...Array(H1 - H0)].map(() => `<div class="hr" style="height:${HPX}px"></div>`).join('')}${iso === h && linhaAgora > 0 && linhaAgora < (H1 - H0) * HPX ? `<div class="agora" style="top:${linhaAgora}px"></div>` : ''}${tar.filter(t => ymd(t.data) === iso && t.hora).map(bloco).join('')}</div>`; }).join('')}</div></div></div></section>`;
+  $('#agAnt').onclick = () => { semanaIni = new Date(+semanaIni - 7 * DIA); telaAgenda(); };
+  $('#agProx').onclick = () => { semanaIni = new Date(+semanaIni + 7 * DIA); telaAgenda(); };
+  $('#agHoje').onclick = () => { semanaIni = inicioSemana(new Date()); telaAgenda(); };
+  $('#agNova').onclick = () => modalTarefa({ data: h });
+  document.querySelectorAll('[data-t]').forEach(el => { el.onclick = e => { e.stopPropagation(); modalTarefa(S.tarefas[el.dataset.t]); }; el.ondragstart = e => { e.dataTransfer.setData('text', el.dataset.t); }; });
+  const horaDoY = (col, y) => { const min = Math.max(0, Math.round((y / HPX * 60) / 15) * 15) + H0 * 60; return `${String(Math.min(H1 - 1, Math.floor(min / 60))).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`; };
+  document.querySelectorAll('.coldia').forEach(col => {
+    col.onclick = e => { if (e.target.closest('[data-t]')) return; const r = col.getBoundingClientRect(); modalTarefa({ data: col.dataset.dia, hora: horaDoY(col, e.clientY - r.top) }); };
+    col.ondragover = e => e.preventDefault();
+    col.ondrop = async e => { e.preventDefault(); const id = e.dataTransfer.getData('text'), r = col.getBoundingClientRect(); try { await db.atualizarTarefa(id, { data: col.dataset.dia, hora: horaDoY(col, e.clientY - r.top) }); telaAgenda(); } catch (er) { erro(er); } };
+  });
+  document.querySelectorAll('.slotdia').forEach(s => { s.onclick = e => { if (!e.target.closest('[data-t]')) modalTarefa({ data: s.dataset.dia }); }; s.ondragover = e => e.preventDefault();
+    s.ondrop = async e => { e.preventDefault(); try { await db.atualizarTarefa(e.dataTransfer.getData('text'), { data: s.dataset.dia, hora: null }); telaAgenda(); } catch (er) { erro(er); } }; });
+}
+function modalTarefa(t = {}, depois) {
+  const novo = !t.id;
+  modal(`<h3>${novo ? 'Nova tarefa' : 'Tarefa'}</h3>
+  <label>O que fazer</label><input id="tTit" value="${esc(t.titulo || '')}" placeholder="Ex.: voltar com amostra, ligar para o dono">
+  <label>Tipo</label><div class="pay" id="tTipo">${Object.entries(TIPOS).map(([k, v]) => `<label><input type="radio" name="tt" value="${k}" ${(t.tipo || 'visita') === k ? 'checked' : ''}> ${v.n}</label>`).join('')}</div>
+  <div class="row"><div style="flex:1"><label>Data</label><input id="tData" type="date" value="${ymd(t.data) || hojeISO()}"></div><div style="flex:1"><label>Hora</label><input id="tHora" type="time" value="${t.hora ? String(t.hora).slice(0, 5) : ''}"></div><div style="flex:1"><label>Duração</label><select id="tDur">${[15, 30, 45, 60, 90, 120].map(m => `<option value="${m}" ${(t.duracao_min || 30) === m ? 'selected' : ''}>${m} min</option>`).join('')}</select></div></div>
+  <label>Negócio (opcional)</label><input id="tPdv" list="lPdv" value="${esc((S.pdvs.find(p => p.id === t.pdv_id) || {}).nome || '')}" placeholder="Digite para buscar"><datalist id="lPdv">${S.pdvs.map(p => `<option value="${esc(p.nome)}">`).join('')}</datalist>
+  <label>Contato (opcional)</label><input id="tCt" list="lCt" value="${esc((S.contatos.find(c => c.id === t.contato_id) || {}).nome || '')}" placeholder="Digite para buscar"><datalist id="lCt">${S.contatos.map(c => `<option value="${esc(c.nome)}">`).join('')}</datalist>
+  <label>Detalhes</label><textarea id="tDesc" rows="2">${esc(t.descricao || '')}</textarea>
+  <div class="row" style="margin-top:14px;justify-content:space-between;flex-wrap:wrap">
+   <div class="row">${novo ? '' : `<button class="btn" id="tDel" style="color:#7A2414">Excluir</button><button class="btn" id="tFeita">${t.concluida ? 'Reabrir' : '✓ Concluir'}</button>`}</div>
+   <div class="row"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="tOk">Salvar</button></div></div>`);
+  const fim = () => { fecharModal(); if (depois) depois(); else if (S.aba === 'agenda') telaAgenda(); else if (S.aba === 'perfil') telaPerfil(); else if (S.aba === 'funil') telaFunil(); };
+  const pegarIds = () => { const pn = norm($('#tPdv').value), cn = norm($('#tCt').value);
+    const pdv = pn ? S.pdvs.find(p => norm(p.nome) === pn) : null, ct = cn ? S.contatos.find(c => norm(c.nome) === cn) : null;
+    if (pn && !pdv) throw new Error('Negócio não encontrado: escolha um da lista ou deixe em branco');
+    if (cn && !ct) throw new Error('Contato não encontrado: escolha um da lista ou deixe em branco');
+    return { pdv_id: pdv?.id || null, contato_id: ct?.id || pdv?.contato_id || null }; };
+  $('#tOk').onclick = async () => {
+    const titulo = $('#tTit').value.trim(); if (!titulo) return toast('Escreva o que fazer');
+    try { const o = { titulo, tipo: document.querySelector('input[name=tt]:checked').value, data: $('#tData').value, hora: $('#tHora').value || null, duracao_min: +$('#tDur').value, descricao: $('#tDesc').value.trim() || null, ...pegarIds() };
+      if (novo) await db.criarTarefa({ ...o, dono: S.eu.id }); else await db.atualizarTarefa(t.id, o);
+      if (o.pdv_id) await atualizarUm(o.pdv_id); if (t.pdv_id && t.pdv_id !== o.pdv_id) await atualizarUm(t.pdv_id);
+      toast('Tarefa salva'); fim(); } catch (e) { toast(e.message); } };
+  if (!novo) {
+    $('#tFeita').onclick = async () => { try { await db.atualizarTarefa(t.id, { concluida: !t.concluida, concluida_em: t.concluida ? null : new Date().toISOString() }); if (t.pdv_id) await atualizarUm(t.pdv_id); toast(t.concluida ? 'Tarefa reaberta' : 'Tarefa concluída'); fim(); } catch (e) { erro(e); } };
+    $('#tDel').onclick = async () => { try { await db.excluirTarefa(t.id); if (t.pdv_id) await atualizarUm(t.pdv_id); toast('Tarefa excluída'); fim(); } catch (e) { erro(e); } };
+  }
+}
+window.modalTarefa = modalTarefa;
+function listaTarefas(ts, vazio) {
+  const h = hojeISO();
+  return ts.length ? ts.map(t => `<div class="trow ${t.concluida ? 'feita' : ''}" data-tid="${t.id}"><i style="background:${TIPOS[t.tipo]?.c}"></i><div style="flex:1"><b>${esc(t.titulo)}</b><br><small style="color:${!t.concluida && ymd(t.data) < h ? '#B8402A' : 'var(--mute)'}">${dstr(ymd(t.data) + 'T12:00')}${t.hora ? ' · ' + String(t.hora).slice(0, 5) : ''} · ${TIPOS[t.tipo]?.n || ''}${t.concluida ? ' · concluída' : !t.concluida && ymd(t.data) < h ? ' · atrasada' : ''}</small></div></div>`).join('') : `<p class="empty" style="padding:6px 0">${vazio}</p>`;
 }
 
 /* =================== carteira =================== */
@@ -403,7 +561,7 @@ function telaAbertura() {
   <div class="row" style="justify-content:space-between;margin-top:14px;flex-wrap:wrap"><div><b id="oUn">0</b> unidades · <span id="oInfo" style="color:var(--soft)"></span></div><div style="font-family:Fraunces,Georgia,serif;font-size:26px" id="oTot">R$ 0,00</div></div>
   <label class="lb">Observação</label><textarea id="oObs" rows="2" style="width:100%"></textarea>
   <div class="row" style="margin-top:12px;justify-content:flex-end"><button class="btn pri" id="oSave" ${p ? '' : 'disabled'}>Lançar venda</button></div></div></div></section>`;
-  const fill = () => { const e = +$('#oExp').value; let l = ''; $('#oItens').innerHTML = S.base.produtos.map(pr => { const h = pr.linha !== l ? `<div style="grid-column:1/-1;font-weight:700;margin-top:6px;color:var(--car-d)">${esc(l = pr.linha)}</div>` : ''; return h + `<div class="row" style="justify-content:space-between"><span>${esc(pr.sabor)}</span><input type="number" min="0" class="oq" data-p="${pr.id}" value="${alvo(e, pr.id)}" style="width:64px"></div>`; }).join(''); calc(); };
+  const fill = () => { const e = +$('#oExp').value; let l = ''; $('#oItens').innerHTML = S.base.produtos.map(pr => { const h = pr.linha !== l ? `<div style="grid-column:1/-1;font-weight:700;margin-top:6px;color:var(--car-d)">${esc(l = pr.linha)}</div>` : ''; return h + `<div class="row" style="justify-content:space-between"><span>${esc(pr.sabor)}</span>${stepper('oq', alvo(e, pr.id), false, `data-p="${pr.id}"`)}</div>`; }).join(''); ligarSteppers($('#oItens')); calc(); };
   const cond = () => document.querySelector('input[name=oc]:checked').value;
   const calc = () => { const un = [...document.querySelectorAll('.oq')].reduce((a, i) => a + (+i.value || 0), 0), pre = +$('#oPre').value || 0, c = cond(), bon = c === 'Bonificação na abertura' ? Math.min(un, +$('#oBonQ').value || 0) : 0, tot = (un - bon) * pre;
     $('#oUn').textContent = un; $('#oTot').textContent = c === 'Consignado' ? 'R$ 0,00 agora' : brl(tot);
@@ -480,6 +638,13 @@ async function telaRota() {
 }
 
 /* =================== reposição (contagem) =================== */
+function stepper(cls, v, peq, attrs = '') { return `<div class="stp ${peq ? 'sm' : ''}"><button type="button" data-d="-1" aria-label="menos">−</button><input type="number" min="0" inputmode="numeric" class="${cls}" value="${v}" ${attrs}><button type="button" data-d="1" aria-label="mais">+</button></div>`; }
+function ligarSteppers(raiz) {
+  if (!raiz || raiz._stp) return; raiz._stp = true;
+  raiz.addEventListener('click', e => { const b = e.target.closest('.stp button'); if (!b) return; const i = b.parentElement.querySelector('input');
+    i.value = Math.max(0, (+i.value || 0) + +b.dataset.d); i.dispatchEvent(new Event('input', { bubbles: true })); });
+  raiz.addEventListener('focusin', e => { if (e.target.matches('.stp input')) e.target.select(); });
+}
 async function telaReposicao() {
   const p = S.pdvs.find(x => x.id === S.contando);
   if (!p) { $('#main').innerHTML = '<section class="view on"><div class="empty">Escolha um PDV na <b>Rota de hoje</b> para começar.</div></section>'; return; }
@@ -488,28 +653,35 @@ async function telaReposicao() {
   const ex = expo(p.expositor_id), cons = p.condicao === 'Consignado';
   let h = `<section class="view on"><div class="count"><div class="toolbar"><h2 style="font-family:Fraunces,Georgia,serif;margin:0">${esc(p.nome)}</h2><span class="badge">Expositor ${esc(ex.nome)} · ${ex.capacidade} un.</span></div>
   <p style="color:var(--soft);margin-top:0">Conte o que tem de cada sabor no expositor, inclusive o que vai ser trocado. O sistema sugere quanto repor e calcula o sell-out.</p>
-  <table id="ct"><tr><th>Sabor</th><th>Deixado na última visita</th><th>Encontrado agora</th><th>Troca</th><th>Sell-out</th><th>Repor</th><th>Valor</th></tr>`;
+  <div id="ct" class="contagem">`;
   let l = '';
-  S.base.produtos.forEach(pr => { if (pr.linha !== l) { l = pr.linha; h += `<tr class="grp"><td colspan="7">${esc(l)}</td></tr>`; }
-    h += `<tr data-p="${pr.id}" data-ant="${ant[pr.id] ?? 0}" data-alvo="${alvo(ex.id, pr.id)}" data-pre="${pr.preco}"><td>${esc(pr.sabor)}</td><td>${ant[pr.id] ?? 0}</td><td><input type="number" min="0" class="enc"></td><td><input type="number" min="0" class="trc" value="0"></td><td class="so">—</td><td><input type="number" min="0" class="rep" value="0"></td><td class="val">—</td></tr>`; });
-  h += `</table><div class="panel" style="margin-top:14px"><div class="row" style="justify-content:space-between;flex-wrap:wrap"><div><b id="tUn">0 un.</b> a repor · sell-out <b id="tSo">0 un.</b> · trocas <b id="tTr">0</b></div><div style="font-family:Fraunces,Georgia,serif;font-size:24px" id="tVal">R$ 0,00</div></div>
+  S.base.produtos.forEach(pr => { if (pr.linha !== l) { l = pr.linha; h += `<div class="lingrp">${esc(l)}</div>`; }
+    const a = ant[pr.id] ?? 0;
+    h += `<div class="lin" data-p="${pr.id}" data-ant="${a}" data-alvo="${alvo(ex.id, pr.id)}" data-pre="${pr.preco}">
+     <div class="sab"><b>${esc(pr.sabor)}</b><small>deixado: ${a}</small></div>
+     <div class="cel"><small>Encontrado</small>${stepper('enc', a)}</div>
+     <div class="cel"><small>Troca</small>${stepper('trc', 0, true)}</div>
+     <div class="cel"><small>Repor</small>${stepper('rep', 0)}</div>
+     <div class="res"><small>sell-out</small><b class="so">0</b><small class="val">—</small></div></div>`; });
+  h += `</div><div class="panel totpanel"><div class="row" style="justify-content:space-between;flex-wrap:wrap"><div><b id="tUn">0 un.</b> a repor · sell-out <b id="tSo">0 un.</b> · trocas <b id="tTr">0</b></div><div style="font-family:Fraunces,Georgia,serif;font-size:24px" id="tVal">R$ 0,00</div></div>
   ${cons ? `<div class="esteira" style="margin-top:12px"><b>Cliente em consignado.</b><p>Cobra só o que foi vendido desde a última visita: <b id="tCons">R$ 0,00</b>.</p></div>` : ''}
   <h3 style="margin:14px 0 6px">Pagamento <small style="font-weight:400;color:var(--mute)">· combinado: ${esc(p.condicao || '—')}</small></h3><div class="pay">${CONDICOES.slice(0, 5).map(c => `<label><input type="radio" name="pg" value="${c}" ${(p.condicao === c || (!CONDICOES.slice(0, 5).includes(p.condicao) && c === 'À vista · dinheiro')) ? 'checked' : ''}> ${c}</label>`).join('')}</div>
   <div class="row"><button class="btn" id="bVoltar">Voltar</button><button class="btn pri" id="fechar">Fechar reposição</button></div></div></div></section>`;
   $('#main').innerHTML = h;
-  const linhas = () => [...document.querySelectorAll('#ct tr[data-p]')];
+  const linhas = () => [...document.querySelectorAll('#ct .lin[data-p]')];
   const calc = () => { let un = 0, so = 0, tr = 0, val = 0, vc = 0;
     linhas().forEach(r => { const a = +r.dataset.ant, enc = r.querySelector('.enc').value, t = +r.querySelector('.trc').value || 0, pre = +r.dataset.pre;
       if (enc !== '' && !r.querySelector('.rep').dataset.mexeu) r.querySelector('.rep').value = Math.max(0, +r.dataset.alvo - (+enc - t));
       const rep = +r.querySelector('.rep').value || 0, s = enc === '' ? null : Math.max(0, a - +enc);
-      r.querySelector('.so').textContent = s === null ? '—' : s; r.querySelector('.val').textContent = rep ? brl(rep * pre) : '—';
+      r.querySelector('.so').textContent = s === null ? '—' : s; r.querySelector('.val').textContent = rep ? 'repor ' + brl(rep * pre) : '—';
+      r.classList.toggle('vendeu', (s || 0) > 0);
       un += rep; so += s || 0; tr += t; val += rep * pre; vc += (s || 0) * pre; });
     if (cons) { val = vc; $('#tCons').textContent = brl(vc); }
     $('#tUn').textContent = un + ' un.'; $('#tSo').textContent = so + ' un.'; $('#tTr').textContent = tr; $('#tVal').textContent = brl(val); return { un, so, tr, val }; };
   $('#ct').addEventListener('input', e => { if (e.target.classList.contains('rep')) e.target.dataset.mexeu = 1; calc(); });
+  ligarSteppers($('#ct')); calc();
   $('#bVoltar').onclick = () => irPara('rota');
   $('#fechar').onclick = async () => {
-    if (linhas().some(r => r.querySelector('.enc').value === '')) return toast('Preencha o "encontrado agora" de todos os sabores (0 se não tinha).');
     const t = calc(), pg = document.querySelector('input[name=pg]:checked').value;
     const contagens = linhas().map(r => ({ produto_id: +r.dataset.p, deixado_anterior: +r.dataset.ant, encontrado: +r.querySelector('.enc').value, troca: +r.querySelector('.trc').value || 0, reposto: +r.querySelector('.rep').value || 0 }));
     const itens = cons ? linhas().map(r => ({ produto_id: +r.dataset.p, quantidade: Math.max(0, +r.dataset.ant - +r.querySelector('.enc').value), preco_unit: +r.dataset.pre, bonificado: 0 }))
@@ -524,7 +696,7 @@ async function telaReposicao() {
         const novo = Number(n.aval_media) >= r.meta_minima_sellout ? 'ativo' : 'revisao';
         await db.atualizarPdv(p.id, { etapa: novo }); extra = novo === 'ativo' ? ' Avaliação concluída: virou cliente ativo.' : ' Avaliação abaixo da meta: foi para revisão comercial.';
       } else if (n.etapa === 'avaliacao') extra = ` Avaliação: ${n.aval_reposicoes} de ${r.reposicoes}.`;
-      await recarregar(); toast('Reposição registrada.' + extra); S.contando = null; irPara('rota');
+      await recarregar(); await avaliarRisco(); toast('Reposição registrada.' + extra); S.contando = null; irPara('rota');
     } catch (e) { erro(e); $('#fechar').disabled = false; }
   };
 }
@@ -637,7 +809,7 @@ async function telaPerfil() {
   const p = S.pdvs.find(x => x.id === S.perfilId);
   if (!p) { $('#main').innerHTML = '<section class="view on"><div class="empty">Negócio não encontrado.</div></section>'; return; }
   $('#main').innerHTML = '<section class="view on"><div class="loading">Carregando o histórico…</div></section>';
-  let h; try { h = await db.historico(p.id); } catch (e) { return erro(e); }
+  let h, tars; try { [h, tars] = await Promise.all([db.historico(p.id), db.tarefasDoPdv(p.id)]); } catch (e) { return erro(e); }
   const c = S.contatos.find(x => x.id === p.contato_id);
   const ev = [];
   h.etapas.forEach(e => ev.push({ em: e.em, cor: etapa(e.para).c, t: e.de ? `Passou de <b>${etapa(e.de).n}</b> para <b>${etapa(e.para).n}</b>` : `Negócio criado como <b>${etapa(e.para).n}</b>`, quem: e.perfis?.nome, obs: e.motivo }));
@@ -675,14 +847,17 @@ async function telaPerfil() {
      <p style="margin:8px 0;line-height:1.7">${c.telefone ? `📞 ${esc(c.telefone)}<br>` : ''}${c.email ? `✉️ ${esc(c.email)}<br>` : ''}</p>
      <div class="row" style="flex-wrap:wrap">${linkWpp(c.whatsapp || c.telefone) ? `<a class="btn car" style="text-decoration:none" target="_blank" rel="noopener" href="${linkWpp(c.whatsapp || c.telefone)}">WhatsApp ↗</a>` : ''}<button class="btn" id="pVerContato">Abrir contato</button><button class="btn" id="pTrocarContato">Trocar</button></div>`
       : `<p class="empty" style="padding:6px 0">Nenhum contato vinculado.</p><button class="btn pri" id="pTrocarContato">Vincular contato</button>`}</div>
+    <div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">Próximas ações</h3><button class="btn pri" id="pNovaTar" style="padding:5px 10px">+ Nova</button></div><div style="margin-top:8px">${listaTarefas(tars.filter(t => !t.concluida), 'Nenhuma ação marcada.')}</div>${tars.some(t => t.concluida) ? `<details style="margin-top:6px"><summary style="cursor:pointer;color:var(--mute);font-size:12px">Concluídas (${tars.filter(t => t.concluida).length})</summary>${listaTarefas(tars.filter(t => t.concluida), '')}</details>` : ''}</div>
     <div class="panel"><h3>Resumo</h3><div class="kv" style="margin:0"><div><small>Criado em</small><b>${dstr(p.criado_em)}</b></div><div><small>Visitas</small><b>${h.visitas.length}</b></div><div><small>Pedidos</small><b>${h.pedidos.length}</b></div><div><small>Total pedido</small><b>${brl(h.pedidos.reduce((a, o) => a + Number(o.valor), 0))}</b></div></div></div>
     <div class="panel"><button class="btn" id="pExcluir" style="width:100%;color:#7A2414">Excluir negócio</button><small style="color:var(--mute);display:block;margin-top:6px">Use para apagar cadastro duplicado ou errado. Negócio com pedidos não pode ser excluído: mude para Inativo.</small></div>
    </div></div></div></section>`;
   $('#pVoltar').onclick = () => irPara(S.voltar || 'carteira');
+  $('#pNovaTar').onclick = () => modalTarefa({ data: hojeISO(), pdv_id: p.id, contato_id: p.contato_id });
+  document.querySelectorAll('[data-tid]').forEach(el => el.onclick = () => modalTarefa(tars.find(t => t.id === el.dataset.tid)));
   if ($('#pComprar')) $('#pComprar').onclick = () => { S.abPdv = p.id; irPara('abertura'); };
   $('#pVisita').onclick = () => visitaRapida(p, telaPerfil);
   ligarComentario(telaPerfil);
-  $('#pEtapa').onchange = async e => { try { await db.atualizarPdv(p.id, { etapa: e.target.value }); await atualizarUm(p.id); toast('Etapa: ' + etapa(e.target.value).n); telaPerfil(); } catch (er) { erro(er); } };
+  $('#pEtapa').onchange = e => mudarEtapa(p.id, e.target.value, telaPerfil);
   $('#pMapa').onclick = () => { S.sel = p.id; irPara('mapa'); if (p.lat) mapa.setView([p.lat, p.lng], 16); };
   $('#pAjustar').onclick = () => { irPara('mapa'); if (p.lat) mapa.setView([p.lat, p.lng], 17); marcando = true; $('#hint').textContent = 'Toque no lugar exato de ' + p.nome; $('#hint').style.display = 'block';
     aoMarcar = async ([lng, lat]) => { try { const g = await geoReverso(lat, lng); await db.atualizarPdv(p.id, { lat, lng, geo_precisao: 'manual', regiao: await garantirRegiao(lng, lat, g.cidade || p.cidade), endereco: g.rua || p.endereco, bairro: g.bairro || p.bairro, cidade: g.cidade || p.cidade }); $('#hint').textContent = 'Toque no mapa onde fica o ponto'; await atualizarUm(p.id); toast('Localização ajustada'); } catch (e) { erro(e); } }; };
@@ -723,16 +898,20 @@ function formContato(c) {
     try { if (c) { const n = await db.atualizarContato(c.id, o); Object.assign(c, n); } else { S.contatos.push(await db.criarContato({ ...o, criado_por: S.eu.id })); }
       fecharModal(); toast('Contato salvo'); S.aba === 'contato' ? telaContato() : telaContatos(); } catch (e) { erro(e); } };
 }
-function telaContato() {
+async function telaContato() {
   const c = S.contatos.find(x => x.id === S.contatoId); if (!c) return irPara('contatos');
+  let tars = []; try { tars = await db.tarefasDoContato(c.id); } catch (e) { }
   const negs = S.pdvs.filter(p => p.contato_id === c.id), w = linkWpp(c.whatsapp || c.telefone);
   $('#main').innerHTML = `<section class="view on"><div class="dash" style="max-width:900px"><div class="row"><button class="btn" id="cVoltar">← Contatos</button></div>
   <div class="panel"><small style="color:var(--mute)">Contato</small><h2 style="font-family:Fraunces,Georgia,serif;margin:4px 0">${esc(c.nome)}</h2><div style="color:var(--soft)">${esc([c.cargo, c.empresa].filter(Boolean).join(' · '))}</div>
    <div class="kv"><div><small>Telefone</small><b>${esc(c.telefone || '—')}</b></div><div><small>WhatsApp</small><b>${esc(c.whatsapp || '—')}</b></div><div style="grid-column:1/-1"><small>E-mail</small><b style="font-size:14px">${esc(c.email || '—')}</b></div></div>
    ${c.observacao ? `<p style="color:var(--soft)">${esc(c.observacao)}</p>` : ''}
    <div class="row">${w ? `<a class="btn car" style="text-decoration:none" target="_blank" rel="noopener" href="${w}">WhatsApp ↗</a>` : ''}<button class="btn" id="cEditar">Editar</button></div></div>
+  <div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">Tarefas</h3><button class="btn pri" id="cNovaTar" style="padding:5px 10px">+ Nova</button></div><div style="margin-top:8px">${listaTarefas(tars, 'Nenhuma tarefa com este contato.')}</div></div>
   <div class="panel"><h3>Negócios deste contato</h3>${negs.map(p => `<div class="stop" data-id="${p.id}" style="cursor:pointer"><div class="info"><b>${esc(p.nome)}</b><br><small style="color:var(--mute)">${esc(p.canal || '')} · ${esc(p.cidade || '')}</small></div><span class="badge st" style="background:${etapa(p.etapa).c}">${etapa(p.etapa).n}</span></div>`).join('') || '<p class="empty">Nenhum negócio vinculado.</p>'}</div></div></section>`;
   $('#cVoltar').onclick = () => irPara('contatos'); $('#cEditar').onclick = () => formContato(c);
+  $('#cNovaTar').onclick = () => modalTarefa({ data: hojeISO(), contato_id: c.id }, telaContato);
+  document.querySelectorAll('[data-tid]').forEach(el => el.onclick = () => modalTarefa(tars.find(t => t.id === el.dataset.tid), telaContato));
   document.querySelectorAll('.stop[data-id]').forEach(d => d.onclick = () => abrirPerfil(d.dataset.id));
 }
 
