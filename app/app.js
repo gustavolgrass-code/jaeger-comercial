@@ -131,7 +131,7 @@ window.irPara = irPara;
 let aoMarcar = null, mapa = null, camada = null, camadaSug = null, marcando = false, mostrarReg = true;
 function telaMapa() {
   $('#main').innerHTML = `<section class="view on" style="display:flex;height:100%"><div id="mapa"><div id="lmap"></div>
-   <div class="maptools"><button class="btn pri" id="bAdd">+ Cadastrar ponto</button><button class="btn car" id="bSug">Buscar prospects aqui</button>
+   <div class="maptools"><button class="btn pri" id="bAdd">+ Cadastrar ponto</button><button class="btn car" id="bSug">Buscar prospects aqui</button><button class="btn" id="bPend">Reposições pendentes <b id="nPend"></b></button><button class="btn" id="bLoc">📍 Minha localização</button>
    <select id="fEt"><option value="">Todas as etapas</option>${ETAPAS.map(e => `<option value="${e.k}">${e.n}</option>`).join('')}</select>
    <select id="fReg"><option value="">Todas as regiões</option>${S.base.regioes.map(r => `<option value="${r.codigo}">${r.codigo} · ${esc(r.nome)}</option>`).join('')}</select>
    <label class="regchk"><input type="checkbox" id="tReg" ${mostrarReg ? 'checked' : ''}> Regiões</label></div>
@@ -144,6 +144,9 @@ function telaMapa() {
   mapa.on('click', e => { if (!marcando) return; marcando = false; $('#hint').style.display = 'none'; const f = aoMarcar || (ll => abrirCadastro(ll)); aoMarcar = null; f([e.latlng.lng, e.latlng.lat]); });
   $('#bAdd').onclick = () => abrirCadastro(null);
   $('#bSug').onclick = buscarProspects;
+  $('#bPend').onclick = () => { S.modoPend = !S.modoPend; S.sel = null; desenhar(); painel(); };
+  $('#bLoc').onclick = () => alternarLocalizacao();
+  if (S.rastreando) { mostrarEu(false); $('#bLoc').classList.add('pri'); }
   $('#fEt').onchange = $('#fReg').onchange = desenhar;
   $('#tReg').onchange = e => { mostrarReg = e.target.checked; desenhar(); };
   desenhar(); painel();
@@ -157,7 +160,10 @@ function desenhar() {
   camada.clearLayers();
   if (mostrarReg) S.base.regioes.forEach(r => { const b = r.limites; if (!b) return; L.rectangle([[b[1], b[0]], [b[3], b[2]]], { color: r.cor, weight: 2, dashArray: '8 6', fillOpacity: .04, interactive: false }).addTo(camada).bindTooltip(`${r.codigo} · ${r.nome}`, { permanent: false }); });
   const fe = $('#fEt').value, fr = $('#fReg').value;
-  S.pdvs.filter(p => p.lat && (!fe || p.etapa === fe) && (!fr || p.regiao === fr)).forEach(p => {
+  const pend = repPendentes();
+  $('#nPend').textContent = pend.length ? `(${pend.length})` : '';
+  $('#bPend').classList.toggle('car', !!S.modoPend);
+  (S.modoPend ? pend : S.pdvs).filter(p => p.lat && (!fe || p.etapa === fe) && (!fr || p.regiao === fr)).forEach(p => {
     const m = L.marker([p.lat, p.lng], { icon: pino(etapa(p.etapa).c, S.sel === p.id ? 1.35 : p.classe === 'A' ? 1.15 : 1), zIndexOffset: S.sel === p.id ? 1000 : 0 });
     m.on('click', () => { S.sel = p.id; desenhar(); painel(); });
     m.bindTooltip(esc(p.nome)); m.addTo(camada);
@@ -180,9 +186,48 @@ function caixaEsteira(p) {
   if (p.etapa === 'revisao') return `<div class="esteira rev"><h3 style="margin:0;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:#A23B72">Revisão comercial</h3><p>Fechou a avaliação com sell-out médio de <b>${dec(p.aval_media)} un.</b>, abaixo da meta. O que fazer?</p><div class="actions" style="margin-top:8px"><button class="btn" data-rev="preco">Negociar preço e reavaliar</button><button class="btn" data-rev="minimo">Subir pedido mínimo e reavaliar</button><button class="btn" data-rev="retirar">Recolher expositor</button></div></div>`;
   return '';
 }
+/* ---------- reposições pendentes ---------- */
+function repPendentes() {
+  return S.pdvs.filter(p => ROTA_ETAPAS.includes(p.etapa) && (!p.proxima_reposicao || atraso(p) >= 0))
+    .sort((a, b) => (atraso(b) ?? 999) - (atraso(a) ?? 999));
+}
+function listaPendentes(s) {
+  const l = repPendentes();
+  s.classList.add('open');
+  s.innerHTML = `<button class="btn" style="float:right;padding:4px 10px" id="xPend">✕</button><h2>Reposições pendentes</h2>
+  <p style="color:var(--soft);margin-top:0">${l.length} cliente${l.length === 1 ? '' : 's'} com reposição para hoje ou atrasada. O mapa mostra só eles.</p>
+  ${l.map(p => { const a = atraso(p); return `<div class="stop" style="padding:10px;align-items:flex-start"><div class="info"><b>${esc(p.nome)}</b><br><small style="color:var(--mute)">${p.regiao || '—'} · ${esc(p.bairro || p.cidade || '')} · ${etapa(p.etapa).n}</small><br><span class="badge" style="background:${(a ?? 1) > 0 ? '#F3D6CF' : '#F7E9DD'};margin-top:4px;display:inline-block">${prazoTxt(p)}${p.proxima_reposicao ? ' · era ' + dstr(p.proxima_reposicao) : ''}</span></div>
+   <div style="display:flex;flex-direction:column;gap:4px"><button class="btn" data-ver="${p.id}" style="padding:5px 10px">Ver</button><button class="btn pri" data-repor="${p.id}" style="padding:5px 10px">Repor</button></div></div>`; }).join('') || '<p class="empty">Nada pendente. 🎉</p>'}`;
+  $('#xPend').onclick = () => { S.modoPend = false; desenhar(); painel(); };
+  s.querySelectorAll('[data-ver]').forEach(b => b.onclick = () => { const p = S.pdvs.find(x => x.id === b.dataset.ver); S.modoPend = false; S.sel = p.id; desenhar(); painel(); if (p.lat) mapa.setView([p.lat, p.lng], 16); });
+  s.querySelectorAll('[data-repor]').forEach(b => b.onclick = () => { S.contando = b.dataset.repor; S.modoPend = false; lado = 'operacao'; $('#rG').classList.remove('on'); $('#rM').classList.add('on'); irPara('reposicao'); });
+}
+
+/* ---------- minha localização em tempo real ---------- */
+let euMarcador = null, euCirculo = null;
+const iconeEu = () => L.icon({ iconUrl: 'img/boneco.png', iconSize: [37, 80], iconAnchor: [18, 78], tooltipAnchor: [0, -70] });
+function mostrarEu(centralizar) {
+  if (!S.minhaPos || !mapa) return;
+  const ll = [S.minhaPos.lat, S.minhaPos.lng];
+  if (!euMarcador || !mapa.hasLayer(euMarcador)) { euMarcador = L.marker(ll, { icon: iconeEu(), zIndexOffset: 2000, interactive: true }).bindTooltip('Você está aqui').addTo(mapa); euCirculo = L.circle(ll, { radius: S.minhaPos.prec, color: '#D08A3C', weight: 1, fillOpacity: .08, interactive: false }).addTo(mapa); }
+  else { euMarcador.setLatLng(ll); euCirculo.setLatLng(ll).setRadius(S.minhaPos.prec); }
+  if (centralizar) mapa.setView(ll, Math.max(mapa.getZoom(), 15));
+}
+function alternarLocalizacao() {
+  if (S.rastreando) { navigator.geolocation.clearWatch(S.watchId); S.rastreando = false; if (euMarcador) { mapa.removeLayer(euMarcador); mapa.removeLayer(euCirculo); euMarcador = null; } $('#bLoc').classList.remove('pri'); toast('Localização desligada'); return; }
+  if (!navigator.geolocation) return toast('Este aparelho não informa a localização.');
+  let primeira = true; toast('Buscando sua localização…');
+  S.rastreando = true;
+  S.watchId = navigator.geolocation.watchPosition(g => { S.minhaPos = { lat: g.coords.latitude, lng: g.coords.longitude, prec: g.coords.accuracy }; if (S.aba === 'mapa') mostrarEu(primeira); primeira = false; },
+    e => { toast(e.code === 1 ? 'Permita o acesso à localização no navegador para usar essa função.' : 'Não foi possível obter a localização.'); navigator.geolocation.clearWatch(S.watchId); S.rastreando = false; $('#bLoc')?.classList.remove('pri'); },
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
+  $('#bLoc').classList.add('pri');
+}
+
 function painel() {
   const s = $('#side'); if (!s) return;
   const p = S.pdvs.find(x => x.id === S.sel);
+  if (!p && S.modoPend) return listaPendentes(s);
   if (!p) { s.classList.remove('open'); s.innerHTML = `<div class="empty"><b>Selecione um ponto no mapa.</b><br>A cor mostra a etapa do funil.<br><br><b>+ Cadastrar ponto</b>: pela sua localização, marcando no mapa ou colando o link do Google Maps.<br><b>Buscar prospects aqui</b>: procura estabelecimentos na área visível do mapa.</div>`; return; }
   s.classList.add('open');
   const podeComprar = ['visitado', 'negociacao'].includes(p.etapa);
@@ -357,7 +402,7 @@ function telaAbertura() {
   <h3 style="margin:16px 0 6px">Itens do primeiro pedido</h3><div id="oItens" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:6px 14px"></div>
   <div class="row" style="justify-content:space-between;margin-top:14px;flex-wrap:wrap"><div><b id="oUn">0</b> unidades · <span id="oInfo" style="color:var(--soft)"></span></div><div style="font-family:Fraunces,Georgia,serif;font-size:26px" id="oTot">R$ 0,00</div></div>
   <label class="lb">Observação</label><textarea id="oObs" rows="2" style="width:100%"></textarea>
-  <div class="row" style="margin-top:12px;justify-content:flex-end"><button class="btn pri" id="oSave" ${p ? '' : 'disabled'}>Fechar abertura</button></div></div></div></section>`;
+  <div class="row" style="margin-top:12px;justify-content:flex-end"><button class="btn pri" id="oSave" ${p ? '' : 'disabled'}>Lançar venda</button></div></div></div></section>`;
   const fill = () => { const e = +$('#oExp').value; let l = ''; $('#oItens').innerHTML = S.base.produtos.map(pr => { const h = pr.linha !== l ? `<div style="grid-column:1/-1;font-weight:700;margin-top:6px;color:var(--car-d)">${esc(l = pr.linha)}</div>` : ''; return h + `<div class="row" style="justify-content:space-between"><span>${esc(pr.sabor)}</span><input type="number" min="0" class="oq" data-p="${pr.id}" value="${alvo(e, pr.id)}" style="width:64px"></div>`; }).join(''); calc(); };
   const cond = () => document.querySelector('input[name=oc]:checked').value;
   const calc = () => { const un = [...document.querySelectorAll('.oq')].reduce((a, i) => a + (+i.value || 0), 0), pre = +$('#oPre').value || 0, c = cond(), bon = c === 'Bonificação na abertura' ? Math.min(un, +$('#oBonQ').value || 0) : 0, tot = (un - bon) * pre;
@@ -380,7 +425,7 @@ function telaAbertura() {
         itens,
         patch: { etapa: 'avaliacao', avaliacao_inicio: hoje.toISOString().slice(0, 10), expositor_id: +$('#oExp').value, condicao: c, pedido_minimo: +$('#oMin').value || 150, cadencia_dias: $('#oCad').value ? +$('#oCad').value : null } });
       await atualizarUm(p.id); const n = S.pdvs.find(x => x.id === p.id);
-      toast(`Abertura de ${p.nome} registrada. Primeira reposição em ${dstr(n.proxima_reposicao)}.`); S.abPdv = null; telaAbertura();
+      toast(`Venda lançada para ${p.nome}. Primeira reposição em ${dstr(n.proxima_reposicao)}.`); S.abPdv = null; telaAbertura();
     } catch (e) { erro(e); $('#oSave').disabled = false; }
   };
 }
