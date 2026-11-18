@@ -111,3 +111,4 @@ export async function pedidosEntre(de, ate, tipo) { return ok(await sb.from('ped
 export async function obterPlano(dono, data) { return ok(await sb.from('planos').select('*').eq('dono', dono).eq('data', data).maybeSingle()); }
 export async function salvarPlano(dono, data, paradas) { return ok(await sb.from('planos').upsert({ dono, data, paradas, atualizado_em: new Date().toISOString() }).select().single()); }
 export async function visitasDoDia(dia) { const de = new Date(dia + 'T00:00:00'); return ok(await sb.from('visitas').select('id, pdv_id, em, resultado, tipo').gte('em', de.toISOString()).lt('em', new Date(+de + 864e5).toISOString())); }
+export async function criarPdvs(lista) { const out = []; for (let i = 0; i < lista.length; i += 300) out.push(...ok(await sb.from('pdvs').insert(lista.slice(i, i + 300)).select('id'))); return out; }

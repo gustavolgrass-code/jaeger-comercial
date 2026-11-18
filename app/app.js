@@ -1027,6 +1027,55 @@ function baixarModelo(k) {
   const csv = '﻿' + m.cols.join(';') + '\n' + m.ex.map(q).join(';') + '\n';
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })); a.download = `modelo_${k}.csv`; document.body.appendChild(a); a.click(); a.remove();
 }
+
+/* ---- importação direta do Google Maps (arquivo do Outscraper) ---- */
+const GMAPS_CANAL = [[/padaria|panificadora/, 'Padaria'], [/confeitaria|doceria|loja de doces|bolo/, 'Confeitaria'], [/cafeteria|cafe/, 'Cafeteria'],
+  [/minimercado|mercearia|supermercado|mercado|armazem|emporio|atacad/, 'Minimercado'], [/hortifruti|fruteira|quitanda|sacolao/, 'Fruteira'],
+  [/conveniencia|posto de (gasolina|combustivel)/, 'Conveniência'], [/cantina/, 'Cantina'],
+  [/escola|colegio|faculdade|universidade|curso|cursinho|ensino|educa/, 'Escola / faculdade'],
+  [/lanchonete|lancheria|hamburgueria|pastelaria|pastel|cachorro|lanche|acai|sorvet/, 'Lancheria'],
+  [/restaurante|buffet|pizzaria|churrascaria|comida/, 'Restaurante'], [/bar\b|choperia|cervejaria|pub|boteco/, 'Bar'],
+  [/academia|crossfit|pilates|fitness|ginastica|danca|clube/, 'Academia / clube'], [/farmacia|drogaria/, 'Farmácia'],
+  [/barbearia|salao|cabeleireir|estetica|manicure/, 'Barbearia / salão'], [/lava|oficina|borracharia|auto ?center|mecanic/, 'Serviços automotivos'],
+  [/pet/, 'Pet shop'], [/hospital|clinica|laboratorio/, 'Saúde'], [/hotel|hostel|pousada/, 'Hotel'], [/distribuidora de bebidas|bebidas|adega|tabacaria/, 'Bebidas / tabacaria'],
+  [/banca|loterica|papelaria/, 'Banca / lotérica / papelaria']];
+function canalGoogle(cat) { const n = norm(cat); const m = GMAPS_CANAL.find(([re]) => re.test(n)); return m ? m[1] : (cat || 'Outro'); }
+const campo = (l, ...ks) => { for (const k of ks) if (l[k]) return l[k]; return ''; };
+let gmaps = null;
+function prepararGoogle(linhas, el) {
+  const vistos = new Set(); let fechados = 0, fora = 0, repetidos = 0, jaTem = 0, semCoord = 0; const ok = [];
+  for (const l of linhas) {
+    const lat = parseFloat(String(campo(l, 'latitude', 'lat')).replace(',', '.')), lng = parseFloat(String(campo(l, 'longitude', 'lng', 'lon')).replace(',', '.')), nome = campo(l, 'name', 'nome', 'title');
+    if (!nome || !isFinite(lat) || !isFinite(lng)) { semCoord++; continue; }
+    if (/closed/i.test(campo(l, 'business_status'))) { fechados++; continue; }
+    const cid = campo(l, 'city', 'cidade'); if (cid && !norm(cid).includes('porto alegre')) { fora++; continue; }
+    const id = campo(l, 'google_id', 'place_id', 'cid') || norm(nome) + lat.toFixed(4) + lng.toFixed(4); if (vistos.has(id)) { repetidos++; continue; } vistos.add(id);
+    if (S.pdvs.some(p => p.lat && norm(p.nome) === norm(nome) && distM(p, { lat, lng }) < 150)) { jaTem++; continue; }
+    const cat = campo(l, 'category', 'type', 'categoria') || (campo(l, 'subtypes').split(',')[0] || '').trim();
+    ok.push({ l, nome, lat, lng, cat, canal: canalGoogle(cat + ' ' + campo(l, 'subtypes')) });
+  }
+  const porCanal = {}; ok.forEach(x => { (porCanal[x.canal] = porCanal[x.canal] || { n: 0, cats: {} }).n++; porCanal[x.canal].cats[x.cat] = (porCanal[x.canal].cats[x.cat] || 0) + 1; });
+  gmaps = { ok, porCanal };
+  el.innerHTML = `<p style="margin:6px 0"><b>${ok.length} pontos novos</b> no arquivo · ${repetidos} repetidos no arquivo · ${jaTem} já estão no sistema · ${fechados} fechados · ${fora} fora de Porto Alegre${semCoord ? ` · ${semCoord} sem coordenada` : ''}</p>
+   <p style="color:var(--soft);margin:4px 0 8px">Desmarque o que não quer importar. O canal é sugerido a partir da categoria do Google.</p>
+   <table><tr><th></th><th>Canal</th><th>Categorias do Google</th><th style="text-align:right">Pontos</th></tr>${Object.entries(porCanal).sort((a, b) => b[1].n - a[1].n).map(([c, v]) => `<tr><td><input type="checkbox" data-gc="${esc(c)}" checked style="width:auto"></td><td><b>${esc(c)}</b></td><td><small>${Object.entries(v.cats).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, n]) => `${esc(k || '—')} (${n})`).join(' · ')}</small></td><td style="text-align:right">${v.n}</td></tr>`).join('')}</table>
+   <div class="row" style="margin-top:10px;justify-content:flex-end"><button class="btn pri" id="gImp">Importar selecionados</button></div><div id="gRes"></div>`;
+  const atual = () => { const sel = new Set([...el.querySelectorAll('[data-gc]:checked')].map(c => c.dataset.gc)); return ok.filter(x => sel.has(x.canal)); };
+  el.querySelectorAll('[data-gc]').forEach(c => c.onchange = () => { $('#gImp').textContent = `Importar ${atual().length} selecionados`; });
+  $('#gImp').textContent = `Importar ${ok.length} selecionados`;
+  $('#gImp').onclick = async () => {
+    const lista = atual(); if (!lista.length) return toast('Nada selecionado'); $('#gImp').disabled = true;
+    try {
+      const regs = []; for (const x of lista) regs.push(await garantirRegiao(x.lng, x.lat, 'Porto Alegre'));
+      const linhasDb = lista.map((x, i) => { const l = x.l, tel = campo(l, 'phone', 'telefone'), nota = campo(l, 'rating'), av = campo(l, 'reviews'), site = campo(l, 'site', 'website');
+        return { nome: x.nome, canal: x.canal, endereco: campo(l, 'street', 'endereco') || (campo(l, 'full_address', 'address').split(' - ')[0]) || null, bairro: campo(l, 'borough', 'bairro', 'neighborhood') || null, cidade: 'Porto Alegre', lat: x.lat, lng: x.lng, geo_precisao: 'exata', potencial: 3,
+          observacao: ['Google: ' + (x.cat || '—'), tel ? 'Tel ' + tel : null, nota ? `★ ${nota}${av ? ' (' + av + ')' : ''}` : null, site || null].filter(Boolean).join(' · '), etapa: 'mapeado', origem: 'google_maps', regiao: regs[i], criado_por: S.eu.id }; });
+      $('#gRes').innerHTML = '<small>Gravando…</small>';
+      await db.criarPdvs(linhasDb); await recarregar();
+      $('#gRes').innerHTML = `<p><b>${linhasDb.length} prospects importados como Mapeado.</b> Já aparecem no mapa e nos blocos do modo prospecção.</p>`; toast(`${linhasDb.length} prospects importados`);
+    } catch (e) { erro(e); $('#gImp').disabled = false; }
+  };
+}
 const etapaDe = t => { const n = norm(t); return (ETAPAS.find(e => norm(e.n) === n || e.k === n.replace(/ /g, '')) || ETAPAS.find(e => n && norm(e.n).startsWith(n)) || {}).k; };
 const expoDe = t => { const n = norm(t); return (S.base.expositores.find(e => norm(e.nome) === n || String(e.capacidade) === soDig(t)) || {}).id || null; };
 const canalDe = t => CANAIS.find(c => norm(c) === norm(t)) || (t ? t.trim() : null);
@@ -1035,10 +1084,14 @@ let pendentes = [];
 function telaUploads() {
   $('#main').innerHTML = `<section class="view on"><div class="dash" style="max-width:1000px">
   <div class="panel"><h3>Como funciona</h3><p style="color:var(--soft);margin:0">Baixe o modelo, preencha no Excel ou Google Planilhas e salve como <b>CSV</b>. Pode ser separado por ponto e vírgula (padrão do Excel no Brasil) ou por vírgula. A coluna <b>localizacao</b> segue o padrão <i>RUA JOAO WOBETO, 350 - MATO GRANDE - Canoas/RS - 92320-160</i>. A busca de endereço faz cerca de 1 por segundo, então 100 linhas levam uns 2 a 4 minutos.</p></div>
+  <div class="panel"><h3 style="margin:0">Google Maps (arquivo do Outscraper)</h3><p style="color:var(--soft)">Suba o CSV exportado do Outscraper como veio, sem editar. Os pontos já têm coordenada, então entram na hora como <b>Mapeado</b>. Repetidos, fechados, fora de Porto Alegre e os que já estão no sistema ficam de fora.</p>
+   <div class="row" style="flex-wrap:wrap"><input type="file" accept=".csv,text/csv" id="gArq"><button class="btn pri" id="gLer">Ler arquivo</button></div><div id="gOut" style="margin-top:10px"></div></div>
   ${Object.entries(MODELOS).map(([k, m]) => `<div class="panel"><div class="row" style="justify-content:space-between;flex-wrap:wrap"><h3 style="margin:0">${m.titulo}</h3><button class="btn" data-mod="${k}">Baixar modelo</button></div>
    <p style="color:var(--soft)">${m.desc}</p><p style="font-size:12px;color:var(--mute)">Colunas: ${m.cols.join(' · ')}</p>
    <div class="row" style="flex-wrap:wrap"><input type="file" accept=".csv,text/csv" data-arq="${k}"><button class="btn pri" data-imp="${k}">Importar</button></div><div id="res-${k}" style="margin-top:10px"></div></div>`).join('')}</div></section>`;
   document.querySelectorAll('[data-mod]').forEach(b => b.onclick = () => baixarModelo(b.dataset.mod));
+  $('#gLer').onclick = async () => { const f = $('#gArq').files[0]; if (!f) return toast('Escolha o arquivo CSV do Outscraper'); const linhas = lerCSV(await f.text()); if (!linhas.length) return toast('Arquivo vazio');
+    if (!('latitude' in linhas[0] || 'lat' in linhas[0])) return toast('Não achei a coluna latitude. Exporte em CSV pelo Outscraper.'); prepararGoogle(linhas, $('#gOut')); };
   document.querySelectorAll('[data-imp]').forEach(b => b.onclick = async () => {
     const k = b.dataset.imp, f = document.querySelector(`[data-arq="${k}"]`).files[0];
     if (!f) return toast('Escolha o arquivo CSV');
@@ -1223,6 +1276,7 @@ function painelParada(s) {
   <p style="color:var(--soft);margin:4px 0">${esc([p.endereco, p.bairro].filter(Boolean).join(' · '))}</p>
   ${c ? `<p style="margin:4px 0">Contato: <b>${esc(c.nome)}</b>${c.cargo ? ' (' + esc(c.cargo) + ')' : ''}${c.telefone ? ' · ' + esc(c.telefone) : ''}</p>` : ''}
   ${p.melhor_horario ? `<p style="margin:4px 0">🕘 Melhor horário: <b>${esc(p.melhor_horario)}</b></p>` : ''}${p.fornecedor_atual ? `<p style="margin:4px 0">Fornecedor atual: <b>${esc(p.fornecedor_atual)}</b></p>` : ''}
+  ${p.observacao ? `<p style="margin:4px 0;font-size:13px;color:var(--soft)">${esc(p.observacao)}</p>` : ''}
   ${p.acao_data ? `<p style="margin:4px 0">${chipAcao(p)}</p>` : ''}
   ${r ? `<div class="esteira" style="background:#E3F0E7;border-color:#BFD9C6"><b>Visitado hoje:</b> ${RESULTADOS[r]?.n || 'visita registrada'}</div>` : ''}
   <div class="sect"><h3>Como foi a visita?</h3><div class="resultados">${Object.entries(RESULTADOS).map(([k, v]) => `<button data-res="${k}" style="--c:${v.c}"><span>${v.ic}</span>${v.n}</button>`).join('')}</div></div>
