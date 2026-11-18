@@ -439,6 +439,8 @@ async function telaFunil() {
   const ganPer = aber.filter(o => noPer(o.criado_em) && filtra(pdv(o.pdv_id))), ganHoje = aber.filter(o => ehHoje(o.criado_em)).length;
   const valorPer = ganPer.reduce((s, o) => s + Number(o.valor), 0), dt = diasTrab(per.de, per.ate);
   const valorMes = aber.filter(o => isoDe(new Date(o.criado_em)).slice(0, 7) === h.slice(0, 7)).reduce((s, o) => s + Number(o.valor), 0);
+  const iniSem = isoDe(new Date(+inicioSemana(new Date()) + 12 * 36e5));
+  const cadPer = S.pdvs.filter(p => p.criado_em && noPer(p.criado_em) && filtra(p)).length, cadSem = S.pdvs.filter(p => p.criado_em && isoDe(new Date(p.criado_em)) >= iniSem).length;
   const canais = [...new Set(S.pdvs.map(p => p.canal).filter(Boolean))].sort();
   const per_ = ['hoje', 'Hoje', 'semana', 'Semana', 'mes', 'Mês', 'mespassado', 'Mês passado', '3meses', 'Últimos 3 meses', 'custom', 'Personalizado'];
   $('#main').innerHTML = `<section class="view on" style="flex-direction:column;height:100%">
@@ -453,6 +455,7 @@ async function telaFunil() {
    <div><small>Conversão visitado → ganho</small><b>${conv === null ? '—' : conv + '%'}</b><small>${visitadosPer.length} negócios visitados no período</small></div>
    <div><small>Vendas (ganhos) · ${per.n.toLowerCase()}</small><b>${ganPer.length}</b><small>meta ${M.vendas_dia * dt} (${M.vendas_dia}/dia × ${dt} dias)</small>${barra(ganPer.length, M.vendas_dia * dt)}</div>
    <div><small>Meta diária de vendas</small><b>${ganHoje} / ${M.vendas_dia}</b><small>vendas hoje</small>${barra(ganHoje, M.vendas_dia)}</div>
+   <div><small>Novos pontos cadastrados · ${per.n.toLowerCase()}</small><b>${cadPer}</b><small>esta semana ${cadSem} de ${M.cadastros_semana}</small>${barra(cadSem, M.cadastros_semana)}</div>
    <div><small>Valor em vendas · ${per.n.toLowerCase()}</small><b>${brl(valorPer)}</b><small>no mês: ${brl(valorMes)} de ${brl(M.valor_mes)}</small>${barra(valorMes, M.valor_mes)}</div></div>`
     : `<div class="funilnum"><div><small>Em avaliação</small><b>${S.pdvs.filter(p => p.etapa === 'avaliacao').length}</b></div><div><small>Ativos</small><b>${S.pdvs.filter(p => p.etapa === 'ativo').length}</b></div><div><small>Em risco</small><b>${S.pdvs.filter(p => p.etapa === 'risco').length}</b></div><div><small>Reposições pendentes</small><b>${repPendentes().length}</b></div><div style="flex:2"><small>Regra de risco automático</small><b style="font-size:13px;font-family:inherit">2 sell-outs abaixo de ${regraAval().meta_minima_sellout} un., reposição atrasada > 7 dias ou queda > 50% da média</b></div></div>`}
   <div class="kanban" id="kanban" style="flex:1;min-height:0"></div></section>`;
