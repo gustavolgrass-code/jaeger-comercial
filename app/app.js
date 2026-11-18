@@ -1076,6 +1076,21 @@ function prepararGoogle(linhas, el) {
     } catch (e) { erro(e); $('#gImp').disabled = false; }
   };
 }
+async function localizarSemCoord(el, bt) {
+  bt.disabled = true; const sem = S.pdvs.filter(x => !x.lat); let ok = 0; const aprox = [], falha = [];
+  for (let i = 0; i < sem.length; i++) { const p = sem[i];
+    el.innerHTML = `<div class="prog" style="height:12px"><i style="width:${i / sem.length * 100}%;background:var(--car)"></i></div><small>${i} de ${sem.length} · ${ok} localizados · ${p.nome}</small>`;
+    if (!p.endereco || !p.cidade) { falha.push([p, 'sem endereço']); continue; }
+    const cep = ((p.observacao || '').match(/\d{5}-?\d{3}/) || [''])[0];
+    try { const g = await geocodificar(`${p.endereco}${p.bairro ? ' - ' + p.bairro : ''} - ${p.cidade}/RS${cep ? ' - ' + cep : ''}`);
+      if (!g || g.precisao === 'cidade') { falha.push([p, 'endereço não encontrado']); continue; }
+      await db.atualizarPdv(p.id, { lat: g.lat, lng: g.lng, geo_precisao: g.precisao, regiao: p.regiao || await garantirRegiao(g.lng, g.lat, p.cidade) }); ok++; if (g.precisao !== 'exata') aprox.push(p);
+    } catch (e) { falha.push([p, e.message]); } }
+  await recarregar(); bt.disabled = false;
+  el.innerHTML = `<p><b>${ok} localizados</b>${aprox.length ? ` · ${aprox.length} só pela rua (confira o pino)` : ''}${falha.length ? ` · <b style="color:#7A2414">${falha.length} sem localização</b>` : ''}</p>
+   ${aprox.length || falha.length ? `<table><tr><th>Negócio</th><th>Endereço</th><th>Situação</th><th></th></tr>${[...aprox.map(p => [p, 'aproximado pela rua']), ...falha].map(([p, m]) => `<tr><td>${esc(p.nome)}</td><td>${esc([p.endereco, p.bairro, p.cidade].filter(Boolean).join(' · ') || '—')}</td><td>${esc(m)}</td><td><button class="mini" data-gper="${p.id}">abrir</button></td></tr>`).join('')}</table>` : ''}`;
+  el.querySelectorAll('[data-gper]').forEach(b => b.onclick = () => abrirPerfil(b.dataset.gper));
+}
 const etapaDe = t => { const n = norm(t); return (ETAPAS.find(e => norm(e.n) === n || e.k === n.replace(/ /g, '')) || ETAPAS.find(e => n && norm(e.n).startsWith(n)) || {}).k; };
 const expoDe = t => { const n = norm(t); return (S.base.expositores.find(e => norm(e.nome) === n || String(e.capacidade) === soDig(t)) || {}).id || null; };
 const canalDe = t => CANAIS.find(c => norm(c) === norm(t)) || (t ? t.trim() : null);
@@ -1084,12 +1099,14 @@ let pendentes = [];
 function telaUploads() {
   $('#main').innerHTML = `<section class="view on"><div class="dash" style="max-width:1000px">
   <div class="panel"><h3>Como funciona</h3><p style="color:var(--soft);margin:0">Baixe o modelo, preencha no Excel ou Google Planilhas e salve como <b>CSV</b>. Pode ser separado por ponto e vírgula (padrão do Excel no Brasil) ou por vírgula. A coluna <b>localizacao</b> segue o padrão <i>RUA JOAO WOBETO, 350 - MATO GRANDE - Canoas/RS - 92320-160</i>. A busca de endereço faz cerca de 1 por segundo, então 100 linhas levam uns 2 a 4 minutos.</p></div>
+  ${(() => { const sem = S.pdvs.filter(x => !x.lat); return sem.length ? `<div class="panel"><div class="row" style="justify-content:space-between;flex-wrap:wrap"><h3 style="margin:0">Negócios sem localização no mapa (${sem.length})</h3><button class="btn pri" id="gLoc">Localizar pelos endereços</button></div><p style="color:var(--soft)">Busca a posição de cada um pelo endereço cadastrado (cerca de 2 a 4 segundos por endereço). Os que não forem achados ficam listados para você ajustar no perfil, em "Ajustar localização".</p><div id="gLocRes"></div></div>` : ''; })()}
   <div class="panel"><h3 style="margin:0">Google Maps (arquivo do Outscraper)</h3><p style="color:var(--soft)">Suba o CSV exportado do Outscraper como veio, sem editar. Os pontos já têm coordenada, então entram na hora como <b>Mapeado</b>. Repetidos, fechados, fora de Porto Alegre e os que já estão no sistema ficam de fora.</p>
    <div class="row" style="flex-wrap:wrap"><input type="file" accept=".csv,text/csv" id="gArq"><button class="btn pri" id="gLer">Ler arquivo</button></div><div id="gOut" style="margin-top:10px"></div></div>
   ${Object.entries(MODELOS).map(([k, m]) => `<div class="panel"><div class="row" style="justify-content:space-between;flex-wrap:wrap"><h3 style="margin:0">${m.titulo}</h3><button class="btn" data-mod="${k}">Baixar modelo</button></div>
    <p style="color:var(--soft)">${m.desc}</p><p style="font-size:12px;color:var(--mute)">Colunas: ${m.cols.join(' · ')}</p>
    <div class="row" style="flex-wrap:wrap"><input type="file" accept=".csv,text/csv" data-arq="${k}"><button class="btn pri" data-imp="${k}">Importar</button></div><div id="res-${k}" style="margin-top:10px"></div></div>`).join('')}</div></section>`;
   document.querySelectorAll('[data-mod]').forEach(b => b.onclick = () => baixarModelo(b.dataset.mod));
+  if ($('#gLoc')) $('#gLoc').onclick = () => localizarSemCoord($('#gLocRes'), $('#gLoc'));
   $('#gLer').onclick = async () => { const f = $('#gArq').files[0]; if (!f) return toast('Escolha o arquivo CSV do Outscraper'); const linhas = lerCSV(await f.text()); if (!linhas.length) return toast('Arquivo vazio');
     if (!('latitude' in linhas[0] || 'lat' in linhas[0])) return toast('Não achei a coluna latitude. Exporte em CSV pelo Outscraper.'); prepararGoogle(linhas, $('#gOut')); };
   document.querySelectorAll('[data-imp]').forEach(b => b.onclick = async () => {
