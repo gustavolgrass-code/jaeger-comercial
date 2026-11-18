@@ -1155,7 +1155,7 @@ async function telaProspeccao() {
   if (mapa) { mapa.remove(); mapa = null; }
   mapa = L.map('lmap', { zoomControl: false }).setView([-29.98, -51.18], 12);
   L.control.zoom({ position: 'bottomright' }).addTo(mapa);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom: 20, attribution: '© OpenStreetMap © CARTO' }).addTo(mapa);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(mapa);
   camada = L.layerGroup().addTo(mapa);
   $('#zSair').onclick = () => { S.prosp = false; telaMapa(); };
   $('#zEditar').onclick = () => { PZ.editando = !PZ.editando; PZ.aberto = null; telaProspeccao(); };
