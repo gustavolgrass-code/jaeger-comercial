@@ -248,3 +248,6 @@ tr:hover td{background:var(--sand)}
 .resultados button:first-child span{background:#fff;color:var(--c)}
 .alertas{border-color:#C9D7EA;background:#F4F7FB}
 .alertas .mini{margin-left:4px}
+table.peds{width:100%;border-collapse:collapse;font-size:13px}
+table.peds td{padding:5px 2px;border-bottom:1px solid var(--line);background:none;color:var(--choc)}
+table.peds tr:last-child td{border-bottom:0}

@@ -241,6 +241,7 @@ function painel() {
   ${caixaComentario(p)}
   ${caixaEsteira(p)}
   <div class="sect"><h3>Potencial</h3><div class="stars">${[1, 2, 3, 4, 5].map(i => `<button data-pot="${i}" class="${i <= (p.potencial || 0) ? 'on' : ''}">★</button>`).join('')}</div></div>
+  <div class="sect" id="sPeds"><h3>Últimos pedidos</h3><small style="color:var(--mute)">carregando…</small></div>
   ${ultimos6(p)}
   ${p.cadencia_efetiva ? `<div class="sect"><h3>Reposição</h3><div class="kv" style="margin:0 0 8px"><div><small>Próxima</small><b>${dstr(p.proxima_reposicao)}</b><small>${prazoTxt(p)}</small></div><div><small>Rota</small><b>${p.regiao || '—'} · ${DIAS[(S.base.regioes.find(r => r.codigo === p.regiao) || {}).dia_rota] || '—'}</b><small>${esc(regNome(p.regiao))}</small></div></div>
    <div class="row"><span>Repor a cada</span><select id="sCad"><option value="">padrão da etapa (${cadPadrao()[p.etapa] || '—'} dias)</option>${[7, 10, 14, 21, 28, 30].map(d => `<option value="${d}" ${p.cadencia_dias === d ? 'selected' : ''}>${d} dias</option>`).join('')}</select></div>
@@ -254,6 +255,8 @@ function painel() {
    ${gm ? `<a class="btn" href="${gm}" target="_blank" rel="noopener">Abrir no Google Maps ↗</a>` : ''}</div>`;
   $('#bPerfil').onclick = () => abrirPerfil(p.id);
   $('#xSide').onclick = () => { S.sel = null; desenhar(); painel(); };
+  db.ultimosPedidos(p.id, 5).then(ls => { const el = $('#sPeds'); if (!el || S.sel !== p.id) return;
+    el.innerHTML = `<h3>Últimos pedidos</h3>${ls.length ? `<table class="peds">${ls.map(o => `<tr><td>${new Date(o.criado_em).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })}</td><td><small style="color:var(--mute)">nº ${esc(o.bling_pedido_id || o.numero)}${o.tipo === 'abertura' ? ' · abertura' : ''}</small></td><td style="text-align:right"><b>${brl(o.valor)}</b></td></tr>`).join('')}</table>` : '<small style="color:var(--mute)">Nenhum pedido ainda.</small>'}`; }).catch(() => { const el = $('#sPeds'); if (el) el.remove(); });
   s.querySelectorAll('[data-pot]').forEach(b => b.onclick = () => salvarPdv(p.id, { potencial: +b.dataset.pot }, 'Potencial atualizado'));
   $('#sEt').onchange = e => mudarEtapa(p.id, e.target.value, () => { desenhar(); painel(); });
   if ($('#sCad')) $('#sCad').onchange = e => salvarPdv(p.id, { cadencia_dias: e.target.value ? +e.target.value : null }, 'Frequência atualizada');
