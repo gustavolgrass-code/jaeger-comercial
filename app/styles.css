@@ -343,3 +343,5 @@ table.bo input{width:120px}
 .pesos input{width:100%}
 @media (max-width:700px){.pgrid{grid-template-columns:1fr}.rk{grid-template-columns:90px 1fr 64px 44px}}
 .pcmp{align-self:center;color:var(--mute);font-size:13px}
+/* mapa ocupa a tela toda quando nada está selecionado */
+#mapa + aside#side:not(.open){display:none}

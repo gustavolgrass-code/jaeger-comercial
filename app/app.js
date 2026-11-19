@@ -316,6 +316,7 @@ function painelZonas(s) {
 }
 function painel() {
   const s = $('#side'); if (!s) return;
+  const antes = s.classList.contains('open'); setTimeout(() => { if (mapa && s.classList.contains('open') !== antes) mapa.invalidateSize(); }, 0);
   const p = S.pdvs.find(x => x.id === S.sel);
   if (!p && S.modoPend) return listaPendentes(s);
   if (!p && S.nuvens && S.zonas) return painelZonas(s);
