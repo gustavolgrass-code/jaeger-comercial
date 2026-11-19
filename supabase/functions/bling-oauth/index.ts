@@ -204,6 +204,22 @@ async function enviarPedido(pedidoId: string) {
   }
 }
 
+// itens dos pedidos do Bling que ainda não têm itens no app (de 25 em 25)
+async function puxarItens() {
+  const token = await tokenValido();
+  const { data: peds, error } = await db.from('pedidos').select('id, bling_id, bling_itens(ordem)').not('bling_id', 'is', null).order('criado_em', { ascending: false }).limit(2000);
+  if (error) throw error;
+  const falta = (peds ?? []).filter((p: any) => !(p.bling_itens ?? []).length);
+  const lote = falta.slice(0, 25), lista: unknown[] = []; let erros = 0;
+  for (const p of lote) {
+    try { const d = (await chamar(`/pedidos/vendas/${p.bling_id}`, token))?.data ?? {};
+      lista.push({ pedido_id: p.id, itens: (d.itens ?? []).map((i: any) => ({ codigo: i.codigo, descricao: i.descricao, quantidade: i.quantidade, valor: i.valor, desconto: i.desconto ?? 0 })) });
+    } catch { erros++; }
+  }
+  if (lista.length) { const { error: e2 } = await db.rpc('bling_gravar_itens', { lista }); if (e2) throw e2; }
+  return { feitos: lista.length, erros, faltam: Math.max(0, falta.length - lote.length), fim: falta.length <= lote.length };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   const url = new URL(req.url);
@@ -245,6 +261,7 @@ Deno.serve(async (req) => {
     if (acao === 'sincronizar') return json(await sincronizar());
     if (acao === 'contatos') return json(await puxarContatos(Number(inicio) || 0));
     if (acao === 'ler') return json(await ler(String(caminho || '')));
+    if (acao === 'itens') return json(await puxarItens());
     if (acao === 'enviar_pedido') return json(await enviarPedido(String(pedido_id || '')));
     return json({ erro: 'ação desconhecida' }, 400);
   } catch (e) {

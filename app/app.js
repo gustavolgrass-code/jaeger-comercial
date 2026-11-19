@@ -90,7 +90,7 @@ async function iniciar() {
   } catch (e) { $('#raiz').innerHTML = `<div class="loading">Não foi possível carregar: ${esc(e.message)}</div>`; }
 }
 function telaLogin() {
-  $('#raiz').innerHTML = `<div class="login"><form class="box" id="fLogin"><h3>Jaeger’s Comercial</h3>
+  $('#raiz').innerHTML = `<div class="login"><form class="box" id="fLogin"><h3>Jaeger’s Administração</h3>
   <label>E-mail</label><input id="lEmail" type="email" autocomplete="username" required>
   <label>Senha</label><input id="lSenha" type="password" autocomplete="current-password" required>
   <div class="err" id="lErr"></div>
@@ -117,7 +117,7 @@ const ABAS = {
 let lado = 'comercial';
 function montar() {
   lado = S.eu.papel === 'operacao' ? 'operacao' : 'comercial';
-  $('#raiz').innerHTML = `<header><span class="brand">Jaeger’s Comercial</span>
+  $('#raiz').innerHTML = `<header><span class="brand">Jaeger’s Administração</span>
    <div class="roles"><button id="rG">Comercial</button><button id="rM">Reposição</button></div>
    <div class="userbox">${esc(S.eu.nome)} <button id="bSair">Sair</button></div></header>
    <nav id="nav"></nav><main id="main"></main>`;
@@ -142,7 +142,7 @@ function telaMapa() {
    <div class="maptools"><div class="mbusca"><input id="bBusca" autocomplete="off" placeholder="🔍 Buscar cliente…"><div id="bSug" class="sugs"></div></div><button class="btn pri" id="bAdd">+ Cadastrar ponto</button><button class="btn" id="bPend">Reposições pendentes <b id="nPend"></b></button><button class="btn" id="bLoc">📍 Minha localização</button>
    <select id="fEt"><option value="">Todas as etapas</option>${ETAPAS.map(e => `<option value="${e.k}">${e.n}</option>`).join('')}</select>
    <select id="fReg"><option value="">Todas as regiões</option>${S.base.regioes.map(r => `<option value="${r.codigo}">${r.codigo} · ${esc(r.nome)}</option>`).join('')}</select>
-   <label class="regchk"><input type="checkbox" id="tReg" ${mostrarReg ? 'checked' : ''}> Regiões</label></div>
+   <label class="regchk"><input type="checkbox" id="tReg" ${mostrarReg ? 'checked' : ''}> Regiões</label><button class="btn ${S.nuvens ? 'car' : ''}" id="bNuvem">☁️ Nuvens de potencial</button></div>
    <div class="hint" id="hint">Toque no mapa onde fica o ponto</div>
    <div class="legend" id="legend"></div></div><aside id="side"></aside></section>`;
   if (mapa) { mapa.remove(); mapa = null; }
@@ -166,6 +166,8 @@ function telaMapa() {
   if (S.rastreando) { mostrarEu(false); $('#bLoc').classList.add('pri'); }
   $('#fEt').onchange = $('#fReg').onchange = desenhar;
   $('#tReg').onchange = e => { mostrarReg = e.target.checked; desenhar(); };
+  $('#bNuvem').onclick = () => { S.nuvens = !S.nuvens; $('#bNuvem').classList.toggle('car', S.nuvens); if (S.nuvens) { S.sel = null; desenharNuvens(true); } else { camadaNuvem?.clearLayers(); painel(); } };
+  camadaNuvem = null; if (S.nuvens) setTimeout(() => desenharNuvens(false), 0);
   desenhar(); painel();
 }
 function pino(cor, k = 1, tracejado = false) {
@@ -241,10 +243,68 @@ function alternarLocalizacao() {
   $('#bLoc').classList.add('pri');
 }
 
+/* ---------- nuvens de potencial: onde já vendemos bem, num raio de 2 km ---------- */
+let camadaNuvem = null;
+async function valorMensalClientes() {
+  if (!S.rpCache || Date.now() - S.rpCache.t > 5 * 60000) S.rpCache = { t: Date.now(), ls: await db.resumoPedidos() };
+  const desde = Date.now() - 180 * DIA, v = {};
+  S.rpCache.ls.forEach(o => { if (new Date(o.criado_em) >= desde) v[o.pdv_id] = (v[o.pdv_id] || 0) + (Number(o.valor) || 0) / 6; });
+  return v;
+}
+async function desenharNuvens(enquadrar) {
+  let vm; try { vm = await valorMensalClientes(); } catch (e) { return erro(e); }
+  if (!S.nuvens || !mapa) return;
+  const bons = S.pdvs.filter(p => p.lat && vm[p.id] > 0).map(p => ({ p, v: vm[p.id] }));
+  if (!bons.length) { toast('Ainda não há vendas nos últimos 6 meses para calcular o potencial'); return; }
+  const R = 2000, CEL = 300, mLat = 1 / 111320, lat0 = bons[0].p.lat, mLng = 1 / (111320 * Math.cos(lat0 * Math.PI / 180));
+  const la = bons.map(b => b.p.lat), lo = bons.map(b => b.p.lng);
+  const minLa = Math.min(...la) - R * mLat, maxLa = Math.max(...la) + R * mLat, minLo = Math.min(...lo) - R * mLng, maxLo = Math.max(...lo) + R * mLng;
+  const cel = [];
+  for (let y = minLa; y <= maxLa; y += CEL * mLat) for (let x = minLo; x <= maxLo; x += CEL * mLng) {
+    const c = { lat: y + CEL * mLat / 2, lng: x + CEL * mLng / 2 }; let s = 0;
+    for (const b of bons) { const d = distM(c, b.p); if (d < R) s += b.v * (1 - d / R); }
+    if (s > 0) cel.push({ y, x, c, s });
+  }
+  const max = Math.max(...cel.map(c => c.s));
+  if (!mapa.getPane('nuvens')) { mapa.createPane('nuvens'); mapa.getPane('nuvens').style.zIndex = 350; mapa.getPane('nuvens').style.filter = 'blur(10px)'; mapa.getPane('nuvens').style.pointerEvents = 'none'; }
+  if (camadaNuvem) camadaNuvem.clearLayers(); else camadaNuvem = L.layerGroup().addTo(mapa);
+  let rend; try { rend = L.canvas({ pane: 'nuvens' }); } catch { rend = L.svg({ pane: 'nuvens' }); }
+  const cor = t => t > .66 ? '#C2410C' : t > .4 ? '#EA8A2E' : t > .2 ? '#F2B84B' : '#F7DC8C';
+  cel.forEach(k => { const t = k.s / max; if (t < .12) return; L.rectangle([[k.y, k.x], [k.y + CEL * mLat, k.x + CEL * mLng]], { renderer: rend, stroke: false, fillColor: cor(t), fillOpacity: .18 + .55 * t, interactive: false }).addTo(camadaNuvem); });
+  // zonas: picos de potencial a pelo menos 1,5 km um do outro
+  const zonas = [];
+  for (const k of cel.slice().sort((a, b) => b.s - a.s)) { if (zonas.length >= 8 || k.s / max < .25) break; if (zonas.some(z => distM(z.c, k.c) < 1500)) continue; zonas.push({ c: k.c, s: k.s }); }
+  zonas.forEach((z, i) => {
+    const perto = S.pdvs.filter(p => p.lat && distM(p, z.c) < R);
+    z.clientes = perto.filter(p => vm[p.id] > 0).sort((a, b) => vm[b.id] - vm[a.id]); z.vm = vm; z.valor = z.clientes.reduce((a, p) => a + vm[p.id], 0);
+    z.prospects = perto.filter(p => ['mapeado', 'visitado', 'negociacao'].includes(p.etapa)); z.inativos = perto.filter(p => p.etapa === 'inativo');
+    const cnt = {}; perto.forEach(p => { const b = p.bairro || p.cidade; if (b) cnt[b] = (cnt[b] || 0) + 1; });
+    z.nome = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 2).map(x => x[0]).join(' / ') || 'Zona ' + (i + 1);
+    z.nota = Math.round(z.s / max * 100);
+    L.marker([z.c.lat, z.c.lng], { icon: L.divIcon({ className: '', iconSize: [34, 34], iconAnchor: [17, 17], html: `<div class="zona-pin">Z${i + 1}</div>` }), zIndexOffset: 800 })
+      .bindTooltip(`Zona ${i + 1} · ${esc(z.nome)} · potencial ${z.nota}`).on('click', () => { S.sel = null; S.zonaSel = i; painel(); }).addTo(camadaNuvem);
+  });
+  S.zonas = zonas; S.zonaSel = null;
+  if (enquadrar) mapa.fitBounds(L.latLngBounds(bons.map(b => [b.p.lat, b.p.lng])).pad(.1));
+  if (!S.sel) painel();
+}
+function painelZonas(s) {
+  s.classList.add('open');
+  const zs = S.zonas;
+  s.innerHTML = `<div class="row" style="justify-content:space-between"><h2 style="margin:0">Nuvens de potencial</h2><button class="btn" id="xZon" style="padding:4px 10px">✕</button></div>
+   <p style="color:var(--soft);font-size:13px;margin-top:6px">Calculado pelo que cada cliente comprou por mês nos últimos 6 meses, espalhado num raio de 2 km. Quanto mais forte a cor, mais venda já existe por perto: é onde abrir novos pontos tende a dar certo.</p>
+   ${zs.map((z, i) => `<div class="zona ${S.zonaSel === i ? 'on' : ''}" data-z="${i}"><div class="row" style="justify-content:space-between"><b>Z${i + 1} · ${esc(z.nome)}</b><span class="badge" style="background:${z.nota > 66 ? '#C2410C' : z.nota > 40 ? '#EA8A2E' : '#F2B84B'};color:#fff">potencial ${z.nota}</span></div>
+     <div class="zkv"><div><small>Vendas no raio</small><b>${brl(z.valor)}/mês</b></div><div><small>Clientes comprando</small><b>${z.clientes.length}</b></div><div><small>Prospects mapeados</small><b>${z.prospects.length}</b></div><div><small>Inativos p/ recuperar</small><b>${z.inativos.length}</b></div></div>
+     ${S.zonaSel === i ? `<div style="margin-top:8px;font-size:12.5px">${z.clientes.slice(0, 8).map(p => `<div class="row" style="justify-content:space-between"><span>• ${esc(p.nome)}</span><b>${brl(z.vm[p.id])}/mês</b></div>`).join('')}</div>` : ''}</div>`).join('')}
+   <p style="color:var(--mute);font-size:12px">Próximo passo: extrair os pontos dessas zonas no Outscraper e montar o plano de prospecção por zona.</p>`;
+  $('#xZon').onclick = () => { S.nuvens = false; $('#bNuvem')?.classList.remove('car'); camadaNuvem?.clearLayers(); painel(); };
+  s.querySelectorAll('[data-z]').forEach(d => d.onclick = () => { const i = +d.dataset.z; S.zonaSel = i; mapa.setView([zs[i].c.lat, zs[i].c.lng], 14); painelZonas(s); });
+}
 function painel() {
   const s = $('#side'); if (!s) return;
   const p = S.pdvs.find(x => x.id === S.sel);
   if (!p && S.modoPend) return listaPendentes(s);
+  if (!p && S.nuvens && S.zonas) return painelZonas(s);
   if (!p) { s.classList.remove('open'); s.innerHTML = `<div class="empty"><b>Selecione um ponto no mapa.</b><br>A cor mostra a etapa do funil.<br><br><b>+ Cadastrar ponto</b>: pela sua localização, marcando no mapa ou colando o link do Google Maps.<br><b>Reposições pendentes</b>: mostra quem precisa de reposição hoje ou está atrasado.</div>`; return; }
   s.classList.add('open');
   const podeComprar = p.etapa !== 'perdido';
@@ -1478,8 +1538,12 @@ async function painelBling() {
    <div class="kv" style="margin:6px 0 10px"><div><small>Situação</small><b>${s.conectado ? 'Conectado' : 'Não conectado'}</b><small>${s.conectado ? 'desde ' + quandoB(s.conectado_em) : ''}</small></div><div><small>Última sincronização</small><b>${quandoB(s.ultima_sync)}</b><small>${esc(resumoSync(s.ultimo_resultado))}</small></div></div>
    ${s.ultimo_erro ? `<p style="color:#7A2414;font-size:13px">Último erro: ${esc(s.ultimo_erro)}</p>` : ''}
    <p style="color:var(--soft);margin-top:0">Os pedidos do Bling entram sozinhos ao abrir o app (no máximo a cada 15 minutos). Clientes ficam Ativos ou Inativos pela regra dos 90 dias.</p>
-   <div class="row" style="flex-wrap:wrap">${s.conectado ? '<button class="btn pri" id="bSync">Sincronizar agora</button><button class="btn" id="bCont">Puxar contatos do Bling</button><button class="btn" id="bCon">Reconectar</button>' : `<button class="btn pri" id="bCon" ${s.configurado ? '' : 'disabled'}>Conectar ao Bling</button>`}</div><div id="bRes" style="margin-top:8px"></div>`;
+   <div class="row" style="flex-wrap:wrap">${s.conectado ? '<button class="btn pri" id="bSync">Sincronizar agora</button><button class="btn" id="bCont">Puxar contatos do Bling</button><button class="btn" id="bItens">Puxar itens dos pedidos</button><button class="btn" id="bCon">Reconectar</button>' : `<button class="btn pri" id="bCon" ${s.configurado ? '' : 'disabled'}>Conectar ao Bling</button>`}</div><div id="bRes" style="margin-top:8px"></div>`;
   $('#bCon').onclick = async () => { try { const r = await db.bling('conectar'); location.href = r.url; } catch (e) { erro(e); } };
+  if ($('#bItens')) $('#bItens').onclick = async () => { const b = $('#bItens'); b.disabled = true; let feitos = 0, erros = 0;
+    try { for (let volta = 0; volta < 40; volta++) { const r = await db.bling('itens'); feitos += r.feitos; erros += r.erros; $('#bRes').innerHTML = `<small>Lendo os itens dos pedidos no Bling… ${feitos} pedidos lidos, faltam ${r.faltam}</small>`; if (r.fim || !r.feitos) break; }
+      $('#bRes').innerHTML = `<b>Itens de ${feitos} pedidos gravados${erros ? ` · ${erros} com erro (tente de novo)` : ''}.</b> Agora dá para analisar a saída por produto e sabor.`; toast('Itens dos pedidos atualizados');
+    } catch (e) { $('#bRes').innerHTML = `<span style="color:#7A2414">${esc(e.message)}</span>`; } b.disabled = false; };
   if ($('#bCont')) $('#bCont').onclick = async () => { const b = $('#bCont'); b.disabled = true; let ini = 0, tot = { criados: 0, completados: 0, sem_dados: 0, nao_achados: 0 };
     try { for (let volta = 0; volta < 40; volta++) { $('#bRes').innerHTML = `<small>Lendo contatos no Bling… ${ini} clientes</small>`;
         const r = await db.bling('contatos', { inicio: ini }); ['criados', 'completados', 'sem_dados', 'nao_achados'].forEach(k => tot[k] += r[k] || 0); ini = r.feitos;
@@ -1551,6 +1615,7 @@ async function syncBlingAuto() {
     const s = await db.bling('status'); if (!s.conectado) return;
     if (s.ultima_sync && Date.now() - new Date(s.ultima_sync) < 15 * 60000) { S.blingSync = new Date(s.ultima_sync).getTime(); return; }
     S.blingSync = Date.now(); const r = await db.bling('sincronizar');
+    if (r.novos) db.bling('itens').catch(() => { });
     if (r.novos || r.cancelados || r.status_mudou || r.removidos) { await recarregar(); if (S.aba === 'mapa' && !S.prosp) { desenhar(); } toast(`Bling: ${r.novos} pedido${r.novos === 1 ? '' : 's'} novo${r.novos === 1 ? '' : 's'}`); }
   } catch (e) { console.warn('Bling', e); }
 }

@@ -275,3 +275,9 @@ table.peds tr:last-child td{border-bottom:0}
 .linha-h .preco input{width:70px;padding:3px 6px;font-size:13px;border:1px solid var(--line);border-radius:6px;background:#FBF7F0}
 .linha-h .preco.custom input{border-color:var(--car);background:#FBEBD3;color:#8A4E17;font-weight:700}
 .linha-h small{font-weight:400;color:var(--mute);font-size:11px}
+.zona-pin{width:34px;height:34px;border-radius:50%;background:#2E1A12;color:#FBF7F0;font:700 12px 'DM Sans',sans-serif;display:flex;align-items:center;justify-content:center;border:3px solid #F2B84B;box-shadow:0 2px 6px rgba(0,0,0,.35)}
+.zona{background:var(--sand);border-radius:12px;padding:10px 12px;margin:8px 0;cursor:pointer;border:2px solid transparent}
+.zona.on{border-color:var(--car)}
+.zkv{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
+.zkv small{display:block;color:var(--mute);font-size:11px}
+.zkv b{font-size:14px}
