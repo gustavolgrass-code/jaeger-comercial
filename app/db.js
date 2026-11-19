@@ -133,3 +133,4 @@ export async function registrarVenda({ pdvId, usuarioId, pedido, itens, patch })
 // preços combinados com o cliente: { produto_id: preço }
 export async function precosCliente(pdvId) { const r = await sb.from('pdvs').select('precos').eq('id', pdvId).maybeSingle(); if (r.error) return {}; return r.data?.precos || {}; }
 export async function salvarPrecos(pdvId, precos) { return ok(await sb.from('pdvs').update({ precos }).eq('id', pdvId)); }
+export async function resumoPedidos() { return ok(await sb.from('pedidos').select('pdv_id, criado_em, valor, unidades').limit(10000)); }
