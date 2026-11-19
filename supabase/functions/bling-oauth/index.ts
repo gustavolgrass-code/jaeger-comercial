@@ -136,7 +136,7 @@ async function ler(caminho: string) {
 // envia um pedido do app para o Bling (configuração em regras.chave = 'bling')
 async function enviarPedido(pedidoId: string) {
   const token = await tokenValido();
-  const { data: ped, error } = await db.from('pedidos').select('*, pdvs(id, nome, razao_social, cnpj, bling_contato_id), pedido_itens(quantidade, bonificado, preco_unit, produtos(id, linha, sabor, bling_produto_id, bling_codigo))').eq('id', pedidoId).single();
+  const { data: ped, error } = await db.from('pedidos').select('*, pdvs(id, nome, razao_social, cnpj, bling_contato_id), pedido_itens(quantidade, bonificado, preco_unit, produtos(id, linha, sabor, preco, bling_produto_id, bling_codigo))').eq('id', pedidoId).single();
   if (error || !ped) throw new Error('pedido não encontrado');
   if (ped.bling_id) return { ja_enviado: true, bling_id: ped.bling_id, numero: ped.bling_pedido_id };
   const { data: rg } = await db.from('regras').select('valor').eq('chave', 'bling').maybeSingle();
@@ -147,19 +147,26 @@ async function enviarPedido(pedidoId: string) {
   if (!contatoId && doc) { const r = await chamar(`/contatos?limite=1&numeroDocumento=${doc}`, token); contatoId = r?.data?.[0]?.id ?? null; }
   if (!contatoId) throw new Error('Cliente sem cadastro no Bling (sem CNPJ/CPF que bata). Cadastre no Bling primeiro.');
   const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+  // preço abaixo da tabela vai como preço de tabela + desconto no pedido (o Bling mostra o desconto)
+  let descontoReais = 0;
   const itens = (ped.pedido_itens ?? []).filter((i: any) => i.quantidade > 0).map((i: any) => {
     const pr = i.produtos ?? {};
+    const tabela = Number(pr.preco) || 0, cobrado = Number(i.preco_unit) || 0;
+    const valorItem = tabela && cobrado < tabela ? tabela : cobrado;
+    if (valorItem > cobrado) descontoReais += (valorItem - cobrado) * i.quantidade;
     if (!pr.bling_produto_id && !pr.bling_codigo) throw new Error(`Produto sem vínculo com o Bling: ${pr.linha} ${pr.sabor}`);
     return { ...(pr.bling_produto_id ? { produto: { id: Number(pr.bling_produto_id) } } : {}), ...(pr.bling_codigo ? { codigo: pr.bling_codigo } : {}),
-      descricao: `${pr.linha} - ${pr.sabor}`.trim(), quantidade: i.quantidade, valor: Number(i.preco_unit), ...(cfg.unidade ? { unidade: cfg.unidade } : {}), ...(cfg.natureza_id ? { naturezaOperacao: { id: Number(cfg.natureza_id) } } : {}) };
+      descricao: `${pr.linha} - ${pr.sabor}`.trim(), quantidade: i.quantidade, valor: valorItem, ...(cfg.unidade ? { unidade: cfg.unidade } : {}), ...(cfg.natureza_id ? { naturezaOperacao: { id: Number(cfg.natureza_id) } } : {}) };
   });
   if (!itens.length) throw new Error('Pedido sem itens');
-  const total = itens.reduce((a: number, i: any) => a + i.quantidade * i.valor, 0);
+  descontoReais = Math.round(descontoReais * 100) / 100;
+  const total = itens.reduce((a: number, i: any) => a + i.quantidade * i.valor, 0) - descontoReais;
   const forma = (cfg.formas ?? {})[ped.condicao] ?? cfg.forma_padrao;
   const corpo: Record<string, unknown> = {
     data: hoje, dataSaida: hoje, dataPrevista: hoje,
     contato: { id: contatoId },
     itens,
+    ...(descontoReais > 0 ? { desconto: { valor: descontoReais, unidade: 'REAL' } } : {}),
     ...(forma ? { parcelas: [{ dataVencimento: ped.vencimento ?? hoje, valor: Math.round(total * 100) / 100, formaPagamento: { id: Number(forma) } }] } : {}),
     ...(cfg.loja_id ? { loja: { id: Number(cfg.loja_id) } } : {}),
     ...(cfg.vendedor_id ? { vendedor: { id: Number(cfg.vendedor_id) } } : {}),
