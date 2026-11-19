@@ -126,6 +126,63 @@ async function puxarContatos(inicio: number) {
   return { ...res, nao_achados, feitos: proximo, total: count ?? 0, fim: proximo >= (count ?? 0) || !(pdvs?.length) };
 }
 
+// leitura de consulta (só GET, só estes caminhos) para analisar os cadastros do Bling
+const LEITURA_OK = /^\/(pedidos\/vendas(\/\d+)?|produtos(\/\d+)?|formas-pagamentos(\/\d+)?|naturezas-operacoes|vendedores(\/\d+)?|contatos\/\d+|situacoes\/modulos(\/\d+)?|situacoes\/\d+|categorias\/receitas-despesas|lojas?|canais-venda|depositos|empresas\/me\/dados-basicos)(\?.*)?$/;
+async function ler(caminho: string) {
+  if (!LEITURA_OK.test(caminho)) throw new Error('caminho de leitura não permitido');
+  return chamar(caminho, await tokenValido());
+}
+
+// envia um pedido do app para o Bling (configuração em regras.chave = 'bling')
+async function enviarPedido(pedidoId: string) {
+  const token = await tokenValido();
+  const { data: ped, error } = await db.from('pedidos').select('*, pdvs(id, nome, razao_social, cnpj, bling_contato_id), pedido_itens(quantidade, bonificado, preco_unit, produtos(id, linha, sabor, bling_produto_id, bling_codigo))').eq('id', pedidoId).single();
+  if (error || !ped) throw new Error('pedido não encontrado');
+  if (ped.bling_id) return { ja_enviado: true, bling_id: ped.bling_id, numero: ped.bling_pedido_id };
+  const { data: rg } = await db.from('regras').select('valor').eq('chave', 'bling').maybeSingle();
+  const cfg = (rg?.valor ?? {}) as Record<string, any>;
+  // contato no Bling: id guardado ou busca pelo CNPJ/CPF
+  let contatoId = ped.pdvs?.bling_contato_id ? Number(ped.pdvs.bling_contato_id) : null;
+  const doc = String(ped.pdvs?.cnpj ?? '').replace(/\D/g, '');
+  if (!contatoId && doc) { const r = await chamar(`/contatos?limite=1&numeroDocumento=${doc}`, token); contatoId = r?.data?.[0]?.id ?? null; }
+  if (!contatoId) throw new Error('Cliente sem cadastro no Bling (sem CNPJ/CPF que bata). Cadastre no Bling primeiro.');
+  const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+  const itens = (ped.pedido_itens ?? []).filter((i: any) => i.quantidade > 0).map((i: any) => {
+    const pr = i.produtos ?? {};
+    if (!pr.bling_produto_id && !pr.bling_codigo) throw new Error(`Produto sem vínculo com o Bling: ${pr.linha} ${pr.sabor}`);
+    return { ...(pr.bling_produto_id ? { produto: { id: Number(pr.bling_produto_id) } } : {}), ...(pr.bling_codigo ? { codigo: pr.bling_codigo } : {}),
+      descricao: `${pr.linha} ${pr.sabor}`.trim(), quantidade: i.quantidade, valor: Number(i.preco_unit), ...(cfg.unidade ? { unidade: cfg.unidade } : {}), ...(cfg.natureza_id ? { naturezaOperacao: { id: Number(cfg.natureza_id) } } : {}) };
+  });
+  if (!itens.length) throw new Error('Pedido sem itens');
+  const total = itens.reduce((a: number, i: any) => a + i.quantidade * i.valor, 0);
+  const forma = (cfg.formas ?? {})[ped.condicao] ?? cfg.forma_padrao;
+  const corpo: Record<string, unknown> = {
+    data: hoje, dataSaida: hoje, dataPrevista: hoje,
+    contato: { id: contatoId },
+    itens,
+    ...(forma ? { parcelas: [{ dataVencimento: ped.vencimento ?? hoje, valor: Math.round(total * 100) / 100, formaPagamento: { id: Number(forma) } }] } : {}),
+    ...(cfg.loja_id ? { loja: { id: Number(cfg.loja_id) } } : {}),
+    ...(cfg.vendedor_id ? { vendedor: { id: Number(cfg.vendedor_id) } } : {}),
+    ...(cfg.situacao_id ? { situacao: { id: Number(cfg.situacao_id) } } : {}),
+    observacoes: cfg.observacoes ?? undefined,
+    observacoesInternas: `Lançado pelo app Jaeger Comercial · pedido ${ped.numero} · ${ped.condicao}`,
+  };
+  try {
+    const r = await fetch(`${API}/pedidos/vendas`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json', 'enable-jwt': '1' }, body: JSON.stringify(corpo) });
+    const res = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(`Bling recusou o pedido (${r.status}): ${JSON.stringify(res?.error ?? res).slice(0, 600)}`);
+    const id = res?.data?.id;
+    let numero: string | null = null;
+    try { numero = String((await chamar(`/pedidos/vendas/${id}`, token))?.data?.numero ?? ''); } catch { /* sem número */ }
+    await db.from('pedidos').update({ bling_id: id, bling_pedido_id: numero, bling_status: 'enviado', bling_erro: null, bling_situacao: 'Em aberto' }).eq('id', pedidoId);
+    await db.from('pdvs').update({ bling_contato_id: String(contatoId) }).eq('id', ped.pdvs.id).is('bling_contato_id', null);
+    return { ok: true, bling_id: id, numero, alertas: res?.data?.alertas ?? [], enviado: corpo };
+  } catch (e) {
+    await db.from('pedidos').update({ bling_status: 'erro', bling_erro: String((e as Error).message).slice(0, 900) }).eq('id', pedidoId);
+    throw e;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   const url = new URL(req.url);
@@ -150,7 +207,7 @@ Deno.serve(async (req) => {
   const jwt = (req.headers.get('Authorization') ?? '').replace('Bearer ', '');
   const { data: u } = await db.auth.getUser(jwt);
   if (!u?.user) return json({ erro: 'não autorizado' }, 401);
-  const { acao, inicio } = await req.json().catch(() => ({}));
+  const { acao, inicio, caminho, pedido_id } = await req.json().catch(() => ({}));
   try {
     if (acao === 'status') {
       const { data } = await db.from('bling_conexao').select('conectado_em, ultima_sync, ultimo_resultado, ultimo_erro, refresh_token').eq('id', 1).maybeSingle();
@@ -166,6 +223,8 @@ Deno.serve(async (req) => {
     }
     if (acao === 'sincronizar') return json(await sincronizar());
     if (acao === 'contatos') return json(await puxarContatos(Number(inicio) || 0));
+    if (acao === 'ler') return json(await ler(String(caminho || '')));
+    if (acao === 'enviar_pedido') return json(await enviarPedido(String(pedido_id || '')));
     return json({ erro: 'ação desconhecida' }, 400);
   } catch (e) {
     const msg = String((e as Error).message ?? e);
