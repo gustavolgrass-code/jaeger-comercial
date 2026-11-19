@@ -375,7 +375,8 @@ function abrirCadastro(loc) {
   ${campoContato()}
   <div class="row"><div style="flex:1"><label>Bairro</label><input id="cBairro"></div><div style="flex:1"><label>Cidade</label><input id="cCidade"></div></div>
   <label>Potencial (1 a 5)</label>${campoPot('cPot')}
-  <label>Observação</label><textarea id="cObs" rows="2" placeholder="Quem decide, melhor horário, espaço no caixa…"></textarea>
+  <label>Melhor dia e horário para visita</label><input id="cHor" placeholder="Ex.: terça e quinta, 9h às 11h" style="width:100%">
+  <label>Observação</label><textarea id="cObs" rows="2" placeholder="Quem decide, espaço no caixa…"></textarea>
   <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="cSalvar">Salvar no funil</button></div>`);
   ligarCanal('cCanal'); ligarEmpresa('c', 'cNome');
   const msg = (t, okk) => { const m = $('#cMsg'); m.style.display = 'block'; m.style.background = okk ? '#E3F0E7' : '#F7E9DD'; m.style.color = okk ? '#1F5A37' : '#7A4A16'; m.innerHTML = t; };
@@ -405,7 +406,7 @@ function abrirCadastro(loc) {
     try {
       const cidade = $('#cCidade').value.trim() || null;
       const contato_id = await contatoDoForm(nome);
-      const n = await db.criarPdv({ contato_id, geo_precisao: 'exata', nome, ...lerEmpresa('c'), canal: lerCanal('cCanal'), endereco: rua || null, bairro: $('#cBairro').value.trim() || null, cidade, lng: pos[0], lat: pos[1], regiao: await garantirRegiao(pos[0], pos[1], cidade), potencial: +$('#cPot').value, observacao: $('#cObs').value.trim() || null, origem: $('#cLink').value ? 'link_maps' : 'manual', link_maps: $('#cLink').value.trim() || null, criado_por: S.eu.id });
+      const n = await db.criarPdv({ contato_id, geo_precisao: 'exata', nome, ...lerEmpresa('c'), canal: lerCanal('cCanal'), endereco: rua || null, bairro: $('#cBairro').value.trim() || null, cidade, lng: pos[0], lat: pos[1], regiao: await garantirRegiao(pos[0], pos[1], cidade), potencial: +$('#cPot').value, observacao: $('#cObs').value.trim() || null, melhor_horario: $('#cHor').value.trim() || null, origem: $('#cLink').value ? 'link_maps' : 'manual', link_maps: $('#cLink').value.trim() || null, criado_por: S.eu.id });
       fecharModal(); await atualizarUm(n.id); S.sel = n.id; if (S.aba === 'mapa') { desenhar(); painel(); } if (S.aba === 'abertura') { S.abPdv = n.id; telaAbertura(); } toast(nome + ' entrou no funil como Mapeado');
     } catch (e) { erro(e); $('#cSalvar').disabled = false; }
   };
@@ -1338,6 +1339,7 @@ async function telaPerfil() {
       <button class="btn" id="pEditar">Editar dados</button><button class="btn" id="pMapa">Ver no mapa</button><button class="btn" id="pAjustar">Ajustar localização</button><button class="btn" id="pExcluirTopo" style="color:#7A2414">Excluir negócio</button>
      </div></div>
     ${caixaComentario(p) ? `<div class="panel" style="padding:4px 14px 14px">${caixaComentario(p)}</div>` : ''}
+    <div class="panel" style="padding:12px 14px"><label style="margin:0 0 6px;display:block;font-weight:700">🕘 Melhor horário para visita</label><div class="row" style="gap:8px"><input id="pHor" value="${esc(p.melhor_horario || '')}" placeholder="Ex.: terça e quinta, 9h às 11h" style="flex:1"><button class="btn" id="pHorOk">Salvar</button></div></div>
     ${caixaEsteira(p) ? `<div class="panel" style="padding:4px 14px 14px">${caixaEsteira(p)}</div>` : ''}
     ${ultimos6(p) ? `<div class="panel">${ultimos6(p)}</div>` : ''}
     <div class="panel"><h3>Histórico</h3>${ev.map(e => `<div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--sand)"><i style="width:12px;height:12px;border-radius:50%;background:${e.cor};flex:none;margin-top:4px"></i><div style="flex:1"><div>${e.t}</div>${e.obs ? `<div style="color:var(--soft);margin-top:2px">“${esc(e.obs)}”</div>` : ''}<small style="color:var(--mute)">${quando(e.em)}${e.quem ? ' · ' + esc(e.quem) : ''}</small></div></div>`).join('') || '<p class="empty">Sem histórico ainda.</p>'}</div>
@@ -1373,6 +1375,7 @@ async function telaPerfil() {
   $('#pTrocarContato').onclick = () => { modal(`<h3>Contato de ${esc(p.nome)}</h3>${campoContato()}<div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="kOk">Vincular</button></div>`); document.querySelector('#modalBox details').open = true;
     $('#kOk').onclick = async () => { try { const id = await contatoDoForm(p.nome); if (!id) return toast('Escolha um contato ou preencha o nome'); await db.atualizarPdv(p.id, { contato_id: id }); fecharModal(); await atualizarUm(p.id); toast('Contato vinculado'); telaPerfil(); } catch (e) { erro(e); } }; };
   $('#pExcluirTopo').onclick = () => $('#pExcluir').click();
+  $('#pHorOk').onclick = async () => { const v = $('#pHor').value.trim() || null; try { await db.atualizarPdv(p.id, { melhor_horario: v }); p.melhor_horario = v; await atualizarUm(p.id); toast('Melhor horário salvo'); } catch (e) { erro(e); } };
   document.querySelectorAll('[data-envbling]').forEach(b => b.onclick = async () => { b.disabled = true; await enviarAoBling(b.dataset.envbling, p.nome); telaPerfil(); });
   $('#pExcluir').onclick = () => { const np = h.pedidos.length; modal(`<h3>Excluir ${esc(p.nome)}?</h3><p style="color:var(--soft)">Apaga o negócio com as visitas, contagens e tarefas dele${np ? `, <b>e também os ${np} pedido${np > 1 ? 's' : ''} (${brl(h.pedidos.reduce((a, o) => a + Number(o.valor), 0))})</b>` : ''}. O contato vinculado continua cadastrado. Não dá para desfazer.</p>${np ? '<p style="color:var(--soft);font-size:13px">Se é um cliente real que parou de comprar, prefira mudar a etapa para Inativo e manter o histórico.</p>' : ''}<div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="xOk" style="background:#7A2414;border-color:#7A2414">Excluir</button></div>`);
     $('#xOk').onclick = async () => { try { await db.excluirPdv(p.id); fecharModal(); S.pdvs = S.pdvs.filter(x => x.id !== p.id); S.sel = null; toast('Negócio excluído'); irPara('carteira'); } catch (e) { fecharModal(); toast('Erro: ' + e.message); } }; };
