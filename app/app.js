@@ -1469,7 +1469,7 @@ function alertasProsp() {
 
 /* =================== integração Bling =================== */
 const quandoB = d => d ? new Date(d).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
-const resumoSync = r => r ? `${r.lidos ?? 0} pedidos lidos · ${r.novos ?? 0} novos · ${r.atualizados ?? 0} atualizados${r.cancelados ? ` · ${r.cancelados} cancelados removidos` : ''}${r.sem_cliente ? ` · ${r.sem_cliente} sem cliente no app` : ''}${r.status_mudou ? ` · ${r.status_mudou} mudaram de ativo/inativo` : ''}` : '';
+const resumoSync = r => r ? `${r.lidos ?? 0} pedidos lidos · ${r.novos ?? 0} novos · ${r.atualizados ?? 0} atualizados${r.cancelados ? ` · ${r.cancelados} cancelados removidos` : ''}${r.sem_cliente ? ` · ${r.sem_cliente} sem cliente no app` : ''}${r.status_mudou ? ` · ${r.status_mudou} mudaram de ativo/inativo` : ''}${r.removidos ? ` · ${r.removidos} excluídos no Bling removidos do app` : ''}` : '';
 async function painelBling() {
   const el = $('#blingPanel'); if (!el) return;
   let s; try { s = await db.bling('status'); } catch (e) { el.innerHTML = `<h3>Integração com o Bling</h3><p style="color:var(--soft)">A função do Bling ainda não está instalada no Supabase.</p><small style="color:var(--mute)">${esc(e.message)}</small>`; return; }
@@ -1551,7 +1551,7 @@ async function syncBlingAuto() {
     const s = await db.bling('status'); if (!s.conectado) return;
     if (s.ultima_sync && Date.now() - new Date(s.ultima_sync) < 15 * 60000) { S.blingSync = new Date(s.ultima_sync).getTime(); return; }
     S.blingSync = Date.now(); const r = await db.bling('sincronizar');
-    if (r.novos || r.cancelados || r.status_mudou) { await recarregar(); if (S.aba === 'mapa' && !S.prosp) { desenhar(); } toast(`Bling: ${r.novos} pedido${r.novos === 1 ? '' : 's'} novo${r.novos === 1 ? '' : 's'}`); }
+    if (r.novos || r.cancelados || r.status_mudou || r.removidos) { await recarregar(); if (S.aba === 'mapa' && !S.prosp) { desenhar(); } toast(`Bling: ${r.novos} pedido${r.novos === 1 ? '' : 's'} novo${r.novos === 1 ? '' : 's'}`); }
   } catch (e) { console.warn('Bling', e); }
 }
 /* =================== início =================== */

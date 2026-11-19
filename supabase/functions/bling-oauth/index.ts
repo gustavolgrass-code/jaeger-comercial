@@ -95,7 +95,19 @@ async function sincronizar() {
   }
   const { data: res, error } = await db.rpc('bling_importar', { lista });
   if (error) throw error;
-  const resultado = { ...res, lidos: lista.length };
+  // pedidos excluídos no Bling: confere a lista completa dos últimos 180 dias (ou tudo, na primeira leitura)
+  let desde = '2025-11-01', idsBling: number[] = [...vistos];
+  if (cx?.ultima_sync) {
+    desde = dia(new Date(Date.now() - 180 * 864e5)); idsBling = [];
+    for (let pagina = 1; pagina <= 30; pagina++) {
+      const r = await chamar(`/pedidos/vendas?pagina=${pagina}&limite=100&dataInicial=${desde}&dataFinal=${dia(amanha)}`, token);
+      const itens = r?.data ?? []; itens.forEach((x: { id: number }) => idsBling.push(x.id));
+      if (itens.length < 100) break;
+    }
+  }
+  let removidos = 0;
+  if (idsBling.length) { const { data: rm, error: e3 } = await db.rpc('bling_remover_ausentes', { ids: idsBling, desde }); if (e3) throw e3; removidos = rm ?? 0; }
+  const resultado = { ...res, lidos: lista.length, removidos };
   await db.from('bling_conexao').update({ ultima_sync: new Date().toISOString(), ultimo_resultado: resultado, ultimo_erro: null }).eq('id', 1);
   return resultado;
 }
