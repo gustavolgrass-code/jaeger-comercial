@@ -261,7 +261,8 @@ function painel() {
    ${gm ? `<a class="btn" href="${gm}" target="_blank" rel="noopener">Abrir no Google Maps ↗</a>` : ''}</div>`;
   $('#bPerfil').onclick = () => abrirPerfil(p.id);
   $('#xSide').onclick = () => { S.sel = null; desenhar(); painel(); };
-  db.ultimosPedidos(p.id, 5).then(ls => { const el = $('#sPeds'); if (!el || S.sel !== p.id) return;
+  db.ultimosPedidos(p.id, 500).then(todos => { const el = $('#sPeds'); if (!el || S.sel !== p.id) return; const ls = todos.slice(0, 5);
+    el.insertAdjacentHTML('beforebegin', fluxoPedidos(todos, true));
     el.innerHTML = `<h3>Últimos pedidos</h3>${ls.length ? `<table class="peds">${ls.map(o => `<tr><td>${new Date(o.criado_em).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })}</td><td><small style="color:var(--mute)">nº ${esc(o.bling_pedido_id || o.numero)}${o.tipo === 'abertura' ? ' · abertura' : ''}</small></td><td style="text-align:right"><b>${brl(o.valor)}</b></td></tr>`).join('')}</table>` : '<small style="color:var(--mute)">Nenhum pedido ainda.</small>'}`; }).catch(() => { const el = $('#sPeds'); if (el) el.remove(); });
   s.querySelectorAll('[data-pot]').forEach(b => b.onclick = () => salvarPdv(p.id, { potencial: +b.dataset.pot }, 'Potencial atualizado'));
   $('#sEt').onchange = e => mudarEtapa(p.id, e.target.value, () => { desenhar(); painel(); });
@@ -1464,7 +1465,7 @@ async function limparPedidook() {
 }
 const dataLonga = d => new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 // pequena análise do fluxo de pedidos de um cliente
-function fluxoPedidos(peds) {
+function fluxoPedidos(peds, lateral) {
   if (!peds.length) return '';
   const ds = peds.map(o => new Date(o.criado_em)).sort((a, b) => a - b), vals = peds.map(o => Number(o.valor) || 0);
   const total = vals.reduce((a, b) => a + b, 0), ticket = total / peds.length;
@@ -1488,8 +1489,8 @@ function fluxoPedidos(peds) {
     if (a1.length >= 2 && a2.length >= 2) { const m1 = a1.reduce((a, b) => a + b, 0) / a1.length, m2 = a2.reduce((a, b) => a + b, 0) / a2.length, var_ = (m2 - m1) / m1;
       if (Math.abs(var_) >= .15) leitura += ` O valor por pedido ${var_ > 0 ? 'subiu' : 'caiu'} ${Math.round(Math.abs(var_) * 100)}% na segunda metade do histórico.`; }
   }
-  return `<div class="panel"><h3>Fluxo de pedidos</h3>
-   <div class="kv" style="margin:0 0 10px"><div><small>Ticket médio</small><b>${brl(ticket)}</b></div><div><small>Compra a cada</small><b>${inter ? Math.round(inter) + ' dias' : '—'}</b></div><div><small>Último pedido</small><b>${dataLonga(ult)}</b><small>há ${semPedido} dias</small></div><div><small>Próximo esperado</small><b>${inter ? dataLonga(new Date(+ult + inter * DIA)) : '—'}</b></div></div>
+  return `<div class="${lateral ? 'sect' : 'panel'}"><h3>${lateral ? 'Métricas' : 'Fluxo de pedidos'}</h3>
+   <div class="kv" style="margin:0 0 10px">${lateral ? `<div><small>Total comprado</small><b>${brl(total)}</b><small>${peds.length} pedido${peds.length === 1 ? '' : 's'} desde ${dataLonga(ds[0])}</small></div>` : ''}<div><small>Ticket médio</small><b>${brl(ticket)}</b></div><div><small>Compra a cada</small><b>${inter ? Math.round(inter) + ' dias' : '—'}</b></div><div><small>Último pedido</small><b>${dataLonga(ult)}</b><small>há ${semPedido} dias</small></div><div><small>Próximo esperado</small><b>${inter ? dataLonga(new Date(+ult + inter * DIA)) : '—'}</b></div></div>
    <div class="fluxo">${meses.map(m => `<div title="${m.n}: ${m.q} pedido${m.q === 1 ? '' : 's'} · ${brl(m.v)}"><i style="height:${Math.round(m.v / max * 100)}%"></i><small>${m.n}</small></div>`).join('')}</div>
    <p style="margin:10px 0 0;font-size:13px;border-left:3px solid ${cor};padding-left:8px">${leitura}</p></div>`;
 }
