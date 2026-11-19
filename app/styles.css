@@ -263,3 +263,8 @@ table.peds tr:last-child td{border-bottom:0}
 .regcheck b{display:block;margin-bottom:4px;font-size:13px}
 .regcheck.ok{background:#E3F0E7;border:1px solid #BFD9C6;color:#1F5A37}
 .regcheck.nao{background:#F8E4DE;border:1px solid #E9BFB2;color:#7A2414}
+.item-v{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.item-v .nm{display:flex;flex-direction:column;gap:2px;min-width:0}
+.item-v .preco{display:inline-flex;align-items:center;gap:3px;font-size:11px;color:var(--mute);margin:0}
+.item-v .preco input{width:62px;padding:2px 5px;font-size:12px;border:1px solid var(--line);border-radius:6px;background:#FBF7F0}
+.item-v .preco.custom input{border-color:var(--car);background:#FBEBD3;color:#8A4E17;font-weight:700}

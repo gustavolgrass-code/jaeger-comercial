@@ -130,3 +130,6 @@ export async function registrarVenda({ pdvId, usuarioId, pedido, itens, patch })
   if (patch) await atualizarPdv(pdvId, patch);
   return { pedido: ped };
 }
+// preços combinados com o cliente: { produto_id: preço }
+export async function precosCliente(pdvId) { const r = await sb.from('pdvs').select('precos').eq('id', pdvId).maybeSingle(); if (r.error) return {}; return r.data?.precos || {}; }
+export async function salvarPrecos(pdvId, precos) { return ok(await sb.from('pdvs').update({ precos }).eq('id', pdvId)); }

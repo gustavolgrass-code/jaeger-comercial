@@ -622,13 +622,16 @@ function telaAbertura() {
    <div><label class="lb">Repor a cada</label><select id="oCad" style="width:100%"><option value="">${cadPadrao().avaliacao || 7} dias (padrão da avaliação)</option><option value="10">10 dias</option><option value="14">14 dias</option></select></div></div></div>
   <h3 style="margin:16px 0 6px">Pagamento</h3><div class="row" style="flex-wrap:wrap;gap:14px;align-items:flex-end"><div class="pay" style="margin:0">${FORMAS.map((c, i) => `<label><input type="radio" name="oc" value="${c}" ${i === 0 ? 'checked' : ''}> ${c}</label>`).join('')}</div>
    <div><label class="lb">Vencimento</label><input id="oVenc" type="date" value="${isoDe(new Date(Date.now() + 7 * DIA))}"></div></div>
-  <div class="row" style="justify-content:space-between;flex-wrap:wrap;margin:16px 0 6px"><h3 style="margin:0">Itens do pedido</h3><div class="row" style="gap:6px;flex-wrap:wrap"><span style="color:var(--mute);font-size:12px">Kits:</span>${KITS.map((k, i) => `<button class="mini" data-kit="${i}">+ ${k.n}</button>`).join('')}<button class="mini" id="oZera">zerar</button></div></div><div id="oItens" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:6px 14px"></div>
+  <div class="row" style="justify-content:space-between;flex-wrap:wrap;margin:16px 0 6px"><h3 style="margin:0">Itens do pedido</h3><div class="row" style="gap:6px;flex-wrap:wrap"><span style="color:var(--mute);font-size:12px">Kits:</span>${KITS.map((k, i) => `<button class="mini" data-kit="${i}">+ ${k.n}</button>`).join('')}<button class="mini" id="oZera">zerar</button></div></div><div id="oItens" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:8px 18px"></div><small style="color:var(--mute)">O preço de cada item pode ser alterado. Em laranja: diferente da tabela do Bling.</small>
   <div class="row" style="justify-content:space-between;margin-top:14px;flex-wrap:wrap"><div><b id="oUn">0</b> unidades · <span id="oInfo" style="color:var(--soft)"></span></div><div style="font-family:Fraunces,Georgia,serif;font-size:26px" id="oTot">R$ 0,00</div></div>
   <label class="lb">Observação</label><textarea id="oObs" rows="2" style="width:100%"></textarea>
-  <div class="row" style="margin-top:12px;justify-content:flex-end;gap:14px;flex-wrap:wrap"><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="oBling" checked style="width:auto"> Criar o pedido no Bling</label><button class="btn pri" id="oSave" ${p ? '' : 'disabled'}>Lançar venda</button></div></div></div></section>`;
-  const fill = () => { const e = +$('#oExp').value; let l = ''; $('#oItens').innerHTML = S.base.produtos.map(pr => { const h = pr.linha !== l ? `<div style="grid-column:1/-1;font-weight:700;margin-top:6px;color:var(--car-d)">${esc(l = pr.linha)}</div>` : ''; return h + `<div class="row" style="justify-content:space-between"><span>${esc(pr.sabor)}</span>${stepper('oq', 0, false, `data-p="${pr.id}" data-preco="${pr.preco}"`)}</div>`; }).join(''); ligarSteppers($('#oItens')); calc(); };
+  <div class="row" style="margin-top:12px;justify-content:flex-end;gap:14px;flex-wrap:wrap"><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="oPadrao" checked style="width:auto"> Guardar os preços como padrão deste cliente</label><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="oBling" checked style="width:auto"> Criar o pedido no Bling</label><button class="btn pri" id="oSave" ${p ? '' : 'disabled'}>Lançar venda</button></div></div></div></section>`;
+  const fill = () => { const e = +$('#oExp').value; let l = ''; $('#oItens').innerHTML = S.base.produtos.map(pr => { const h = pr.linha !== l ? `<div style="grid-column:1/-1;font-weight:700;margin-top:6px;color:var(--car-d)">${esc(l = pr.linha)}</div>` : ''; const pc = S.precosCli?.[pr.id], v = pc != null ? Number(pc) : Number(pr.preco);
+    return h + `<div class="item-v"><div class="nm"><span>${esc(pr.sabor)}</span><label class="preco ${pc != null && Number(pc) !== Number(pr.preco) ? 'custom' : ''}" title="Tabela: ${brl(pr.preco)}">R$ <input type="number" step="0.05" min="0" class="opr" data-p="${pr.id}" data-tab="${pr.preco}" value="${v.toFixed(2)}"></label></div>${stepper('oq', 0, false, `data-p="${pr.id}"`)}</div>`; }).join(''); ligarSteppers($('#oItens')); calc(); };
   const cond = () => document.querySelector('input[name=oc]:checked').value;
-  const calc = () => { const qs = [...document.querySelectorAll('.oq')], un = qs.reduce((a, i) => a + (+i.value || 0), 0), tot = qs.reduce((a, i) => a + (+i.value || 0) * (+i.dataset.preco || 0), 0), c = cond();
+  const precoDe = pid => +(document.querySelector(`.opr[data-p="${pid}"]`)?.value) || 0;
+  const calc = () => { const qs = [...document.querySelectorAll('.oq')], un = qs.reduce((a, i) => a + (+i.value || 0), 0), tot = qs.reduce((a, i) => a + (+i.value || 0) * precoDe(i.dataset.p), 0), c = cond();
+    document.querySelectorAll('.opr').forEach(i => i.parentElement.classList.toggle('custom', Math.abs((+i.value || 0) - +i.dataset.tab) > 0.001));
     $('#oUn').textContent = un; $('#oTot').textContent = brl(tot);
     $('#oInfo').textContent = tot && tot < (+$('#oMin').value || 0) ? 'abaixo do pedido mínimo' : ''; return { un, tot, c }; };
   document.querySelectorAll('input[name=oc]').forEach(x => x.onchange = () => { $('#oVenc').value = isoDe(new Date(Date.now() + (cond() === 'Dinheiro' ? 0 : 7) * DIA)); });
@@ -640,12 +643,15 @@ function telaAbertura() {
     sug.style.display = 'block'; sug.querySelectorAll('[data-pick]').forEach(d => d.onmousedown = e => { e.preventDefault(); S.abPdv = d.dataset.pick; telaAbertura(); }); };
   bu.onfocus = () => { bu.select(); listar(); }; bu.oninput = listar; bu.onblur = () => setTimeout(() => { sug.style.display = 'none'; }, 150);
   $('#oCad').onclick = () => abrirCadastro(null);
-  $('#oExp').onchange = fill; const sec = $('#main section'); sec.addEventListener('input', calc); sec.addEventListener('change', calc); fill();
+  $('#oExp').onchange = fill; const sec = $('#main section'); sec.addEventListener('input', calc); sec.addEventListener('change', calc);
+  S.precosCli = {}; fill();
+  if (p) db.precosCliente(p.id).then(pc => { if (S.abPdv !== p.id || !Object.keys(pc || {}).length) return; S.precosCli = pc; const q = {}; document.querySelectorAll('.oq').forEach(i => q[i.dataset.p] = i.value); fill(); document.querySelectorAll('.oq').forEach(i => i.value = q[i.dataset.p] || 0); calc(); toast('Preços combinados com este cliente carregados'); });
   $('#oSave').onclick = async () => {
     const t = calc(); if (!t.un) return toast('Coloque os itens do pedido');
     const c = t.c;
-    const itens = [...document.querySelectorAll('.oq')].map(i => ({ produto_id: +i.dataset.p, quantidade: +i.value || 0, preco_unit: +i.dataset.preco || 0, bonificado: 0 }));
-    const hoje = new Date(), venc = $('#oVenc').value || null, mandar = $('#oBling').checked;
+    const itens = [...document.querySelectorAll('.oq')].map(i => ({ produto_id: +i.dataset.p, quantidade: +i.value || 0, preco_unit: precoDe(i.dataset.p), bonificado: 0 }));
+    const novosPrecos = {}; document.querySelectorAll('.opr').forEach(i => { if (Math.abs((+i.value || 0) - +i.dataset.tab) > 0.001) novosPrecos[i.dataset.p] = +(+i.value).toFixed(2); });
+    const hoje = new Date(), venc = $('#oVenc').value || null, mandar = $('#oBling').checked, guardar = $('#oPadrao').checked;
     $('#oSave').disabled = true;
     try {
       const reg = jaCliente
@@ -657,6 +663,7 @@ function telaAbertura() {
         patch: { etapa: 'avaliacao', avaliacao_inicio: hoje.toISOString().slice(0, 10), expositor_id: +$('#oExp').value, condicao: c, pedido_minimo: +$('#oMin').value || 150, cadencia_dias: $('#oCad').value ? +$('#oCad').value : null } });
       await atualizarUm(p.id); const n = S.pdvs.find(x => x.id === p.id);
       toast(jaCliente ? `Venda lançada para ${p.nome}.` : `Venda lançada para ${p.nome}. Primeira reposição em ${dstr(n.proxima_reposicao)}.`);
+      if (guardar && JSON.stringify(novosPrecos) !== JSON.stringify(S.precosCli || {})) { try { await db.salvarPrecos(p.id, novosPrecos); } catch (e) { toast('Venda salva, mas os preços do cliente não foram guardados: rode o SQL 015'); } }
       if (mandar && reg?.pedido?.id) await enviarAoBling(reg.pedido.id, p.nome); S.abPdv = null; if (S.prosp) { PZ.visHoje[p.id] = 'fechou'; PZ.aberto = null; irPara('mapa'); } else telaAbertura();
     } catch (e) { erro(e); $('#oSave').disabled = false; }
   };
