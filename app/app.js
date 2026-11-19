@@ -142,7 +142,7 @@ function telaMapa() {
    <div class="maptools"><div class="mbusca"><input id="bBusca" autocomplete="off" placeholder="🔍 Buscar cliente…"><div id="bSug" class="sugs"></div></div><button class="btn pri" id="bAdd">+ Cadastrar ponto</button><button class="btn" id="bPend">Reposições pendentes <b id="nPend"></b></button><button class="btn" id="bLoc">📍 Minha localização</button>
    <select id="fEt"><option value="">Todas as etapas</option>${ETAPAS.map(e => `<option value="${e.k}">${e.n}</option>`).join('')}</select>
    <select id="fReg"><option value="">Todas as regiões</option>${S.base.regioes.map(r => `<option value="${r.codigo}">${r.codigo} · ${esc(r.nome)}</option>`).join('')}</select>
-   <label class="regchk"><input type="checkbox" id="tReg" ${mostrarReg ? 'checked' : ''}> Regiões</label><button class="btn ${S.nuvens ? 'car' : ''}" id="bNuvem">☁️ Nuvens de potencial</button></div>
+   <label class="regchk"><input type="checkbox" id="tReg" ${mostrarReg ? 'checked' : ''}> Regiões</label><button class="btn ${S.nuvens ? 'car' : ''}" id="bNuvem">☁️ Nuvens de potencial</button><button class="btn" id="bCheia" title="Tela cheia">⛶ Tela cheia</button></div>
    <div class="hint" id="hint">Toque no mapa onde fica o ponto</div>
    <div class="legend" id="legend"></div></div><aside id="side"></aside></section>`;
   if (mapa) { mapa.remove(); mapa = null; }
@@ -166,6 +166,8 @@ function telaMapa() {
   if (S.rastreando) { mostrarEu(false); $('#bLoc').classList.add('pri'); }
   $('#fEt').onchange = $('#fReg').onchange = desenhar;
   $('#tReg').onchange = e => { mostrarReg = e.target.checked; desenhar(); };
+  $('#bCheia').onclick = () => { const sec = $('#mapa').parentElement; if (document.fullscreenElement) document.exitFullscreen(); else (sec.requestFullscreen || sec.webkitRequestFullscreen)?.call(sec); };
+  if (!S.cheiaLigado) { S.cheiaLigado = true; document.addEventListener('fullscreenchange', () => { const b = $('#bCheia'); if (b) b.textContent = document.fullscreenElement ? '✕ Sair da tela cheia' : '⛶ Tela cheia'; setTimeout(() => mapa && mapa.invalidateSize(), 150); }); }
   $('#bNuvem').onclick = () => { S.nuvens = !S.nuvens; $('#bNuvem').classList.toggle('car', S.nuvens); if (S.nuvens) { S.sel = null; desenharNuvens(true); } else { camadaNuvem?.clearLayers(); painel(); } };
   camadaNuvem = null; if (S.nuvens) setTimeout(() => desenharNuvens(false), 0);
   desenhar(); painel();

@@ -345,3 +345,5 @@ table.bo input{width:120px}
 .pcmp{align-self:center;color:var(--mute);font-size:13px}
 /* mapa ocupa a tela toda quando nada está selecionado */
 #mapa + aside#side:not(.open){display:none}
+section:fullscreen{background:var(--cream);width:100vw;height:100vh}
+section:fullscreen #mapa{height:100vh}
