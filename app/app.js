@@ -923,7 +923,8 @@ async function telaPerfil() {
      <div class="row" style="flex-wrap:wrap">${linkWpp(c.whatsapp || c.telefone) ? `<a class="btn car" style="text-decoration:none" target="_blank" rel="noopener" href="${linkWpp(c.whatsapp || c.telefone)}">WhatsApp ↗</a>` : ''}<button class="btn" id="pVerContato">Abrir contato</button><button class="btn" id="pTrocarContato">Trocar</button></div>`
       : `<p class="empty" style="padding:6px 0">Nenhum contato vinculado.</p><button class="btn pri" id="pTrocarContato">Vincular contato</button>`}</div>
     <div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">Próximas ações</h3><button class="btn pri" id="pNovaTar" style="padding:5px 10px">+ Nova</button></div><div style="margin-top:8px">${listaTarefas(tars.filter(t => !t.concluida), 'Nenhuma ação marcada.')}</div>${tars.some(t => t.concluida) ? `<details style="margin-top:6px"><summary style="cursor:pointer;color:var(--mute);font-size:12px">Concluídas (${tars.filter(t => t.concluida).length})</summary>${listaTarefas(tars.filter(t => t.concluida), '')}</details>` : ''}</div>
-    <div class="panel"><h3>Resumo</h3><div class="kv" style="margin:0"><div><small>Criado em</small><b>${dstr(p.criado_em)}</b></div><div><small>Visitas</small><b>${h.visitas.length}</b></div><div><small>Pedidos</small><b>${h.pedidos.length}</b></div><div><small>Total pedido</small><b>${brl(h.pedidos.reduce((a, o) => a + Number(o.valor), 0))}</b></div></div></div>
+    <div class="panel"><h3>Resumo</h3><div class="kv" style="margin:0"><div><small>${h.pedidos.length ? 'Cliente desde' : 'Criado em'}</small><b>${dataLonga(h.pedidos.length ? h.pedidos[0].criado_em : p.criado_em)}</b>${h.pedidos.length ? '<small>1º pedido no Bling</small>' : ''}</div><div><small>Visitas</small><b>${h.visitas.length}</b></div><div><small>Pedidos</small><b>${h.pedidos.length}</b></div><div><small>Total pedido</small><b>${brl(h.pedidos.reduce((a, o) => a + Number(o.valor), 0))}</b></div></div></div>
+    ${fluxoPedidos(h.pedidos)}
     <div class="panel"><button class="btn" id="pExcluir" style="width:100%;color:#7A2414">Excluir negócio</button><small style="color:var(--mute);display:block;margin-top:6px">Use para apagar cadastro duplicado, errado ou de teste. Apaga também os pedidos dele.</small></div>
    </div></div></div></section>`;
   $('#pVoltar').onclick = () => irPara(S.voltar || 'carteira');
@@ -1455,6 +1456,37 @@ async function limparPedidook() {
     try { await db.atualizarPdv(p.id, { observacao: obs }); p.observacao = obs; } catch (e) { console.warn(e); return; }
   }
   if (sujos.length && S.aba === 'perfil') telaPerfil();
+}
+const dataLonga = d => new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+// pequena análise do fluxo de pedidos de um cliente
+function fluxoPedidos(peds) {
+  if (!peds.length) return '';
+  const ds = peds.map(o => new Date(o.criado_em)).sort((a, b) => a - b), vals = peds.map(o => Number(o.valor) || 0);
+  const total = vals.reduce((a, b) => a + b, 0), ticket = total / peds.length;
+  const gaps = ds.slice(1).map((d, i) => (d - ds[i]) / DIA).filter(g => g > 0.5);
+  const inter = gaps.length ? gaps.reduce((a, b) => a + b, 0) / gaps.length : null;
+  const ult = ds[ds.length - 1], semPedido = Math.floor((Date.now() - ult) / DIA);
+  // meses (últimos 12)
+  const hoje = new Date(), meses = [];
+  for (let i = 11; i >= 0; i--) { const m = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1); meses.push({ k: m.getFullYear() + '-' + m.getMonth(), n: m.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', ''), v: 0, q: 0 }); }
+  peds.forEach(o => { const d = new Date(o.criado_em), m = meses.find(x => x.k === d.getFullYear() + '-' + d.getMonth()); if (m) { m.v += Number(o.valor) || 0; m.q++; } });
+  const max = Math.max(...meses.map(m => m.v), 1);
+  // leitura
+  let leitura, cor;
+  if (peds.length === 1) { leitura = `Fez só 1 pedido, há ${semPedido} dias. Ainda não tem ritmo de compra.`; cor = semPedido > 45 ? '#B8402A' : '#8C7E74'; }
+  else {
+    const atraso = semPedido / inter;
+    if (atraso <= 1.3) { leitura = `No ritmo: compra a cada ${Math.round(inter)} dias em média e o último pedido foi há ${semPedido} dias.`; cor = '#2F7D4E'; }
+    else if (atraso <= 2.5) { leitura = `Atrasado: comprava a cada ${Math.round(inter)} dias e está há ${semPedido} dias sem pedido. Vale um contato.`; cor = '#D08A3C'; }
+    else { leitura = `Parou de comprar: o ritmo era a cada ${Math.round(inter)} dias e já são ${semPedido} dias sem pedido (${atraso.toFixed(1).replace('.', ',')}× o normal).`; cor = '#B8402A'; }
+    const meio = Math.floor(vals.length / 2), a1 = vals.slice(0, meio), a2 = vals.slice(meio);
+    if (a1.length >= 2 && a2.length >= 2) { const m1 = a1.reduce((a, b) => a + b, 0) / a1.length, m2 = a2.reduce((a, b) => a + b, 0) / a2.length, var_ = (m2 - m1) / m1;
+      if (Math.abs(var_) >= .15) leitura += ` O valor por pedido ${var_ > 0 ? 'subiu' : 'caiu'} ${Math.round(Math.abs(var_) * 100)}% na segunda metade do histórico.`; }
+  }
+  return `<div class="panel"><h3>Fluxo de pedidos</h3>
+   <div class="kv" style="margin:0 0 10px"><div><small>Ticket médio</small><b>${brl(ticket)}</b></div><div><small>Compra a cada</small><b>${inter ? Math.round(inter) + ' dias' : '—'}</b></div><div><small>Último pedido</small><b>${dataLonga(ult)}</b><small>há ${semPedido} dias</small></div><div><small>Próximo esperado</small><b>${inter ? dataLonga(new Date(+ult + inter * DIA)) : '—'}</b></div></div>
+   <div class="fluxo">${meses.map(m => `<div title="${m.n}: ${m.q} pedido${m.q === 1 ? '' : 's'} · ${brl(m.v)}"><i style="height:${Math.round(m.v / max * 100)}%"></i><small>${m.n}</small></div>`).join('')}</div>
+   <p style="margin:10px 0 0;font-size:13px;border-left:3px solid ${cor};padding-left:8px">${leitura}</p></div>`;
 }
 async function syncBlingAuto() {
   try { if (S.blingSync && Date.now() - S.blingSync < 15 * 60000) return;
