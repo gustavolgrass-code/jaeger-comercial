@@ -122,3 +122,11 @@ export async function bling(acao, extra = {}) {
 }
 export async function blingOrfaos() { return ok(await sb.from('bling_orfaos').select('*').order('data', { ascending: false })); }
 export async function blingIgnorar(blingId) { return ok(await sb.from('bling_orfaos').delete().eq('bling_id', blingId)); }
+// venda para quem já é cliente: só o pedido (não conta como visita de reposição nem mexe na etapa)
+export async function registrarVenda({ pdvId, usuarioId, pedido, itens, patch }) {
+  const ped = ok(await sb.from('pedidos').insert({ ...pedido, pdv_id: pdvId, criado_por: usuarioId }).select().single());
+  const its = itens.filter(i => i.quantidade > 0);
+  if (its.length) ok(await sb.from('pedido_itens').insert(its.map(i => ({ ...i, pedido_id: ped.id }))));
+  if (patch) await atualizarPdv(pdvId, patch);
+  return { pedido: ped };
+}

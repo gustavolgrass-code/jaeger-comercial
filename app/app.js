@@ -606,18 +606,20 @@ function telaCarteira() {
 
 /* =================== abertura de cliente =================== */
 function telaAbertura() {
-  const elig = S.pdvs.filter(p => ['mapeado', 'visitado', 'negociacao', 'inativo'].includes(p.etapa));
+  const elig = S.pdvs.filter(p => p.etapa !== 'perdido').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
   if (!S.abPdv || !elig.some(p => p.id === S.abPdv)) S.abPdv = (elig.find(p => p.id === S.sel) || elig.find(p => p.etapa === 'negociacao') || elig[0] || {}).id;
   const p = S.pdvs.find(x => x.id === S.abPdv);
+  const jaCliente = p && ['avaliacao', 'ativo', 'risco', 'revisao'].includes(p.etapa);
   const ex = S.base.expositores;
   $('#main').innerHTML = `<section class="view on"><div class="dash"><div class="panel" style="max-width:980px">
-  <div class="row" style="justify-content:space-between;flex-wrap:wrap"><h3 style="font-family:Fraunces,Georgia,serif;font-size:22px;font-weight:600;margin:0">Abertura de cliente</h3><button class="btn" id="oCad">+ Cadastrar ponto</button></div>
+  <div class="row" style="justify-content:space-between;flex-wrap:wrap"><h3 style="font-family:Fraunces,Georgia,serif;font-size:22px;font-weight:600;margin:0">${jaCliente ? 'Nova venda' : 'Abertura de cliente'}</h3><button class="btn" id="oCad">+ Cadastrar ponto</button></div>
   ${p ? '' : '<p class="empty">Nenhum PDV disponível. Cadastre um ponto no mapa primeiro.</p>'}
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
    <div><label class="lb">PDV</label><select id="oPdv" style="width:100%">${elig.map(x => `<option value="${x.id}" ${x.id === S.abPdv ? 'selected' : ''}>${esc(x.nome)} · ${etapa(x.etapa).n}</option>`).join('')}</select></div>
+   ${jaCliente ? `<div style="align-self:end;color:var(--soft);font-size:13px">Já é cliente (${etapa(p.etapa).n}): lança só o pedido, sem mexer na etapa nem no expositor.</div><div style="display:none">` : '<div style="display:contents">'}
    <div><label class="lb">Expositor entregue</label><select id="oExp" style="width:100%">${ex.map(e => `<option value="${e.id}">${esc(e.nome)} · ${e.capacidade} un.</option>`).join('')}</select></div>
    <div><label class="lb">Pedido mínimo combinado (R$)</label><input id="oMin" type="number" step="10" value="150" style="width:100%"></div>
-   <div><label class="lb">Repor a cada</label><select id="oCad" style="width:100%"><option value="">${cadPadrao().avaliacao || 7} dias (padrão da avaliação)</option><option value="10">10 dias</option><option value="14">14 dias</option></select></div></div>
+   <div><label class="lb">Repor a cada</label><select id="oCad" style="width:100%"><option value="">${cadPadrao().avaliacao || 7} dias (padrão da avaliação)</option><option value="10">10 dias</option><option value="14">14 dias</option></select></div></div></div>
   <h3 style="margin:16px 0 6px">Pagamento</h3><div class="row" style="flex-wrap:wrap;gap:14px;align-items:flex-end"><div class="pay" style="margin:0">${FORMAS.map((c, i) => `<label><input type="radio" name="oc" value="${c}" ${i === 0 ? 'checked' : ''}> ${c}</label>`).join('')}</div>
    <div><label class="lb">Vencimento</label><input id="oVenc" type="date" value="${isoDe(new Date(Date.now() + 7 * DIA))}"></div></div>
   <div class="row" style="justify-content:space-between;flex-wrap:wrap;margin:16px 0 6px"><h3 style="margin:0">Itens do pedido</h3><div class="row" style="gap:6px;flex-wrap:wrap"><span style="color:var(--mute);font-size:12px">Kits:</span>${KITS.map((k, i) => `<button class="mini" data-kit="${i}">+ ${k.n}</button>`).join('')}<button class="mini" id="oZera">zerar</button></div></div><div id="oItens" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:6px 14px"></div>
@@ -642,13 +644,15 @@ function telaAbertura() {
     const hoje = new Date(), venc = $('#oVenc').value || null, mandar = $('#oBling').checked;
     $('#oSave').disabled = true;
     try {
-      const reg = await db.registrarAbertura({ pdvId: p.id, usuarioId: S.eu.id, observacao: $('#oObs').value || null,
+      const reg = jaCliente
+        ? await db.registrarVenda({ pdvId: p.id, usuarioId: S.eu.id, pedido: { tipo: 'reposicao', condicao: c, unidades: t.un, valor: t.tot, pago_na_hora: c === 'Dinheiro', vencimento: venc }, itens, patch: { condicao: c } })
+        : await db.registrarAbertura({ pdvId: p.id, usuarioId: S.eu.id, observacao: $('#oObs').value || null,
         contagens: itens.filter(i => i.quantidade).map(i => ({ produto_id: i.produto_id, deixado_anterior: 0, encontrado: 0, troca: 0, reposto: i.quantidade })),
         pedido: { tipo: 'abertura', condicao: c, unidades: t.un, valor: t.tot, pago_na_hora: c === 'Dinheiro', vencimento: venc },
         itens,
         patch: { etapa: 'avaliacao', avaliacao_inicio: hoje.toISOString().slice(0, 10), expositor_id: +$('#oExp').value, condicao: c, pedido_minimo: +$('#oMin').value || 150, cadencia_dias: $('#oCad').value ? +$('#oCad').value : null } });
       await atualizarUm(p.id); const n = S.pdvs.find(x => x.id === p.id);
-      toast(`Venda lançada para ${p.nome}. Primeira reposição em ${dstr(n.proxima_reposicao)}.`);
+      toast(jaCliente ? `Venda lançada para ${p.nome}.` : `Venda lançada para ${p.nome}. Primeira reposição em ${dstr(n.proxima_reposicao)}.`);
       if (mandar && reg?.pedido?.id) await enviarAoBling(reg.pedido.id, p.nome); S.abPdv = null; if (S.prosp) { PZ.visHoje[p.id] = 'fechou'; PZ.aberto = null; irPara('mapa'); } else telaAbertura();
     } catch (e) { erro(e); $('#oSave').disabled = false; }
   };
