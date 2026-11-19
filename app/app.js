@@ -139,7 +139,7 @@ let aoMarcar = null, mapa = null, camada = null, camadaSug = null, marcando = fa
 function telaMapa() {
   if (S.prosp) return telaProspeccao();
   $('#main').innerHTML = `<section class="view on" style="display:flex;height:100%"><div id="mapa"><div id="lmap"></div>
-   <div class="maptools"><button class="btn car" id="bProsp">🧭 Modo prospecção</button><button class="btn pri" id="bAdd">+ Cadastrar ponto</button><button class="btn" id="bPend">Reposições pendentes <b id="nPend"></b></button><button class="btn" id="bLoc">📍 Minha localização</button>
+   <div class="maptools"><div class="mbusca"><input id="bBusca" autocomplete="off" placeholder="🔍 Buscar cliente…"><div id="bSug" class="sugs"></div></div><button class="btn pri" id="bAdd">+ Cadastrar ponto</button><button class="btn" id="bPend">Reposições pendentes <b id="nPend"></b></button><button class="btn" id="bLoc">📍 Minha localização</button>
    <select id="fEt"><option value="">Todas as etapas</option>${ETAPAS.map(e => `<option value="${e.k}">${e.n}</option>`).join('')}</select>
    <select id="fReg"><option value="">Todas as regiões</option>${S.base.regioes.map(r => `<option value="${r.codigo}">${r.codigo} · ${esc(r.nome)}</option>`).join('')}</select>
    <label class="regchk"><input type="checkbox" id="tReg" ${mostrarReg ? 'checked' : ''}> Regiões</label></div>
@@ -151,7 +151,15 @@ function telaMapa() {
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(mapa);
   camada = L.layerGroup().addTo(mapa); camadaSug = L.layerGroup().addTo(mapa);
   mapa.on('click', e => { if (!marcando) return; marcando = false; $('#hint').style.display = 'none'; const f = aoMarcar || (ll => abrirCadastro(ll)); aoMarcar = null; f([e.latlng.lng, e.latlng.lat]); });
-  $('#bProsp').onclick = () => { S.prosp = true; PZ.aberto = null; telaMapa(); };
+  { const bu = $('#bBusca'), sug = $('#bSug');
+    const listar = () => { const q = norm(bu.value).trim(); if (!q) { sug.style.display = 'none'; return; }
+      const ls = S.pdvs.filter(x => norm([x.nome, x.razao_social, x.bairro, x.cidade].filter(Boolean).join(' ')).includes(q)).slice(0, 12);
+      sug.innerHTML = ls.map(x => `<div data-pick="${x.id}"><b>${esc(x.nome)}</b> <small style="color:${etapa(x.etapa).c};font-weight:700">${etapa(x.etapa).n}</small><br><small style="color:var(--mute)">${esc([x.bairro, x.cidade].filter(Boolean).join(' · '))}${x.lat ? '' : ' · sem localização'}</small></div>`).join('') || '<div style="color:var(--mute)">Nenhum cliente encontrado</div>';
+      sug.style.display = 'block';
+      sug.querySelectorAll('[data-pick]').forEach(d => d.onmousedown = e => { e.preventDefault(); const x = S.pdvs.find(y => y.id === d.dataset.pick); bu.value = ''; sug.style.display = 'none'; bu.blur();
+        S.sel = x.id; if (x.lat) mapa.setView([x.lat, x.lng], Math.max(mapa.getZoom(), 16)); else toast('Esse cliente ainda não tem localização no mapa'); desenhar(); painel(); }); };
+    bu.oninput = listar; bu.onfocus = listar; bu.onblur = () => setTimeout(() => { sug.style.display = 'none'; }, 150);
+    bu.onkeydown = e => { if (e.key === 'Enter') sug.querySelector('[data-pick]')?.dispatchEvent(new MouseEvent('mousedown')); if (e.key === 'Escape') { bu.value = ''; listar(); } }; }
   $('#bAdd').onclick = () => abrirCadastro(null);
   $('#bPend').onclick = () => { S.modoPend = !S.modoPend; S.sel = null; desenhar(); painel(); };
   $('#bLoc').onclick = () => alternarLocalizacao();
