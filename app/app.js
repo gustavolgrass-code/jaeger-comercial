@@ -81,6 +81,7 @@ async function iniciar() {
     await recarregar();
     montar();
     avaliarRisco();
+    limparPedidook();
     if (location.hash.startsWith('#bling=')) { const h = new URLSearchParams(location.hash.slice(1)); history.replaceState(null, '', location.pathname); if (h.get('bling') === 'ok') { toast('Bling conectado! Lendo os pedidos…'); irPara('regras'); try { const r = await db.bling('sincronizar'); S.blingSync = Date.now(); await recarregar(); toast('Bling: ' + resumoSync(r)); irPara('regras'); } catch (e) { erro(e); } } else { irPara('regras'); toast('Não conectou ao Bling: ' + (h.get('msg') || 'erro')); } }
     else setTimeout(syncBlingAuto, 3000);
   } catch (e) { $('#raiz').innerHTML = `<div class="loading">Não foi possível carregar: ${esc(e.message)}</div>`; }
@@ -1445,6 +1446,15 @@ async function painelBling() {
       $('#bRes').innerHTML = `<b>${tot.criados} contatos criados · ${tot.completados} completados · ${tot.sem_dados} sem dados no Bling${tot.nao_achados ? ` · ${tot.nao_achados} não achados no Bling` : ''}.</b><br><small>${falta} clientes ainda com ⚠️ dados faltando (filtro em Negócios).</small>`; toast('Contatos atualizados');
     } catch (e) { $('#bRes').innerHTML = `<span style="color:#7A2414">${esc(e.message)}</span>`; } b.disabled = false; };
   if ($('#bSync')) $('#bSync').onclick = async () => { const b = $('#bSync'); b.disabled = true; $('#bRes').innerHTML = '<small>Lendo pedidos do Bling…</small>'; try { const r = await db.bling('sincronizar'); S.blingSync = Date.now(); await recarregar(); toast('Bling sincronizado'); $('#bRes').innerHTML = `<b>${esc(resumoSync(r))}</b>`; setTimeout(painelBling, 1500); } catch (e) { $('#bRes').innerHTML = `<span style="color:#7A2414">${esc(e.message)}</span>`; b.disabled = false; } };
+}
+// o Pedidook foi descontinuado: tira o "Pedidook cód. N" que veio na importação da carteira
+async function limparPedidook() {
+  const sujos = S.pdvs.filter(p => /Pedidook cód\./.test(p.observacao || ''));
+  for (const p of sujos) {
+    const obs = (p.observacao || '').replace(/Pedidook cód\.\s*\S+(\s*·\s*)?/g, '').replace(/^[\s·]+|[\s·]+$/g, '') || null;
+    try { await db.atualizarPdv(p.id, { observacao: obs }); p.observacao = obs; } catch (e) { console.warn(e); return; }
+  }
+  if (sujos.length && S.aba === 'perfil') telaPerfil();
 }
 async function syncBlingAuto() {
   try { if (S.blingSync && Date.now() - S.blingSync < 15 * 60000) return;
