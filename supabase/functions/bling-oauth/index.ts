@@ -100,6 +100,32 @@ async function sincronizar() {
   return resultado;
 }
 
+// completa o contato dos clientes com o cadastro do Bling, de 20 em 20 (para caber no tempo da função)
+async function puxarContatos(inicio: number) {
+  const token = await tokenValido();
+  const { data: pdvs, count, error } = await db.from('pdvs').select('id, nome, razao_social, cnpj, bling_contato_id', { count: 'exact' })
+    .in('etapa', ['avaliacao', 'ativo', 'risco', 'revisao', 'inativo']).order('nome').range(inicio, inicio + 19);
+  if (error) throw error;
+  const lista: unknown[] = []; let nao_achados = 0;
+  for (const p of pdvs ?? []) {
+    let id = p.bling_contato_id ? Number(p.bling_contato_id) : null;
+    const doc = String(p.cnpj ?? '').replace(/\D/g, '');
+    if (!id && doc) { const r = await chamar(`/contatos?limite=1&numeroDocumento=${doc}`, token); id = r?.data?.[0]?.id ?? null; }
+    if (!id && p.razao_social) {
+      const r = await chamar(`/contatos?limite=5&pesquisa=${encodeURIComponent(p.razao_social)}`, token);
+      id = (r?.data ?? []).find((c: { nome?: string }) => (c.nome ?? '').trim().toLowerCase() === p.razao_social.trim().toLowerCase())?.id ?? null;
+    }
+    if (!id) { nao_achados++; continue; }
+    const c = (await chamar(`/contatos/${id}`, token))?.data ?? {};
+    lista.push({ pdv_id: p.id, bling_id: String(id), pessoa: c.pessoasContato?.[0]?.descricao ?? null, info: c.informacoesContato ?? null,
+      telefone: c.telefone ?? null, celular: c.celular ?? null, email: c.email ?? null });
+  }
+  const { data: res, error: e2 } = await db.rpc('bling_contatos', { lista });
+  if (e2) throw e2;
+  const proximo = inicio + (pdvs?.length ?? 0);
+  return { ...res, nao_achados, feitos: proximo, total: count ?? 0, fim: proximo >= (count ?? 0) || !(pdvs?.length) };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   const url = new URL(req.url);
@@ -124,7 +150,7 @@ Deno.serve(async (req) => {
   const jwt = (req.headers.get('Authorization') ?? '').replace('Bearer ', '');
   const { data: u } = await db.auth.getUser(jwt);
   if (!u?.user) return json({ erro: 'não autorizado' }, 401);
-  const { acao } = await req.json().catch(() => ({}));
+  const { acao, inicio } = await req.json().catch(() => ({}));
   try {
     if (acao === 'status') {
       const { data } = await db.from('bling_conexao').select('conectado_em, ultima_sync, ultimo_resultado, ultimo_erro, refresh_token').eq('id', 1).maybeSingle();
@@ -139,6 +165,7 @@ Deno.serve(async (req) => {
       return json({ url: `${BLING}/oauth/authorize?${q}` });
     }
     if (acao === 'sincronizar') return json(await sincronizar());
+    if (acao === 'contatos') return json(await puxarContatos(Number(inicio) || 0));
     return json({ erro: 'ação desconhecida' }, 400);
   } catch (e) {
     const msg = String((e as Error).message ?? e);

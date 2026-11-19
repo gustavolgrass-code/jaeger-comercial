@@ -115,8 +115,8 @@ export async function visitasDoDia(dia) { const de = new Date(dia + 'T00:00:00')
 export async function criarPdvs(lista) { const out = []; for (let i = 0; i < lista.length; i += 300) out.push(...ok(await sb.from('pdvs').insert(lista.slice(i, i + 300)).select('id'))); return out; }
 export async function ultimosPedidos(pdvId, n = 5) { return ok(await sb.from('pedidos').select('numero, bling_pedido_id, tipo, valor, criado_em').eq('pdv_id', pdvId).order('criado_em', { ascending: false }).limit(n)); }
 // integração Bling (a função do servidor guarda as chaves; o app só pede ações)
-export async function bling(acao) {
-  const { data, error } = await sb.functions.invoke('bling-oauth', { body: { acao } });
+export async function bling(acao, extra = {}) {
+  const { data, error } = await sb.functions.invoke('bling-oauth', { body: { acao, ...extra } });
   if (error) { let m = error.message; try { m = (await error.context.json()).erro || m; } catch { } throw new Error(m); }
   return data;
 }

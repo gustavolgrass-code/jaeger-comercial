@@ -367,7 +367,7 @@ const CART = ['avaliacao', 'ativo', 'risco', 'revisao', 'inativo'];
 function faltaContato(p) {
   if (!CART.includes(p.etapa)) return [];
   const c = S.contatos.find(x => x.id === p.contato_id) || {};
-  return [!c.nome && 'pessoa de contato', !c.cargo && 'cargo', !(c.telefone || c.whatsapp || p.telefone) && 'telefone', !c.email && 'e-mail'].filter(Boolean);
+  return [(!c.nome || /sem pessoa de contato/.test(c.observacao || '')) && 'pessoa de contato', !c.cargo && 'cargo', !(c.telefone || c.whatsapp || p.telefone) && 'telefone', !c.email && 'e-mail'].filter(Boolean);
 }
 const avisoContato = (p, curto) => { const f = faltaContato(p); return f.length ? `<span class="aviso-ct" title="Faltam dados do contato: ${f.join(', ')}">⚠️ ${curto ? 'Falta ' : 'Faltam dados: '}${f.join(', ')}</span>` : ''; };
 const MOTIVOS = ['Preço', 'Sem espaço', 'Concorrente', 'Dono não decide', 'Sem interesse', 'Outro'];
@@ -1435,8 +1435,15 @@ async function painelBling() {
    <div class="kv" style="margin:6px 0 10px"><div><small>Situação</small><b>${s.conectado ? 'Conectado' : 'Não conectado'}</b><small>${s.conectado ? 'desde ' + quandoB(s.conectado_em) : ''}</small></div><div><small>Última sincronização</small><b>${quandoB(s.ultima_sync)}</b><small>${esc(resumoSync(s.ultimo_resultado))}</small></div></div>
    ${s.ultimo_erro ? `<p style="color:#7A2414;font-size:13px">Último erro: ${esc(s.ultimo_erro)}</p>` : ''}
    <p style="color:var(--soft);margin-top:0">Os pedidos do Bling entram sozinhos ao abrir o app (no máximo a cada 15 minutos). Clientes ficam Ativos ou Inativos pela regra dos 90 dias.</p>
-   <div class="row" style="flex-wrap:wrap">${s.conectado ? '<button class="btn pri" id="bSync">Sincronizar agora</button><button class="btn" id="bCon">Reconectar</button>' : `<button class="btn pri" id="bCon" ${s.configurado ? '' : 'disabled'}>Conectar ao Bling</button>`}</div><div id="bRes" style="margin-top:8px"></div>`;
+   <div class="row" style="flex-wrap:wrap">${s.conectado ? '<button class="btn pri" id="bSync">Sincronizar agora</button><button class="btn" id="bCont">Puxar contatos do Bling</button><button class="btn" id="bCon">Reconectar</button>' : `<button class="btn pri" id="bCon" ${s.configurado ? '' : 'disabled'}>Conectar ao Bling</button>`}</div><div id="bRes" style="margin-top:8px"></div>`;
   $('#bCon').onclick = async () => { try { const r = await db.bling('conectar'); location.href = r.url; } catch (e) { erro(e); } };
+  if ($('#bCont')) $('#bCont').onclick = async () => { const b = $('#bCont'); b.disabled = true; let ini = 0, tot = { criados: 0, completados: 0, sem_dados: 0, nao_achados: 0 };
+    try { for (let volta = 0; volta < 40; volta++) { $('#bRes').innerHTML = `<small>Lendo contatos no Bling… ${ini} clientes</small>`;
+        const r = await db.bling('contatos', { inicio: ini }); ['criados', 'completados', 'sem_dados', 'nao_achados'].forEach(k => tot[k] += r[k] || 0); ini = r.feitos;
+        $('#bRes').innerHTML = `<small>Lendo contatos no Bling… ${r.feitos} de ${r.total} clientes</small>`; if (r.fim) break; }
+      await recarregar(); const falta = S.pdvs.filter(p => faltaContato(p).length).length;
+      $('#bRes').innerHTML = `<b>${tot.criados} contatos criados · ${tot.completados} completados · ${tot.sem_dados} sem dados no Bling${tot.nao_achados ? ` · ${tot.nao_achados} não achados no Bling` : ''}.</b><br><small>${falta} clientes ainda com ⚠️ dados faltando (filtro em Negócios).</small>`; toast('Contatos atualizados');
+    } catch (e) { $('#bRes').innerHTML = `<span style="color:#7A2414">${esc(e.message)}</span>`; } b.disabled = false; };
   if ($('#bSync')) $('#bSync').onclick = async () => { const b = $('#bSync'); b.disabled = true; $('#bRes').innerHTML = '<small>Lendo pedidos do Bling…</small>'; try { const r = await db.bling('sincronizar'); S.blingSync = Date.now(); await recarregar(); toast('Bling sincronizado'); $('#bRes').innerHTML = `<b>${esc(resumoSync(r))}</b>`; setTimeout(painelBling, 1500); } catch (e) { $('#bRes').innerHTML = `<span style="color:#7A2414">${esc(e.message)}</span>`; b.disabled = false; } };
 }
 async function syncBlingAuto() {
