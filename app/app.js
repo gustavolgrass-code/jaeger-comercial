@@ -985,7 +985,7 @@ async function telaPainel(recarregarDados) {
 
   <h2 class="psec">Saída de produtos</h2>
   ${temItens ? `<div class="pgrid">
-   <div class="panel"><h3>Unidades por linha · ${porAno ? 'meses de ' + PV.ano : '12 meses'}</h3>${(() => { const ss = LINHAS.map(l => ({ nome: l.n, cor: l.c, vals: m12.map(k => unLinhaMes(k, l.k)) })); return grafLinhas('gLinhas', m12.map(k => mesNome(k, true)), ss, 'n') + legenda(ss); })()}</div>
+   <div class="panel"><h3>Unidades por linha · ${porAno ? 'meses de ' + PV.ano : '12 meses'}</h3>${(() => { const ss = LINHAS.map(l => ({ nome: l.n, cor: l.c, vals: m12.map(k => k > mesKey(hoje) ? null : unLinhaMes(k, l.k)) })); return grafLinhas('gLinhas', m12.map(k => mesNome(k, true)), ss, 'n') + legenda(ss); })()}</div>
    <div class="panel"><h3>Ranking de sabores · ${porAno ? PV.ano : mesNome(mes, true)}</h3><p class="psub">Unidades no ${unid} e variação ${porAno || PV.cmp === 'ano' ? 'contra o ano anterior' : 'contra o mês anterior'}</p>${rankSab.length ? ranking(rankSab, 'n') + legenda(LINHAS.map(l => ({ nome: l.n, cor: l.c }))) : '<p class="empty">Sem itens neste mês.</p>'}</div>
    <div class="panel"><h3>Mix por cliente</h3><p class="psub">Clientes que compraram nos últimos 90 dias, por quantas linhas levam</p>
     <div class="mixn">${mixN.map((n, i) => `<div><b>${n}</b><small>${i + 1} linha${i ? 's' : ''}</small></div>`).join('')}</div>
