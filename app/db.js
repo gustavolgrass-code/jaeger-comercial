@@ -88,7 +88,7 @@ export async function historico(pdvId) {
   const [etapas, visitas, pedidos, sellouts] = await Promise.all([
     sb.from('pdv_etapas').select('de, para, motivo, em, perfis(nome)').eq('pdv_id', pdvId).order('em').then(ok),
     sb.from('visitas').select('id, tipo, em, observacao, perfis(nome)').eq('pdv_id', pdvId).order('em').then(ok),
-    sb.from('pedidos').select('numero, tipo, condicao, unidades, valor, pago_na_hora, visita_id, criado_em, bling_status').eq('pdv_id', pdvId).order('criado_em').then(ok),
+    sb.from('pedidos').select('id, numero, tipo, condicao, unidades, valor, pago_na_hora, visita_id, criado_em, bling_status, bling_erro, bling_pedido_id').eq('pdv_id', pdvId).order('criado_em').then(ok),
     sb.from('v_sellout_visita').select('*').eq('pdv_id', pdvId).then(ok),
   ]);
   return { etapas, visitas, pedidos, sellouts };

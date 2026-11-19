@@ -151,7 +151,7 @@ async function enviarPedido(pedidoId: string) {
     const pr = i.produtos ?? {};
     if (!pr.bling_produto_id && !pr.bling_codigo) throw new Error(`Produto sem vínculo com o Bling: ${pr.linha} ${pr.sabor}`);
     return { ...(pr.bling_produto_id ? { produto: { id: Number(pr.bling_produto_id) } } : {}), ...(pr.bling_codigo ? { codigo: pr.bling_codigo } : {}),
-      descricao: `${pr.linha} ${pr.sabor}`.trim(), quantidade: i.quantidade, valor: Number(i.preco_unit), ...(cfg.unidade ? { unidade: cfg.unidade } : {}), ...(cfg.natureza_id ? { naturezaOperacao: { id: Number(cfg.natureza_id) } } : {}) };
+      descricao: `${pr.linha} - ${pr.sabor}`.trim(), quantidade: i.quantidade, valor: Number(i.preco_unit), ...(cfg.unidade ? { unidade: cfg.unidade } : {}), ...(cfg.natureza_id ? { naturezaOperacao: { id: Number(cfg.natureza_id) } } : {}) };
   });
   if (!itens.length) throw new Error('Pedido sem itens');
   const total = itens.reduce((a: number, i: any) => a + i.quantidade * i.valor, 0);
@@ -164,6 +164,8 @@ async function enviarPedido(pedidoId: string) {
     ...(cfg.loja_id ? { loja: { id: Number(cfg.loja_id) } } : {}),
     ...(cfg.vendedor_id ? { vendedor: { id: Number(cfg.vendedor_id) } } : {}),
     ...(cfg.situacao_id ? { situacao: { id: Number(cfg.situacao_id) } } : {}),
+    ...(cfg.categoria_id ? { categoria: { id: Number(cfg.categoria_id) } } : {}),
+    transporte: { fretePorConta: Number(cfg.frete ?? 9) },
     observacoes: cfg.observacoes ?? undefined,
     observacoesInternas: `Lançado pelo app Jaeger Comercial · pedido ${ped.numero} · ${ped.condicao}`,
   };

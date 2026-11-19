@@ -26,6 +26,9 @@ const CANAIS = ['Minimercado', 'Padaria', 'Fruteira', 'Cantina', 'Conveniência'
 const CONDICOES = ['À vista · dinheiro', 'À vista · Pix', 'A prazo · 7 dias', 'A prazo · 14 dias', 'A prazo · 28 dias', 'Consignado', 'Bonificação na abertura'];
 const DIAS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 const ROTA_ETAPAS = ['ativo', 'avaliacao', 'risco', 'revisao'];
+const FORMAS = ['Boleto', 'Pix', 'Dinheiro'];
+// kits mais pedidos (pelos pedidos do Bling): código do produto no Bling → quantidade
+const KITS = [{ n: 'Brownie 32', q: { B1: 8, B2: 8, B3: 8, B4: 8 } }, { n: 'Cookies 32', q: { C1: 8, C2: 8, C3: 8, C4: 8 } }, { n: 'Palha 45', q: { P1: 18, P2: 18, P3: 9 } }];
 const prazoDias = c => { const m = /(\d+) dias/.exec(c || ''); return m ? +m[1] : 0; };
 
 /* =================== estado =================== */
@@ -612,40 +615,40 @@ function telaAbertura() {
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
    <div><label class="lb">PDV</label><select id="oPdv" style="width:100%">${elig.map(x => `<option value="${x.id}" ${x.id === S.abPdv ? 'selected' : ''}>${esc(x.nome)} · ${etapa(x.etapa).n}</option>`).join('')}</select></div>
    <div><label class="lb">Expositor entregue</label><select id="oExp" style="width:100%">${ex.map(e => `<option value="${e.id}">${esc(e.nome)} · ${e.capacidade} un.</option>`).join('')}</select></div>
-   <div><label class="lb">Preço por unidade (R$)</label><input id="oPre" type="number" step="0.05" value="4.90" style="width:100%"></div>
    <div><label class="lb">Pedido mínimo combinado (R$)</label><input id="oMin" type="number" step="10" value="150" style="width:100%"></div>
    <div><label class="lb">Repor a cada</label><select id="oCad" style="width:100%"><option value="">${cadPadrao().avaliacao || 7} dias (padrão da avaliação)</option><option value="10">10 dias</option><option value="14">14 dias</option></select></div></div>
-  <h3 style="margin:16px 0 6px">Condição de pagamento</h3><div class="pay">${CONDICOES.map((c, i) => `<label><input type="radio" name="oc" value="${c}" ${i === 0 ? 'checked' : ''}> ${c}</label>`).join('')}<label><input type="radio" name="oc" value="Outra"> Outra</label></div>
-  <input id="oOutra" placeholder="Descreva a negociação" style="width:100%;display:none;margin-bottom:8px">
-  <div id="oBon" style="display:none;margin-bottom:8px"><label class="lb">Unidades bonificadas</label><input id="oBonQ" type="number" value="6" style="width:120px"></div>
-  <h3 style="margin:16px 0 6px">Itens do primeiro pedido</h3><div id="oItens" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:6px 14px"></div>
+  <h3 style="margin:16px 0 6px">Pagamento</h3><div class="row" style="flex-wrap:wrap;gap:14px;align-items:flex-end"><div class="pay" style="margin:0">${FORMAS.map((c, i) => `<label><input type="radio" name="oc" value="${c}" ${i === 0 ? 'checked' : ''}> ${c}</label>`).join('')}</div>
+   <div><label class="lb">Vencimento</label><input id="oVenc" type="date" value="${isoDe(new Date(Date.now() + 7 * DIA))}"></div></div>
+  <div class="row" style="justify-content:space-between;flex-wrap:wrap;margin:16px 0 6px"><h3 style="margin:0">Itens do pedido</h3><div class="row" style="gap:6px;flex-wrap:wrap"><span style="color:var(--mute);font-size:12px">Kits:</span>${KITS.map((k, i) => `<button class="mini" data-kit="${i}">+ ${k.n}</button>`).join('')}<button class="mini" id="oZera">zerar</button></div></div><div id="oItens" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:6px 14px"></div>
   <div class="row" style="justify-content:space-between;margin-top:14px;flex-wrap:wrap"><div><b id="oUn">0</b> unidades · <span id="oInfo" style="color:var(--soft)"></span></div><div style="font-family:Fraunces,Georgia,serif;font-size:26px" id="oTot">R$ 0,00</div></div>
   <label class="lb">Observação</label><textarea id="oObs" rows="2" style="width:100%"></textarea>
-  <div class="row" style="margin-top:12px;justify-content:flex-end"><button class="btn pri" id="oSave" ${p ? '' : 'disabled'}>Lançar venda</button></div></div></div></section>`;
-  const fill = () => { const e = +$('#oExp').value; let l = ''; $('#oItens').innerHTML = S.base.produtos.map(pr => { const h = pr.linha !== l ? `<div style="grid-column:1/-1;font-weight:700;margin-top:6px;color:var(--car-d)">${esc(l = pr.linha)}</div>` : ''; return h + `<div class="row" style="justify-content:space-between"><span>${esc(pr.sabor)}</span>${stepper('oq', alvo(e, pr.id), false, `data-p="${pr.id}"`)}</div>`; }).join(''); ligarSteppers($('#oItens')); calc(); };
+  <div class="row" style="margin-top:12px;justify-content:flex-end;gap:14px;flex-wrap:wrap"><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="oBling" checked style="width:auto"> Criar o pedido no Bling</label><button class="btn pri" id="oSave" ${p ? '' : 'disabled'}>Lançar venda</button></div></div></div></section>`;
+  const fill = () => { const e = +$('#oExp').value; let l = ''; $('#oItens').innerHTML = S.base.produtos.map(pr => { const h = pr.linha !== l ? `<div style="grid-column:1/-1;font-weight:700;margin-top:6px;color:var(--car-d)">${esc(l = pr.linha)}</div>` : ''; return h + `<div class="row" style="justify-content:space-between"><span>${esc(pr.sabor)}</span>${stepper('oq', 0, false, `data-p="${pr.id}" data-preco="${pr.preco}"`)}</div>`; }).join(''); ligarSteppers($('#oItens')); calc(); };
   const cond = () => document.querySelector('input[name=oc]:checked').value;
-  const calc = () => { const un = [...document.querySelectorAll('.oq')].reduce((a, i) => a + (+i.value || 0), 0), pre = +$('#oPre').value || 0, c = cond(), bon = c === 'Bonificação na abertura' ? Math.min(un, +$('#oBonQ').value || 0) : 0, tot = (un - bon) * pre;
-    $('#oUn').textContent = un; $('#oTot').textContent = c === 'Consignado' ? 'R$ 0,00 agora' : brl(tot);
-    $('#oInfo').textContent = c === 'Consignado' ? `consignado: cobra ${brl(un * pre)} conforme vender` : bon ? `${bon} bonificadas` : tot < (+$('#oMin').value || 0) ? 'abaixo do pedido mínimo' : '';
-    $('#oOutra').style.display = c === 'Outra' ? 'block' : 'none'; $('#oBon').style.display = c === 'Bonificação na abertura' ? 'block' : 'none'; return { un, tot, bon, c, pre }; };
+  const calc = () => { const qs = [...document.querySelectorAll('.oq')], un = qs.reduce((a, i) => a + (+i.value || 0), 0), tot = qs.reduce((a, i) => a + (+i.value || 0) * (+i.dataset.preco || 0), 0), c = cond();
+    $('#oUn').textContent = un; $('#oTot').textContent = brl(tot);
+    $('#oInfo').textContent = tot && tot < (+$('#oMin').value || 0) ? 'abaixo do pedido mínimo' : ''; return { un, tot, c }; };
+  document.querySelectorAll('input[name=oc]').forEach(x => x.onchange = () => { $('#oVenc').value = isoDe(new Date(Date.now() + (cond() === 'Dinheiro' ? 0 : 7) * DIA)); });
+  document.querySelectorAll('[data-kit]').forEach(b => b.onclick = () => { const k = KITS[+b.dataset.kit]; Object.entries(k.q).forEach(([cod, q]) => { const pr = S.base.produtos.find(x => x.bling_codigo === cod), inp = pr && document.querySelector(`.oq[data-p="${pr.id}"]`); if (inp) inp.value = (+inp.value || 0) + q; }); calc(); });
+  $('#oZera').onclick = () => { document.querySelectorAll('.oq').forEach(i => i.value = 0); calc(); };
   $('#oPdv') && ($('#oPdv').onchange = e => { S.abPdv = e.target.value; telaAbertura(); });
   $('#oCad').onclick = () => abrirCadastro(null);
   $('#oExp').onchange = fill; const sec = $('#main section'); sec.addEventListener('input', calc); sec.addEventListener('change', calc); fill();
   $('#oSave').onclick = async () => {
     const t = calc(); if (!t.un) return toast('Coloque os itens do pedido');
-    const c = t.c === 'Outra' ? ($('#oOutra').value.trim() || 'Negociação especial') : t.c;
-    const itens = [...document.querySelectorAll('.oq')].map(i => ({ produto_id: +i.dataset.p, quantidade: +i.value || 0, preco_unit: t.pre, bonificado: 0 }));
-    if (t.bon) { let r = t.bon; for (const it of itens) { const b = Math.min(r, it.quantidade); it.bonificado = b; r -= b; if (!r) break; } }
-    const hoje = new Date();
+    const c = t.c;
+    const itens = [...document.querySelectorAll('.oq')].map(i => ({ produto_id: +i.dataset.p, quantidade: +i.value || 0, preco_unit: +i.dataset.preco || 0, bonificado: 0 }));
+    const hoje = new Date(), venc = $('#oVenc').value || null, mandar = $('#oBling').checked;
     $('#oSave').disabled = true;
     try {
-      await db.registrarAbertura({ pdvId: p.id, usuarioId: S.eu.id, observacao: $('#oObs').value || null,
+      const reg = await db.registrarAbertura({ pdvId: p.id, usuarioId: S.eu.id, observacao: $('#oObs').value || null,
         contagens: itens.filter(i => i.quantidade).map(i => ({ produto_id: i.produto_id, deixado_anterior: 0, encontrado: 0, troca: 0, reposto: i.quantidade })),
-        pedido: { tipo: 'abertura', condicao: c, unidades: t.un, valor: c === 'Consignado' ? 0 : t.tot, pago_na_hora: c.startsWith('À vista'), vencimento: prazoDias(c) ? new Date(+hoje + prazoDias(c) * DIA).toISOString().slice(0, 10) : null },
+        pedido: { tipo: 'abertura', condicao: c, unidades: t.un, valor: t.tot, pago_na_hora: c === 'Dinheiro', vencimento: venc },
         itens,
         patch: { etapa: 'avaliacao', avaliacao_inicio: hoje.toISOString().slice(0, 10), expositor_id: +$('#oExp').value, condicao: c, pedido_minimo: +$('#oMin').value || 150, cadencia_dias: $('#oCad').value ? +$('#oCad').value : null } });
       await atualizarUm(p.id); const n = S.pdvs.find(x => x.id === p.id);
-      toast(`Venda lançada para ${p.nome}. Primeira reposição em ${dstr(n.proxima_reposicao)}.`); S.abPdv = null; if (S.prosp) { PZ.visHoje[p.id] = 'fechou'; PZ.aberto = null; irPara('mapa'); } else telaAbertura();
+      toast(`Venda lançada para ${p.nome}. Primeira reposição em ${dstr(n.proxima_reposicao)}.`);
+      if (mandar && reg?.pedido?.id) await enviarAoBling(reg.pedido.id, p.nome); S.abPdv = null; if (S.prosp) { PZ.visHoje[p.id] = 'fechou'; PZ.aberto = null; irPara('mapa'); } else telaAbertura();
     } catch (e) { erro(e); $('#oSave').disabled = false; }
   };
 }
@@ -925,6 +928,7 @@ async function telaPerfil() {
     <div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">Próximas ações</h3><button class="btn pri" id="pNovaTar" style="padding:5px 10px">+ Nova</button></div><div style="margin-top:8px">${listaTarefas(tars.filter(t => !t.concluida), 'Nenhuma ação marcada.')}</div>${tars.some(t => t.concluida) ? `<details style="margin-top:6px"><summary style="cursor:pointer;color:var(--mute);font-size:12px">Concluídas (${tars.filter(t => t.concluida).length})</summary>${listaTarefas(tars.filter(t => t.concluida), '')}</details>` : ''}</div>
     <div class="panel"><h3>Resumo</h3><div class="kv" style="margin:0"><div><small>${h.pedidos.length ? 'Cliente desde' : 'Criado em'}</small><b>${dataLonga(h.pedidos.length ? h.pedidos[0].criado_em : p.criado_em)}</b>${h.pedidos.length ? '<small>1º pedido no Bling</small>' : ''}</div><div><small>Visitas</small><b>${h.visitas.length}</b></div><div><small>Pedidos</small><b>${h.pedidos.length}</b></div><div><small>Total pedido</small><b>${brl(h.pedidos.reduce((a, o) => a + Number(o.valor), 0))}</b></div></div></div>
     ${fluxoPedidos(h.pedidos)}
+    ${(() => { const pend = h.pedidos.filter(o => o.bling_status === 'pendente' || o.bling_status === 'erro'); return pend.length ? `<div class="panel alertas"><h3>Pedidos do app ainda não criados no Bling (${pend.length})</h3>${pend.map(o => `<div class="trow" style="cursor:default"><div style="flex:1"><b>${dataLonga(o.criado_em)} · ${brl(o.valor)}</b> <small style="color:var(--mute)">${esc(o.condicao)}</small>${o.bling_erro ? `<br><small style="color:#7A2414">${esc(o.bling_erro.slice(0, 220))}</small>` : ''}</div><button class="mini" data-envbling="${o.id}">enviar ao Bling</button></div>`).join('')}</div>` : ''; })()}
     <div class="panel"><button class="btn" id="pExcluir" style="width:100%;color:#7A2414">Excluir negócio</button><small style="color:var(--mute);display:block;margin-top:6px">Use para apagar cadastro duplicado, errado ou de teste. Apaga também os pedidos dele.</small></div>
    </div></div></div></section>`;
   $('#pVoltar').onclick = () => irPara(S.voltar || 'carteira');
@@ -947,6 +951,7 @@ async function telaPerfil() {
   $('#pTrocarContato').onclick = () => { modal(`<h3>Contato de ${esc(p.nome)}</h3>${campoContato()}<div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="kOk">Vincular</button></div>`); document.querySelector('#modalBox details').open = true;
     $('#kOk').onclick = async () => { try { const id = await contatoDoForm(p.nome); if (!id) return toast('Escolha um contato ou preencha o nome'); await db.atualizarPdv(p.id, { contato_id: id }); fecharModal(); await atualizarUm(p.id); toast('Contato vinculado'); telaPerfil(); } catch (e) { erro(e); } }; };
   $('#pExcluirTopo').onclick = () => $('#pExcluir').click();
+  document.querySelectorAll('[data-envbling]').forEach(b => b.onclick = async () => { b.disabled = true; await enviarAoBling(b.dataset.envbling, p.nome); telaPerfil(); });
   $('#pExcluir').onclick = () => { const np = h.pedidos.length; modal(`<h3>Excluir ${esc(p.nome)}?</h3><p style="color:var(--soft)">Apaga o negócio com as visitas, contagens e tarefas dele${np ? `, <b>e também os ${np} pedido${np > 1 ? 's' : ''} (${brl(h.pedidos.reduce((a, o) => a + Number(o.valor), 0))})</b>` : ''}. O contato vinculado continua cadastrado. Não dá para desfazer.</p>${np ? '<p style="color:var(--soft);font-size:13px">Se é um cliente real que parou de comprar, prefira mudar a etapa para Inativo e manter o histórico.</p>' : ''}<div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="xOk" style="background:#7A2414;border-color:#7A2414">Excluir</button></div>`);
     $('#xOk').onclick = async () => { try { await db.excluirPdv(p.id); fecharModal(); S.pdvs = S.pdvs.filter(x => x.id !== p.id); S.sel = null; toast('Negócio excluído'); irPara('carteira'); } catch (e) { fecharModal(); toast('Erro: ' + e.message); } }; };
 }
@@ -1487,6 +1492,12 @@ function fluxoPedidos(peds) {
    <div class="kv" style="margin:0 0 10px"><div><small>Ticket médio</small><b>${brl(ticket)}</b></div><div><small>Compra a cada</small><b>${inter ? Math.round(inter) + ' dias' : '—'}</b></div><div><small>Último pedido</small><b>${dataLonga(ult)}</b><small>há ${semPedido} dias</small></div><div><small>Próximo esperado</small><b>${inter ? dataLonga(new Date(+ult + inter * DIA)) : '—'}</b></div></div>
    <div class="fluxo">${meses.map(m => `<div title="${m.n}: ${m.q} pedido${m.q === 1 ? '' : 's'} · ${brl(m.v)}"><i style="height:${Math.round(m.v / max * 100)}%"></i><small>${m.n}</small></div>`).join('')}</div>
    <p style="margin:10px 0 0;font-size:13px;border-left:3px solid ${cor};padding-left:8px">${leitura}</p></div>`;
+}
+async function enviarAoBling(pedidoId, nome) {
+  toast('Criando o pedido no Bling…');
+  try { const r = await db.bling('enviar_pedido', { pedido_id: pedidoId });
+    modal(`<h3>Pedido criado no Bling ✓</h3><p>${esc(nome)} · <b>pedido nº ${esc(r.numero || r.bling_id)}</b>, situação Em aberto.</p><p style="color:var(--soft)">O Moisés já encontra o pedido no Bling para conferir e emitir a nota.</p>${(r.alertas || []).length ? `<p style="color:#8A4E17;font-size:13px">Avisos do Bling: ${esc(JSON.stringify(r.alertas))}</p>` : ''}<div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn pri" onclick="fecharModal()">Ok</button></div>`);
+  } catch (e) { modal(`<h3>O Bling não aceitou o pedido</h3><p style="color:var(--soft)">A venda ficou salva no app. Corrija o que o Bling pediu e reenvie pelo perfil do cliente.</p><p style="font-size:13px;color:#7A2414">${esc(e.message)}</p><div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn pri" onclick="fecharModal()">Ok</button></div>`); }
 }
 async function syncBlingAuto() {
   try { if (S.blingSync && Date.now() - S.blingSync < 15 * 60000) return;
