@@ -285,9 +285,14 @@ async function desenharNuvens(enquadrar) {
       .bindTooltip(`Zona ${i + 1} · ${esc(z.nome)} · potencial ${z.nota}`).on('click', () => { S.sel = null; S.zonaSel = i; painel(); }).addTo(camadaNuvem);
   });
   S.zonas = zonas; S.zonaSel = null;
+  zonas.forEach(z => { const cc = {}; S.pdvs.filter(p => p.lat && p.cidade && distM(p, z.c) < 2000).forEach(p => cc[p.cidade] = (cc[p.cidade] || 0) + 1); z.cidade = Object.keys(cc).sort((a, b) => cc[b] - cc[a])[0]; });
+  if (!mapa._nuvemClick) { mapa._nuvemClick = true; mapa.on('click', e => { if (!S.nuvens || !S.zonas?.length || marcando) return; let best = -1, bd = 1e9; S.zonas.forEach((z, i) => { const d = distM(z.c, { lat: e.latlng.lat, lng: e.latlng.lng }); if (d < bd) { bd = d; best = i; } }); if (bd < 2000) { S.sel = null; S.zonaSel = best; painel(); } }); }
   if (enquadrar) mapa.fitBounds(L.latLngBounds(bons.map(b => [b.p.lat, b.p.lng])).pad(.1));
   if (!S.sel) painel();
 }
+// categorias de ponto de venda para extrair no Outscraper
+const BUSCAS_PDV = ['escola', 'escola particular', 'colégio', 'cantina escolar', 'faculdade', 'padaria', 'confeitaria', 'cafeteria', 'lanchonete', 'pastelaria', 'açaí', 'sorveteria', 'loja de doces', 'restaurante', 'restaurante a quilo', 'pizzaria', 'hamburgueria', 'minimercado', 'mercado', 'supermercado', 'mercearia', 'loja de conveniência', 'posto de combustível', 'empório', 'hortifruti', 'fruteira', 'distribuidora de bebidas', 'tabacaria', 'banca de revistas', 'academia', 'crossfit', 'estúdio de pilates', 'barbearia', 'salão de beleza', 'lava-rápido', 'pet shop', 'farmácia', 'hospital', 'clínica médica', 'hotel', 'casa lotérica', 'papelaria', 'bar', 'coworking'];
+function bairrosZona(z, comCidade) { const cnt = {}, cid = {}; S.pdvs.filter(p => p.lat && p.bairro && distM(p, z.c) < 2000).forEach(p => { const b = p.bairro.trim(); cnt[b] = (cnt[b] || 0) + 1; if (p.cidade) cid[b] = p.cidade; }); const ks = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a]); return comCidade ? ks.map(b => [b, cid[b] || z.cidade || 'Porto Alegre']) : ks; }
 function painelZonas(s) {
   s.classList.add('open');
   const zs = S.zonas;
@@ -295,10 +300,19 @@ function painelZonas(s) {
    <p style="color:var(--soft);font-size:13px;margin-top:6px">Calculado pelo que cada cliente comprou por mês nos últimos 6 meses, espalhado num raio de 2 km. Quanto mais forte a cor, mais venda já existe por perto: é onde abrir novos pontos tende a dar certo.</p>
    ${zs.map((z, i) => `<div class="zona ${S.zonaSel === i ? 'on' : ''}" data-z="${i}"><div class="row" style="justify-content:space-between"><b>Z${i + 1} · ${esc(z.nome)}</b><span class="badge" style="background:${z.nota > 66 ? '#C2410C' : z.nota > 40 ? '#EA8A2E' : '#F2B84B'};color:#fff">potencial ${z.nota}</span></div>
      <div class="zkv"><div><small>Vendas no raio</small><b>${brl(z.valor)}/mês</b></div><div><small>Clientes comprando</small><b>${z.clientes.length}</b></div><div><small>Prospects mapeados</small><b>${z.prospects.length}</b></div><div><small>Inativos p/ recuperar</small><b>${z.inativos.length}</b></div></div>
+     ${S.zonaSel === i ? (() => { const ll = `${z.c.lat.toFixed(5)}, ${z.c.lng.toFixed(5)}`, bs = bairrosZona(z); return `<div class="zcoord"><div><small>Centro da zona (raio de 2 km)</small><b>${ll}</b></div>
+       <div><small>Coordenadas no formato do Outscraper</small><b>@${z.c.lat.toFixed(5)},${z.c.lng.toFixed(5)},14z</b></div>
+       <div><small>Bairros dentro da zona</small><b style="font-weight:600">${esc(bs.join(', ') || '—')}</b></div>
+       <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px"><button class="mini" data-copia="${ll}">copiar coordenadas</button><button class="mini" data-copia="@${z.c.lat.toFixed(5)},${z.c.lng.toFixed(5)},14z">copiar formato Outscraper</button><button class="mini" data-buscas="${i}">baixar buscas da zona (.txt)</button><a class="mini" target="_blank" rel="noopener" href="https://www.google.com/maps/@${z.c.lat},${z.c.lng},14z">ver no Google Maps ↗</a></div></div>`; })() : ''}
      ${S.zonaSel === i ? `<div style="margin-top:8px;font-size:12.5px">${z.clientes.slice(0, 8).map(p => `<div class="row" style="justify-content:space-between"><span>• ${esc(p.nome)}</span><b>${brl(z.vm[p.id])}/mês</b></div>`).join('')}</div>` : ''}</div>`).join('')}
    <p style="color:var(--mute);font-size:12px">Próximo passo: extrair os pontos dessas zonas no Outscraper e montar o plano de prospecção por zona.</p>`;
   $('#xZon').onclick = () => { S.nuvens = false; $('#bNuvem')?.classList.remove('car'); camadaNuvem?.clearLayers(); painel(); };
-  s.querySelectorAll('[data-z]').forEach(d => d.onclick = () => { const i = +d.dataset.z; S.zonaSel = i; mapa.setView([zs[i].c.lat, zs[i].c.lng], 14); painelZonas(s); });
+  s.querySelectorAll('[data-z]').forEach(d => d.onclick = e => { if (e.target.closest('.zcoord')) return; const i = +d.dataset.z; S.zonaSel = i; mapa.setView([zs[i].c.lat, zs[i].c.lng], 14); painelZonas(s); });
+  s.querySelectorAll('[data-copia]').forEach(b => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copia); toast('Copiado: ' + b.dataset.copia); } catch { prompt('Copie:', b.dataset.copia); } });
+  s.querySelectorAll('[data-buscas]').forEach(b => b.onclick = () => { const z = zs[+b.dataset.buscas], bs = bairrosZona(z), cid = z.cidade || 'Porto Alegre';
+    const ls = []; BUSCAS_PDV.forEach(t => bs.length ? bairrosZona(z, true).forEach(([bb, cc]) => ls.push(`${t}, ${bb}, ${cc}, RS`)) : ls.push(`${t} perto de ${z.c.lat.toFixed(5)},${z.c.lng.toFixed(5)}`));
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([ls.join('\n') + '\n'], { type: 'text/plain;charset=utf-8' })); a.download = `buscas_zona_Z${+b.dataset.buscas + 1}.txt`; document.body.appendChild(a); a.click(); a.remove();
+    toast(`${ls.length} buscas da zona Z${+b.dataset.buscas + 1} (${bs.length} bairros × ${BUSCAS_PDV.length} categorias)`); });
 }
 function painel() {
   const s = $('#side'); if (!s) return;

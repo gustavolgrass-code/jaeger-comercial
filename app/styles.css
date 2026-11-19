@@ -281,3 +281,7 @@ table.peds tr:last-child td{border-bottom:0}
 .zkv{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
 .zkv small{display:block;color:var(--mute);font-size:11px}
 .zkv b{font-size:14px}
+.zcoord{margin-top:8px;background:#FBF7F0;border-radius:8px;padding:8px 10px;font-size:12.5px;cursor:default}
+.zcoord small{display:block;color:var(--mute);font-size:11px;margin-top:4px}
+.zcoord b{font-size:13px;word-break:break-word}
+.zcoord a.mini{text-decoration:none;display:inline-flex;align-items:center}
