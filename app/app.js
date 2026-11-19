@@ -615,7 +615,7 @@ function telaAbertura() {
   <div class="row" style="justify-content:space-between;flex-wrap:wrap"><h3 style="font-family:Fraunces,Georgia,serif;font-size:22px;font-weight:600;margin:0">${jaCliente ? 'Nova venda' : 'Abertura de cliente'}</h3><button class="btn" id="oCad">+ Cadastrar ponto</button></div>
   ${p ? '' : '<p class="empty">Nenhum PDV disponível. Cadastre um ponto no mapa primeiro.</p>'}
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
-   <div><label class="lb">PDV</label><select id="oPdv" style="width:100%">${elig.map(x => `<option value="${x.id}" ${x.id === S.abPdv ? 'selected' : ''}>${esc(x.nome)} · ${etapa(x.etapa).n}</option>`).join('')}</select></div>
+   <div style="position:relative"><label class="lb">Cliente</label><input id="oBusca" autocomplete="off" placeholder="Digite o nome, razão social ou bairro…" value="${p ? esc(p.nome) + ' · ' + etapa(p.etapa).n : ''}" style="width:100%"><div id="oSug" class="sugs"></div></div>
    ${jaCliente ? `<div style="align-self:end;color:var(--soft);font-size:13px">Já é cliente (${etapa(p.etapa).n}): lança só o pedido, sem mexer na etapa nem no expositor.</div><div style="display:none">` : '<div style="display:contents">'}
    <div><label class="lb">Expositor entregue</label><select id="oExp" style="width:100%">${ex.map(e => `<option value="${e.id}">${esc(e.nome)} · ${e.capacidade} un.</option>`).join('')}</select></div>
    <div><label class="lb">Pedido mínimo combinado (R$)</label><input id="oMin" type="number" step="10" value="150" style="width:100%"></div>
@@ -634,7 +634,11 @@ function telaAbertura() {
   document.querySelectorAll('input[name=oc]').forEach(x => x.onchange = () => { $('#oVenc').value = isoDe(new Date(Date.now() + (cond() === 'Dinheiro' ? 0 : 7) * DIA)); });
   document.querySelectorAll('[data-kit]').forEach(b => b.onclick = () => { const k = KITS[+b.dataset.kit]; Object.entries(k.q).forEach(([cod, q]) => { const pr = S.base.produtos.find(x => x.bling_codigo === cod), inp = pr && document.querySelector(`.oq[data-p="${pr.id}"]`); if (inp) inp.value = (+inp.value || 0) + q; }); calc(); });
   $('#oZera').onclick = () => { document.querySelectorAll('.oq').forEach(i => i.value = 0); calc(); };
-  $('#oPdv') && ($('#oPdv').onchange = e => { S.abPdv = e.target.value; telaAbertura(); });
+  const bu = $('#oBusca'), sug = $('#oSug');
+  const listar = () => { const q = norm(bu.value).trim(), ls = elig.filter(x => !q || norm([x.nome, x.razao_social, x.bairro, x.cidade].filter(Boolean).join(' ')).includes(q)).slice(0, 12);
+    sug.innerHTML = ls.map(x => `<div data-pick="${x.id}"><b>${esc(x.nome)}</b> <small style="color:${etapa(x.etapa).c};font-weight:700">${etapa(x.etapa).n}</small><br><small style="color:var(--mute)">${esc([x.bairro, x.cidade].filter(Boolean).join(' · '))}</small></div>`).join('') || '<div style="color:var(--mute)">Nenhum cliente encontrado</div>';
+    sug.style.display = 'block'; sug.querySelectorAll('[data-pick]').forEach(d => d.onmousedown = e => { e.preventDefault(); S.abPdv = d.dataset.pick; telaAbertura(); }); };
+  bu.onfocus = () => { bu.select(); listar(); }; bu.oninput = listar; bu.onblur = () => setTimeout(() => { sug.style.display = 'none'; }, 150);
   $('#oCad').onclick = () => abrirCadastro(null);
   $('#oExp').onchange = fill; const sec = $('#main section'); sec.addEventListener('input', calc); sec.addEventListener('change', calc); fill();
   $('#oSave').onclick = async () => {
@@ -1496,7 +1500,18 @@ function fluxoPedidos(peds, lateral) {
   return `<div class="${lateral ? 'sect' : 'panel'}"><h3>${lateral ? 'Métricas' : 'Fluxo de pedidos'}</h3>
    <div class="kv" style="margin:0 0 10px">${lateral ? `<div><small>Total comprado</small><b>${brl(total)}</b><small>${peds.length} pedido${peds.length === 1 ? '' : 's'} desde ${dataLonga(ds[0])}</small></div>` : ''}<div><small>Ticket médio</small><b>${brl(ticket)}</b></div><div><small>Compra a cada</small><b>${inter ? Math.round(inter) + ' dias' : '—'}</b></div><div><small>Último pedido</small><b>${dataLonga(ult)}</b><small>há ${semPedido} dias</small></div><div><small>Próximo esperado</small><b>${inter ? dataLonga(new Date(+ult + inter * DIA)) : '—'}</b></div></div>
    <div class="fluxo">${meses.map(m => `<div title="${m.n}: ${m.q} pedido${m.q === 1 ? '' : 's'} · ${brl(m.v)}"><i style="height:${Math.round(m.v / max * 100)}%"></i><small>${m.n}</small></div>`).join('')}</div>
-   <p style="margin:10px 0 0;font-size:13px;border-left:3px solid ${cor};padding-left:8px">${leitura}</p></div>`;
+   <p style="margin:10px 0 0;font-size:13px;border-left:3px solid ${cor};padding-left:8px">${leitura}</p>${lateral ? checarRegras(peds, inter, semPedido) : ''}</div>`;
+}
+// confere o histórico de pedidos com as regras de Regras e metas (esteira de avaliação)
+function checarRegras(peds, inter, semPedido) {
+  const ra = regraAval(), cad = cadPadrao().avaliacao || 7;
+  const uns = peds.map(o => Number(o.unidades) > 0 ? Number(o.unidades) : Math.round((Number(o.valor) || 0) / 4.6)), mediaUn = uns.reduce((a, b) => a + b, 0) / uns.length;
+  const itens = [
+    [inter != null && inter <= cad * 2, `Frequência: ${inter == null ? 'só 1 pedido, sem ritmo ainda' : `compra a cada ${Math.round(inter)} dias`} · regra: reposição a cada ${cad} dias (aceita até ${cad * 2})`],
+    [mediaUn >= ra.meta_minima_sellout, `Volume: cerca de ${Math.round(mediaUn)} un. por pedido · regra: mínimo ${ra.meta_minima_sellout} un. por reposição`],
+    [semPedido <= 90, `Recência: último pedido há ${semPedido} dias · regra: até 90 dias`]];
+  const ok = itens.every(i => i[0]);
+  return `<div class="regcheck ${ok ? 'ok' : 'nao'}"><b>${ok ? '✓ Dentro das regras para a avaliação' : '✕ Fora das regras para a avaliação'}</b>${itens.map(([b, t]) => `<div>${b ? '✓' : '✕'} ${t}</div>`).join('')}</div>`;
 }
 async function enviarAoBling(pedidoId, nome) {
   toast('Criando o pedido no Bling…');

@@ -256,3 +256,10 @@ table.peds tr:last-child td{border-bottom:0}
 .fluxo div{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%}
 .fluxo i{display:block;width:100%;background:var(--car);border-radius:3px 3px 0 0;min-height:2px}
 .fluxo small{font-size:10px;color:var(--mute);margin-top:3px}
+.sugs{display:none;position:absolute;left:0;right:0;top:100%;z-index:50;background:#FBF7F0;border:1px solid var(--line);border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.12);max-height:320px;overflow:auto;margin-top:4px}
+.sugs div{padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--line);font-size:14px}
+.sugs div:hover{background:var(--sand)}
+.regcheck{margin-top:12px;padding:10px 12px;border-radius:10px;font-size:12.5px;line-height:1.5}
+.regcheck b{display:block;margin-bottom:4px;font-size:13px}
+.regcheck.ok{background:#E3F0E7;border:1px solid #BFD9C6;color:#1F5A37}
+.regcheck.nao{background:#F8E4DE;border:1px solid #E9BFB2;color:#7A2414}
