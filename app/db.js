@@ -134,3 +134,18 @@ export async function registrarVenda({ pdvId, usuarioId, pedido, itens, patch })
 export async function precosCliente(pdvId) { const r = await sb.from('pdvs').select('precos').eq('id', pdvId).maybeSingle(); if (r.error) return {}; return r.data?.precos || {}; }
 export async function salvarPrecos(pdvId, precos) { return ok(await sb.from('pdvs').update({ precos }).eq('id', pdvId)); }
 export async function resumoPedidos() { return ok(await sb.from('pedidos').select('pdv_id, criado_em, valor, unidades').limit(10000)); }
+
+/* ---------- painel: busca tudo, em páginas de 1000 (limite do Supabase) ---------- */
+async function tudo(montar) { const out = []; for (let i = 0; i < 50; i++) { const r = ok(await montar().range(i * 1000, i * 1000 + 999)); out.push(...r); if (r.length < 1000) break; } return out; }
+export async function painelDados() {
+  const [pedidos, bitens, pitens, contagens, visitas, perfis, produtos] = await Promise.all([
+    tudo(() => sb.from('pedidos').select('id, pdv_id, criado_em, valor, unidades, criado_por, tipo, bling_id').order('criado_em')),
+    tudo(() => sb.from('bling_itens').select('pedido_id, codigo, descricao, quantidade, valor, desconto')).catch(() => []),
+    tudo(() => sb.from('pedido_itens').select('pedido_id, produto_id, quantidade, preco_unit')),
+    tudo(() => sb.from('contagens').select('produto_id, troca, encontrado, deixado_anterior, visitas(em, pdv_id, usuario_id)')).catch(() => []),
+    tudo(() => sb.from('visitas').select('pdv_id, em, tipo, usuario_id, resultado')),
+    sb.from('perfis').select('id, nome, papel').then(ok),
+    sb.from('produtos').select('*').order('ordem').then(ok),
+  ]);
+  return { pedidos, bitens, pitens, contagens, visitas, perfis, produtos };
+}
