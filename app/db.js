@@ -149,3 +149,8 @@ export async function painelDados() {
   ]);
   return { pedidos, bitens, pitens, contagens, visitas, perfis, produtos };
 }
+// apaga uma reposição/venda de vez: o pedido (itens saem junto) e a visita com as contagens dela
+export async function excluirPedido(id, visitaId) {
+  ok(await sb.from('pedidos').delete().eq('id', id));
+  if (visitaId) ok(await sb.from('visitas').delete().eq('id', visitaId));
+}
