@@ -270,3 +270,8 @@ table.peds tr:last-child td{border-bottom:0}
 .item-v .preco.custom input{border-color:var(--car);background:#FBEBD3;color:#8A4E17;font-weight:700}
 .mbusca{position:relative;width:250px}
 .mbusca input{width:100%;height:100%;min-height:38px;border-radius:10px;border:1px solid var(--line);background:#FBF7F0;padding:8px 12px;font-size:14px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.linha-h{grid-column:1/-1;display:flex;align-items:center;gap:10px;margin-top:8px;font-weight:700;color:var(--car-d)}
+.linha-h .preco{display:inline-flex;align-items:center;gap:3px;font-size:12px;color:var(--mute);margin:0;font-weight:400}
+.linha-h .preco input{width:70px;padding:3px 6px;font-size:13px;border:1px solid var(--line);border-radius:6px;background:#FBF7F0}
+.linha-h .preco.custom input{border-color:var(--car);background:#FBEBD3;color:#8A4E17;font-weight:700}
+.linha-h small{font-weight:400;color:var(--mute);font-size:11px}
