@@ -846,23 +846,25 @@ const escalaY = (max) => { const m = max > 0 ? max : 1, p = Math.pow(10, Math.fl
 const curto = (v, u) => u === 'R$' ? (v >= 1000 ? 'R$ ' + (v / 1000).toFixed(v >= 10000 ? 0 : 1).replace('.', ',') + ' mil' : 'R$ ' + Math.round(v)) : u === '%' ? Math.round(v * 100) + '%' : fmt(Math.round(v));
 // linhas: series [{nome, cor, vals[], tracejado, rotulo}], xs = rótulos
 function grafLinhas(id, xs, series, u, { h = 230, marcas = true } = {}) {
-  const W = 640, H = h, L = 54, R = 74, T = 14, B = 26, iw = W - L - R, ih = H - T - B;
+  const W = 640, H = h, L = 72, R = 104, T = 14, B = 26, iw = W - L - R, ih = H - T - B;
   const max = Math.max(...series.flatMap(s => s.vals.filter(v => v != null)), 0), { top, passo } = escalaY(max);
   const X = i => L + (xs.length < 2 ? iw / 2 : i * iw / (xs.length - 1)), Y = v => T + ih - v / top * ih;
   let g = ''; for (let v = 0; v <= top + 1e-9; v += passo) g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="${COR.grid}" stroke-width="1"/><text x="${L - 8}" y="${Y(v) + 4}" text-anchor="end" class="ax">${curto(v, u)}</text>`;
+  const rot = [];
   const passoX = Math.ceil(xs.length / 8); xs.forEach((x, i) => { if (i % passoX === 0 || i === xs.length - 1) g += `<text x="${X(i)}" y="${H - 6}" text-anchor="middle" class="ax">${x}</text>`; });
   series.forEach(s => {
     let d = '', on = false; s.vals.forEach((v, i) => { if (v == null) { on = false; return; } d += (on ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1); on = true; });
     g += `<path d="${d}" fill="none" stroke="${s.cor}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" ${s.tracejado ? 'stroke-dasharray="5 4"' : ''}/>`;
     const li = s.vals.map((v, i) => v == null ? -1 : i).filter(i => i >= 0).pop();
-    if (li != null && li >= 0) { if (marcas && !s.tracejado) g += `<circle cx="${X(li)}" cy="${Y(s.vals[li])}" r="4" fill="${s.cor}" stroke="#FBF7F0" stroke-width="2"/>`; if (s.rotulo !== false) g += `<text x="${X(li) + 8}" y="${Y(s.vals[li]) + 4}" class="lb" fill="var(--choc)">${esc(s.nome)}</text>`; }
+    if (li != null && li >= 0) { if (marcas && !s.tracejado) g += `<circle cx="${X(li)}" cy="${Y(s.vals[li])}" r="4" fill="${s.cor}" stroke="#FBF7F0" stroke-width="2"/>`; if (s.rotulo !== false) rot.push({ x: X(li) + 8, y: Y(s.vals[li]) + 4, t: s.nome }); }
   });
+  rot.sort((a, b) => a.y - b.y).forEach((r, i, a) => { if (i && r.y - a[i - 1].y < 14) r.y = a[i - 1].y + 14; }); rot.forEach(r => { g += `<text x="${r.x}" y="${r.y}" class="lb" fill="var(--choc)">${esc(r.t)}</text>`; });
   return `<svg viewBox="0 0 ${W} ${H}" class="grf" id="${id}" data-tipo="linha" role="img"><g>${g}</g><line class="xh" x1="0" x2="0" y1="${T}" y2="${T + ih}" stroke="${COR.eixo}" stroke-width="1" style="display:none"/><rect x="${L}" y="${T}" width="${iw}" height="${ih}" fill="transparent" class="hov"/></svg>`
     + `<script type="application/json" data-for="${id}">${JSON.stringify({ xs, series: series.map(s => ({ nome: s.nome, cor: s.cor, vals: s.vals })), u, L, iw, n: xs.length, W })}</script>`;
 }
 // barras verticais (uma ou mais séries lado a lado) com marcador de meta opcional
 function grafBarras(id, xs, series, u, { h = 230, metas = null, rotulos = false } = {}) {
-  const W = 640, H = h, L = 54, R = 12, T = 14, B = 26, iw = W - L - R, ih = H - T - B;
+  const W = 640, H = h, L = 72, R = 12, T = 14, B = 26, iw = W - L - R, ih = H - T - B;
   const max = Math.max(...series.flatMap(s => s.vals), ...(metas || []).filter(v => v != null), 0), { top, passo } = escalaY(max);
   const Y = v => T + ih - v / top * ih, gw = iw / xs.length, bw = Math.max(4, Math.min(28, (gw - 8) / series.length - 2));
   let g = ''; for (let v = 0; v <= top + 1e-9; v += passo) g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="${COR.grid}"/><text x="${L - 8}" y="${Y(v) + 4}" text-anchor="end" class="ax">${curto(v, u)}</text>`;
