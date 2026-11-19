@@ -129,7 +129,7 @@ function trocarLado(l) { lado = l; $('#rG').classList.toggle('on', l === 'comerc
 function irPara(a) {
   S.aba = a;
   $('#nav').innerHTML = ABAS[lado].map(([k, n]) => `<button data-a="${k}" class="${k === a ? 'on' : ''}">${n}</button>`).join('');
-  $('#nav').onclick = e => { const k = e.target.dataset.a; if (k) irPara(k); };
+  $('#nav').onclick = e => { const k = e.target.dataset.a; if (k) { S.vendaVolta = null; irPara(k); } };
   ({ agenda: telaAgenda, perfil: telaPerfil, contato: telaContato, contatos: telaContatos, uploads: telaUploads, mapa: telaMapa, funil: telaFunil, carteira: telaCarteira, abertura: telaAbertura, painel: telaPainel, regras: telaRegras, rota: telaRota, reposicao: telaReposicao, resumo: telaResumo })[a]();
 }
 window.irPara = irPara;
@@ -239,7 +239,7 @@ function painel() {
   if (!p && S.modoPend) return listaPendentes(s);
   if (!p) { s.classList.remove('open'); s.innerHTML = `<div class="empty"><b>Selecione um ponto no mapa.</b><br>A cor mostra a etapa do funil.<br><br><b>+ Cadastrar ponto</b>: pela sua localização, marcando no mapa ou colando o link do Google Maps.<br><b>Reposições pendentes</b>: mostra quem precisa de reposição hoje ou está atrasado.</div>`; return; }
   s.classList.add('open');
-  const podeComprar = ['visitado', 'negociacao'].includes(p.etapa);
+  const podeComprar = p.etapa !== 'perdido';
   const gm = p.lat ? `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}` : null;
   s.innerHTML = `<button class="btn" style="float:right;padding:4px 10px" id="xSide">✕</button>
   <small style="color:var(--mute)">${esc(p.canal || '')} · ${esc(p.cidade || '')}</small><h2>${esc(p.nome)}</h2>${p.contato_nome ? `<div style="color:var(--soft)">Contato: <b>${esc(p.contato_nome)}</b>${p.contato_telefone ? ' · ' + esc(p.contato_telefone) : ''}</div>` : ''}
@@ -255,7 +255,7 @@ function painel() {
   <div class="sect"><h3>Etapa do funil</h3><select id="sEt" style="width:100%">${ETAPAS.map(e => `<option value="${e.k}" ${e.k === p.etapa ? 'selected' : ''}>${e.n}</option>`).join('')}</select></div>
   ${p.observacao ? `<div class="sect"><h3>Observação</h3><div style="color:var(--soft)">${esc(p.observacao)}</div></div>` : ''}
   <div class="actions">
-   ${podeComprar ? `<button class="btn car" style="font-size:15px;padding:11px" id="bComprar">Gerar compra →</button>` : ''}
+   ${podeComprar ? `<button class="btn car" style="font-size:15px;padding:11px" id="bComprar">Registrar venda →</button>` : ''}
    <button class="btn ${podeComprar ? '' : 'pri'}" id="bVisita">Registrar visita de prospecção</button>
    <button class="btn" id="bPerfil">Abrir perfil do negócio</button>
    ${gm ? `<a class="btn" href="${gm}" target="_blank" rel="noopener">Abrir no Google Maps ↗</a>` : ''}</div>`;
@@ -267,7 +267,7 @@ function painel() {
   s.querySelectorAll('[data-pot]').forEach(b => b.onclick = () => salvarPdv(p.id, { potencial: +b.dataset.pot }, 'Potencial atualizado'));
   $('#sEt').onchange = e => mudarEtapa(p.id, e.target.value, () => { desenhar(); painel(); });
   if ($('#sCad')) $('#sCad').onchange = e => salvarPdv(p.id, { cadencia_dias: e.target.value ? +e.target.value : null }, 'Frequência atualizada');
-  if ($('#bComprar')) $('#bComprar').onclick = () => { S.abPdv = p.id; irPara('abertura'); };
+  if ($('#bComprar')) $('#bComprar').onclick = () => { S.abPdv = p.id; S.vendaVolta = { aba: 'mapa', id: p.id }; irPara('abertura'); };
   $('#bVisita').onclick = () => visitaRapida(p);
   ligarComentario(() => painel());
   s.querySelectorAll('[data-rev]').forEach(b => b.onclick = () => revisar(p, b.dataset.rev));
@@ -664,7 +664,12 @@ function telaAbertura() {
       await atualizarUm(p.id); const n = S.pdvs.find(x => x.id === p.id);
       toast(jaCliente ? `Venda lançada para ${p.nome}.` : `Venda lançada para ${p.nome}. Primeira reposição em ${dstr(n.proxima_reposicao)}.`);
       if (guardar && JSON.stringify(novosPrecos) !== JSON.stringify(S.precosCli || {})) { try { await db.salvarPrecos(p.id, novosPrecos); } catch (e) { toast('Venda salva, mas os preços do cliente não foram guardados: rode o SQL 015'); } }
-      if (mandar && reg?.pedido?.id) await enviarAoBling(reg.pedido.id, p.nome); S.abPdv = null; if (S.prosp) { PZ.visHoje[p.id] = 'fechou'; PZ.aberto = null; irPara('mapa'); } else telaAbertura();
+      if (mandar && reg?.pedido?.id) await enviarAoBling(reg.pedido.id, p.nome); S.abPdv = null;
+      const volta = S.vendaVolta; S.vendaVolta = null;
+      if (S.prosp) { PZ.visHoje[p.id] = 'fechou'; PZ.aberto = null; irPara('mapa'); }
+      else if (volta?.aba === 'perfil') abrirPerfil(p.id);
+      else if (volta?.aba === 'mapa') { S.sel = p.id; irPara('mapa'); }
+      else telaAbertura();
     } catch (e) { erro(e); $('#oSave').disabled = false; }
   };
 }
@@ -914,7 +919,7 @@ async function telaPerfil() {
       : `Reposição: sell-out <b>${s?.sellout ?? 0} un.</b> (${brl(s?.valor_sellout)})${s?.trocas ? ` · ${s.trocas} trocas` : ''} · pedido #${o?.numero ?? '—'} ${brl(o?.valor)} · ${esc(o?.condicao || '')}`;
     ev.push({ em: v.em, cor: v.tipo === 'prospeccao' ? '#3F6FA8' : '#D08A3C', t, quem: v.perfis?.nome, obs: v.observacao }); });
   ev.sort((a, b) => new Date(b.em) - new Date(a.em));
-  const podeComprar = ['visitado', 'negociacao', 'mapeado'].includes(p.etapa);
+  const podeComprar = p.etapa !== 'perdido';
   $('#main').innerHTML = `<section class="view on"><div class="dash" style="max-width:1100px">
   <div class="row" style="gap:8px"><button class="btn" id="pVoltar">← Voltar</button><span style="color:var(--mute)">Perfil do negócio</span></div>
   <div style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:16px;align-items:start">
@@ -926,7 +931,7 @@ async function telaPerfil() {
      <p style="color:var(--soft);margin:6px 0">${esc(p.endereco || 'Sem endereço')}${p.condicao ? ` · Condição: <b>${esc(p.condicao)}</b>` : ''}${p.proxima_reposicao ? ` · Próxima reposição: <b>${dstr(p.proxima_reposicao)}</b> (${prazoTxt(p)})` : ''}</p>
      ${p.observacao ? `<p style="background:var(--sand);padding:8px 10px;border-radius:8px;margin:8px 0 0">${esc(p.observacao)}</p>` : ''}
      <div class="row" style="flex-wrap:wrap;margin-top:12px">
-      ${podeComprar ? '<button class="btn car" id="pComprar">Gerar compra →</button>' : ''}
+      ${podeComprar ? '<button class="btn car" id="pComprar">Registrar venda →</button>' : ''}
       <button class="btn pri" id="pVisita">Registrar visita</button>
       <select id="pEtapa">${ETAPAS.map(e => `<option value="${e.k}" ${e.k === p.etapa ? 'selected' : ''}>${e.n}</option>`).join('')}</select>
       <button class="btn" id="pEditar">Editar dados</button><button class="btn" id="pMapa">Ver no mapa</button><button class="btn" id="pAjustar">Ajustar localização</button><button class="btn" id="pExcluirTopo" style="color:#7A2414">Excluir negócio</button>
@@ -950,7 +955,7 @@ async function telaPerfil() {
   $('#pVoltar').onclick = () => irPara(S.voltar || 'carteira');
   $('#pNovaTar').onclick = $('#pTarTopo').onclick = () => modalTarefa({ data: hojeISO(), pdv_id: p.id, contato_id: p.contato_id });
   document.querySelectorAll('[data-tid]').forEach(el => el.onclick = () => modalTarefa(tars.find(t => t.id === el.dataset.tid)));
-  if ($('#pComprar')) $('#pComprar').onclick = () => { S.abPdv = p.id; irPara('abertura'); };
+  if ($('#pComprar')) $('#pComprar').onclick = () => { S.abPdv = p.id; S.vendaVolta = { aba: 'perfil', id: p.id }; irPara('abertura'); };
   $('#pVisita').onclick = () => visitaRapida(p, telaPerfil);
   ligarComentario(telaPerfil);
   $('#pEtapa').onchange = e => mudarEtapa(p.id, e.target.value, telaPerfil);
