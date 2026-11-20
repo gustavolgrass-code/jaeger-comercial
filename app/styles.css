@@ -353,3 +353,11 @@ section:fullscreen #mapa{height:100vh}
 .legend{bottom:12px;left:40px}
 .legend.oculta{display:none}
 .legdot{position:absolute;bottom:14px;left:12px;z-index:500;width:20px;height:20px;border-radius:50%;padding:0;border:2px solid #FBF7F0;box-shadow:0 1px 4px rgba(0,0,0,.3);cursor:pointer;background:conic-gradient(#2F7D4E 0 25%,#D08A3C 0 50%,#6B4FA0 0 75%,#3E2C24 0)}
+/* janela de atendimento */
+.janela{display:flex;flex-direction:column;gap:8px}
+.jdias,.jper{display:flex;flex-wrap:wrap;gap:6px}
+.jdias label,.jper label{margin:0;display:inline-flex;align-items:center;padding:5px 10px;border:1px solid var(--line);border-radius:16px;background:#FBF7F0;font-size:13px;cursor:pointer;user-select:none}
+.jdias label.on,.jper label.on{background:var(--car);border-color:var(--car);color:#fff;font-weight:700}
+.jdias input,.jper input{display:none}
+.jdono{margin:0;display:flex;align-items:center;gap:6px;font-size:13px}
+.jdono input{width:auto}
