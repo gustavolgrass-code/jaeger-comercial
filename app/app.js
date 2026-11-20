@@ -198,7 +198,7 @@ function telaMapa() {
     <div class="msatalhos"><button type="button" data-ms="todas">Todas</button><button type="button" data-ms="nenhuma">Nenhuma</button><button type="button" data-ms="carteira">Carteira</button><button type="button" data-ms="prosp">Prospecção</button></div>
     ${ETAPAS.filter(NO_MAPA).map(e => `<label><input type="checkbox" value="${e.k}" ${S.etapasMapa.has(e.k) ? 'checked' : ''}><i class="dot" style="background:${e.c}"></i>${e.n}</label>`).join('')}</div></div>
    <select id="fReg"><option value="">Todas as regiões</option>${S.base.regioes.map(r => `<option value="${r.codigo}">${r.codigo} · ${esc(r.nome)}</option>`).join('')}</select>
-   <label class="regchk"><input type="checkbox" id="tReg" ${mostrarReg ? 'checked' : ''}> Regiões</label><button class="btn ${S.nuvens ? 'car' : ''}" id="bNuvem">☁️ Nuvens de potencial</button></div>
+   <label class="regchk"><input type="checkbox" id="tReg" ${mostrarReg ? 'checked' : ''}> Regiões</label><button class="btn ${S.nuvens ? 'car' : ''}" id="bNuvem">☁️ Nuvens de potencial</button><button class="btn ${S.quad ? 'car' : ''}" id="bQuad">▦ Quadrantes</button></div>
    <div class="hint" id="hint">Toque no mapa onde fica o ponto</div>
    <div class="rotabox" id="rotaBox" hidden></div>
    <div class="legend ${S.legOculta ? 'oculta' : ''}" id="legend"></div><button class="legdot" id="legDot" title="${S.legOculta ? 'Mostrar legenda' : 'Esconder legenda'}"></button></div><aside id="side"></aside></section>`;
@@ -239,6 +239,8 @@ function telaMapa() {
   if (!S.cheiaLigado) { S.cheiaLigado = true; document.addEventListener('fullscreenchange', () => { const b = document.querySelector('.bt-cheia'); if (b) { b.innerHTML = document.fullscreenElement ? '✕' : '⛶'; b.title = document.fullscreenElement ? 'Sair da tela cheia' : 'Tela cheia'; } setTimeout(() => mapa && mapa.invalidateSize(), 150); }); }
   $('#bNuvem').onclick = () => { S.nuvens = !S.nuvens; $('#bNuvem').classList.toggle('car', S.nuvens); if (S.nuvens) { S.sel = null; desenharNuvens(true); } else { camadaNuvem?.clearLayers(); painel(); } };
   camadaNuvem = null; if (S.nuvens) setTimeout(() => desenharNuvens(false), 0);
+  camadaQuad = null; if (S.quad) setTimeout(() => desenharQuad(), 0);
+  $('#bQuad').onclick = () => { S.quad = !S.quad; $('#bQuad').classList.toggle('car', S.quad); if (S.quad) { S.sel = null; desenharQuad(); } else { camadaQuad?.clearLayers(); painel(); } };
   desenhar(); painel();
 }
 function pino(cor, k = 1, tracejado = false) {
@@ -315,7 +317,56 @@ function alternarLocalizacao() {
 }
 
 /* ---------- nuvens de potencial: onde já vendemos bem, num raio de 2 km ---------- */
-let camadaNuvem = null;
+let camadaNuvem = null, camadaQuad = null;
+/* ---- quadrantes da carteira: agrupa os clientes pela proximidade e mede quanto cada grupo compra ---- */
+const COR_Q = ['#2a78d6', '#eb6834', '#1baf7a', '#7B4FC0', '#d03b3b', '#B8860B'];
+function agruparQuad(pts, k) {
+  // começa pelos pontos mais distantes entre si (resultado estável) e ajusta os centros (k-médias)
+  let C = [pts.reduce((a, b) => (b.lat < a.lat ? b : a))];
+  while (C.length < k) C.push(pts.reduce((a, b) => Math.min(...C.map(c => km2(b, c))) > Math.min(...C.map(c => km2(a, c))) ? b : a));
+  C = C.map(c => ({ lat: c.lat, lng: c.lng })); let A = [];
+  for (let it = 0; it < 60; it++) { A = pts.map(x => C.reduce((bi, c, i) => km2(x, c) < km2(x, C[bi]) ? i : bi, 0));
+    C = C.map((c, i) => { const g = pts.filter((_, j) => A[j] === i); return g.length ? { lat: g.reduce((a, x) => a + x.lat, 0) / g.length, lng: g.reduce((a, x) => a + x.lng, 0) / g.length } : c; }); }
+  return C.map((c, i) => ({ c, g: pts.filter((_, j) => A[j] === i) })).filter(q => q.g.length);
+}
+const casca = pts => { const p = [...pts].sort((a, b) => a.lng - b.lng || a.lat - b.lat); if (p.length < 3) return p; const cr = (o, a, b) => (a.lng - o.lng) * (b.lat - o.lat) - (a.lat - o.lat) * (b.lng - o.lng);
+  const lo = [], hi = []; p.forEach(x => { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], x) <= 0) lo.pop(); lo.push(x); });
+  [...p].reverse().forEach(x => { while (hi.length >= 2 && cr(hi[hi.length - 2], hi[hi.length - 1], x) <= 0) hi.pop(); hi.push(x); }); return lo.slice(0, -1).concat(hi.slice(0, -1)); };
+async function desenharQuad() {
+  if (!S.quadPed) { try { S.quadPed = await db.resumoPedidos(); } catch (e) { return erro(e); } }
+  const k = S.quadK || 4, desde = Date.now() - 180 * DIA, ped = {}; S.quadPed.forEach(o => { if (new Date(o.criado_em) >= desde) (ped[o.pdv_id] = ped[o.pdv_id] || []).push(o); });
+  const cart = S.pdvs.filter(p => p.lat && CART.includes(p.etapa));
+  // quem fica muito longe do miolo da carteira (ex.: outra cidade) não entra nos quadrantes
+  const med = { lat: [...cart].sort((a, b) => a.lat - b.lat)[cart.length >> 1]?.lat, lng: [...cart].sort((a, b) => a.lng - b.lng)[cart.length >> 1]?.lng };
+  const dentro = cart.filter(p => km2(p, med) <= 30), fora = cart.filter(p => km2(p, med) > 30);
+  if (dentro.length < k) return toast('Poucos clientes com localização para dividir');
+  const est = g => { const os = g.flatMap(p => ped[p.id] || []), fat = os.reduce((a, o) => a + Number(o.valor || 0), 0), c = { lat: g.reduce((a, x) => a + x.lat, 0) / g.length, lng: g.reduce((a, x) => a + x.lng, 0) / g.length };
+    return { n: g.length, ativos: g.filter(p => p.etapa === 'ativo').length, compradores: new Set(os.map(o => o.pdv_id)).size, fatMes: fat / 6, pedMes: os.length / 6, ticket: os.length ? fat / os.length : 0, porCliente: g.length ? fat / 6 / g.length : 0,
+      raio: Math.max(...g.map(x => km2(x, c))), bairros: [...new Set(g.map(p => p.bairro).filter(Boolean))], cidades: [...new Set(g.map(p => p.cidade).filter(Boolean))], regs: [...new Set(g.map(p => p.regiao).filter(Boolean))], c }; };
+  S.quads = agruparQuad(dentro, k).map(q => ({ ...est(q.g), g: q.g })).sort((a, b) => b.fatMes - a.fatMes).map((q, i) => ({ ...q, i, cor: COR_Q[i % COR_Q.length], nome: `Q${i + 1}` }));
+  S.quadFora = fora.length ? { ...est(fora), g: fora } : null;
+  if (camadaQuad) camadaQuad.clearLayers(); else camadaQuad = L.layerGroup().addTo(mapa);
+  S.quads.forEach(q => { const h = casca(q.g);
+    if (h.length >= 3) L.polygon(h.map(x => [x.lat, x.lng]), { color: q.cor, weight: 2, fillColor: q.cor, fillOpacity: .12 }).bindTooltip(`${q.nome} · ${q.n} clientes · ${brl(q.fatMes)}/mês`).on('click', () => { S.sel = null; S.quadSel = q.i; painel(); }).addTo(camadaQuad);
+    else L.circle([q.c.lat, q.c.lng], { radius: 400, color: q.cor, weight: 2, fillOpacity: .12 }).addTo(camadaQuad);
+    L.marker([q.c.lat, q.c.lng], { interactive: false, icon: L.divIcon({ className: '', html: `<div class="qrot" style="--c:${q.cor}">${q.nome}<small>${brl(q.fatMes)}/mês</small></div>`, iconSize: [90, 34], iconAnchor: [45, 17] }) }).addTo(camadaQuad); });
+  S.sel = null; painel();
+}
+function painelQuad(s) {
+  s.classList.add('open'); const Q = S.quads, tot = Q.reduce((a, q) => a + q.fatMes, 0) + (S.quadFora?.fatMes || 0);
+  const linha = (q, fora) => `<div class="zona ${S.quadSel === q.i && !fora ? 'on' : ''}" ${fora ? '' : `data-q="${q.i}"`} style="border-left:4px solid ${fora ? '#9A8F86' : q.cor}">
+    <div class="row" style="justify-content:space-between"><b>${fora ? 'Fora da área' : q.nome} · ${esc(q.cidades.join('/'))}</b><b>${brl(q.fatMes)}<small style="font-weight:400">/mês</small></b></div>
+    <div class="qkv"><span><b>${q.n}</b> clientes · <b>${q.ativos}</b> ativos</span><span><b>${dec(q.pedMes)}</b> pedidos/mês</span><span>pedido médio <b>${brl(q.ticket)}</b></span><span><b>${brl(q.porCliente)}</b>/cliente/mês</span><span>raio ${dec(q.raio)} km</span><span>${Math.round(q.fatMes / (tot || 1) * 100)}% do faturamento</span></div>
+    <small style="color:var(--mute)">${esc(q.bairros.slice(0, 7).join(', '))}${q.bairros.length > 7 ? '…' : ''}${q.regs.length ? ` · regiões hoje: ${esc(q.regs.join(', '))}` : ''}</small></div>`;
+  s.innerHTML = `<button class="btn" style="float:right;padding:4px 10px" id="xQuad">✕</button><h2>Quadrantes da carteira</h2>
+   <p style="color:var(--soft);margin-top:0">Clientes da carteira agrupados pela proximidade. Valores pela média dos pedidos dos últimos 6 meses.</p>
+   <div class="row" style="gap:6px;margin-bottom:10px"><span style="color:var(--soft);font-size:13px">Quantos quadrantes:</span>${[3, 4, 5].map(n => `<button class="mini ${(S.quadK || 4) === n ? 'on' : ''}" data-qk="${n}">${n}</button>`).join('')}</div>
+   ${Q.map(q => linha(q)).join('')}${S.quadFora ? linha(S.quadFora, true) : ''}
+   <p style="color:var(--mute);font-size:12px">Toque num quadrante para ver no mapa. Os quadrantes são uma sugestão: as regiões de reposição de hoje não mudam.</p>`;
+  $('#xQuad').onclick = () => { S.quad = false; $('#bQuad')?.classList.remove('car'); camadaQuad?.clearLayers(); painel(); };
+  s.querySelectorAll('[data-qk]').forEach(b => b.onclick = () => { S.quadK = +b.dataset.qk; S.quadSel = null; desenharQuad(); });
+  s.querySelectorAll('[data-q]').forEach(d => d.onclick = () => { const q = Q[+d.dataset.q]; S.quadSel = q.i; mapa.fitBounds(L.latLngBounds(q.g.map(x => [x.lat, x.lng])).pad(0.3)); painelQuad(s); });
+}
 async function valorMensalClientes() {
   if (!S.rpCache || Date.now() - S.rpCache.t > 5 * 60000) S.rpCache = { t: Date.now(), ls: await db.resumoPedidos() };
   const desde = Date.now() - 180 * DIA, v = {};
@@ -414,6 +465,7 @@ function painel() {
   const antes = s.classList.contains('open'); setTimeout(() => { if (mapa && s.classList.contains('open') !== antes) mapa.invalidateSize(); }, 0);
   const p = S.pdvs.find(x => x.id === S.sel);
   if (!p && S.modoPend) return listaPendentes(s);
+  if (!p && S.quad && S.quads) return painelQuad(s);
   if (!p && S.nuvens && S.zonas) return painelZonas(s);
   if (!p) { s.classList.remove('open'); s.innerHTML = `<div class="empty"><b>Selecione um ponto no mapa.</b><br>A cor mostra a etapa do funil.<br><br><b>+ Cadastrar ponto</b>: pela sua localização, marcando no mapa ou colando o link do Google Maps.<br><b>Reposições pendentes</b>: mostra quem precisa de reposição hoje ou está atrasado.</div>`; return; }
   s.classList.add('open');

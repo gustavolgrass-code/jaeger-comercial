@@ -496,3 +496,8 @@ section:fullscreen #mapa{height:100vh}
 .msatalhos button{border:1px solid var(--line);background:#FBF7F0;border-radius:999px;padding:3px 9px;font-size:12px;cursor:pointer}
 .dped tr.lnk{cursor:pointer}
 .dped tr.lnk:hover td{background:var(--sand)}
+.qrot{background:var(--c);color:#fff;border-radius:10px;text-align:center;font:700 13px/1.1 system-ui;padding:4px 6px;box-shadow:0 2px 6px rgba(0,0,0,.3);border:2px solid #fff}
+.qrot small{display:block;font-weight:600;font-size:10px;opacity:.95}
+.qkv{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12.5px;margin:6px 0 4px;color:var(--soft)}
+.qkv b{color:var(--choc)}
+.mini.on{background:var(--choc);color:#fff;border-color:var(--choc)}
