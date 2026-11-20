@@ -24,7 +24,7 @@ const ETAPAS = [
   { k: 'fechado', n: 'Estabelecimento fechado', c: '#6E6E6E' }];
 const NO_MAPA = e => e.k !== 'fechado'; // estabelecimento fechado não aparece no mapa
 const etapa = k => ETAPAS.find(e => e.k === k) || ETAPAS[0];
-const CANAIS = ['Minimercado', 'Padaria', 'Fruteira', 'Cantina', 'Conveniência', 'Cafeteria', 'Restaurante', 'Lancheria', 'Outro'];
+const CANAIS = ['Minimercado', 'Minimercado de autoatendimento', 'Padaria', 'Fruteira', 'Cantina', 'Conveniência', 'Cafeteria', 'Restaurante', 'Lancheria', 'Outro'];
 const CONDICOES = ['À vista · dinheiro', 'À vista · Pix', 'A prazo · 7 dias', 'A prazo · 14 dias', 'A prazo · 28 dias', 'Consignado', 'Bonificação na abertura'];
 const DIAS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 const ROTA_ETAPAS = ['ativo', 'avaliacao', 'risco', 'revisao'];
@@ -2038,6 +2038,7 @@ function baixarModelo(k) {
 
 /* ---- importação direta do Google Maps (arquivo do Outscraper) ---- */
 const GMAPS_CANAL = [[/padaria|panificadora/, 'Padaria'], [/confeitaria|doceria|loja de doces|bolo/, 'Confeitaria'], [/cafeteria|cafe/, 'Cafeteria'],
+  [/auto ?atendimento|autosservico|self service|mercado autonomo|minimercado autonomo|honest market/, 'Minimercado de autoatendimento'],
   [/minimercado|mercearia|supermercado|mercado|armazem|emporio|atacad/, 'Minimercado'], [/hortifruti|fruteira|quitanda|sacolao/, 'Fruteira'],
   [/conveniencia|posto de (gasolina|combustivel)/, 'Conveniência'], [/cantina/, 'Cantina'],
   [/escola|colegio|faculdade|universidade|curso|cursinho|ensino|educa/, 'Escola / faculdade'],
