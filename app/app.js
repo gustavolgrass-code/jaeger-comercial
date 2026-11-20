@@ -1830,7 +1830,8 @@ async function telaPedidosCliente() {
   const sabL = Object.values(sab).sort((a, b) => b.q - a.q), sabT = sabL.reduce((a, x) => a + x.q, 0);
   const dow = [0, 0, 0, 0, 0, 0, 0]; ds.forEach(d => dow[d.getDay()]++);
   const formaDe = o => !o.condicao || /importad/i.test(o.condicao) ? null : o.condicao; // pedidos do Bling vieram sem a forma
-  const pag = {}; peds.forEach(o => { const k = formaDe(o); if (k) pag[k] = (pag[k] || 0) + 1; }), nPag = Object.values(pag).reduce((a, b) => a + b, 0);
+  const pag = {}; peds.forEach(o => { const k = formaDe(o); if (k) pag[k] = (pag[k] || 0) + 1; });
+  const nPag = Object.values(pag).reduce((a, b) => a + b, 0);
   // tendência: média dos 3 últimos pedidos contra a média dos anteriores
   const tick = peds.map(o => Number(o.valor || 0)), ult3 = tick.slice(-3), ant = tick.slice(0, -3);
   const tend = ant.length >= 2 ? (ult3.reduce((a, b) => a + b, 0) / ult3.length) / (ant.reduce((a, b) => a + b, 0) / ant.length) - 1 : null;
