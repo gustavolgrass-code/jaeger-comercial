@@ -10,7 +10,7 @@ const dstr = d => d ? new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', 
 const dec = n => Number(n || 0).toFixed(1).replace('.', ',');
 const DIA = 864e5;
 function toast(t) { const e = $('#toast'); e.textContent = t; e.style.display = 'block'; clearTimeout(e._t); e._t = setTimeout(() => e.style.display = 'none', 4200); }
-function erro(e) { console.error(e); toast('Erro: ' + (e.message || e)); }
+function erro(e) { console.error(e); const m = String(e.message || e); toast(/janela_periodo_check/.test(m) ? 'Para marcar mais de um período, rode o 029_periodos_multiplos.sql no Supabase' : 'Erro: ' + m); }
 function modal(html) { $('#modalBox').innerHTML = html; $('#modal').classList.add('on'); }
 function fecharModal() { $('#modal').classList.remove('on'); }
 window.fecharModal = fecharModal;
@@ -1464,8 +1464,8 @@ function prever(raw, data) {
 function simular(ordem, ini, fim, base, t0 = ini, pos0 = base) {
   let t = t0, pos = pos0; const hs = [];
   for (const s of ordem) {
-    const [w0, w1] = s.jan, chega = t + viagem(pos, s.p), comeca = Math.max(chega, w0);
-    if (comeca + s.serv > w1) return null;
+    const chega = t + viagem(pos, s.p), w = s.jan.find(([a, b]) => Math.max(chega, a) + s.serv <= b); // primeira janela em que ainda dá para atender
+    if (!w) return null; const comeca = Math.max(chega, w[0]);
     hs.push({ chega, comeca, espera: comeca - chega }); t = comeca + s.serv; pos = s.p;
   }
   const volta = t + viagem(pos, base); if (volta > fim) return null;
@@ -1535,7 +1535,8 @@ function calcularRota() {
   const R = RT.salvo, c = cfgRota(), base = baseRota(), dow = diaSemana(R.data), ini = minDe(R.inicio), fim = minDe(R.fim);
   const mot = RT.perfis.find(x => x.id === R.motorista) || S.eu, moises = /mois/i.test(semAcento(mot.nome || ''));
   const feitos = new Set(RT.visitas.filter(v => { const p = S.pdvs.find(q => q.id === v.pdv_id); return ROTA_ETAPAS.includes(p?.etapa) ? v.tipo === 'reposicao' : v.tipo === 'prospeccao'; }).map(v => v.pdv_id)), incl = new Set(R.incluir), tira = new Set(R.tirar); // cliente só conta como atendido com reposição; prospect, com visita de prospecção
-  const jan = p => { const j = JANELAS[p.janela_periodo] || [ini, fim]; return [Math.max(j[0], 0), Math.min(j[1], 24 * 60)]; };
+  // janelas do cliente: um intervalo por período marcado (manhã e noite viram dois intervalos); sem período, a jornada toda
+  const jan = p => { const ks = perList(p); return ks.length ? ks.map(k => JANELAS[k]).sort((a, b) => a[0] - b[0]) : [[ini, fim]]; };
   const atendeHoje = p => !p.janela_dias?.length || p.janela_dias.includes(dow);
   // fila de reposição
   const fila = S.pdvs.filter(p => ROTA_ETAPAS.includes(p.etapa) && p.lat).map(p => ({ p, ...RT.prev[p.id] })).filter(x => x.urg).sort((a, b) => a.dias - b.dias);
@@ -1828,15 +1829,19 @@ async function telaResumo() {
 }
 
 /* =================== campos reutilizáveis =================== */
+const perList = p => String(p.janela_periodo || '').split(',').filter(k => PERIODOS[k]); // um ou mais períodos (ex.: 'manha,noite')
 const DIAS_SEM = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'], PERIODOS = { manha: 'Manhã', tarde: 'Tarde', noite: 'Noite', dia_todo: 'Dia todo' };
 function campoJanela(id, p) { const ds = p.janela_dias || [];
   return `<div class="janela" id="${id}"><div class="jdias">${DIAS_SEM.map((d, i) => `<label class="${ds.includes(i) ? 'on' : ''}"><input type="checkbox" value="${i}" ${ds.includes(i) ? 'checked' : ''}>${d}</label>`).join('')}</div>
-   <div class="jper">${Object.entries(PERIODOS).map(([k, n]) => `<label class="${p.janela_periodo === k ? 'on' : ''}"><input type="radio" name="${id}Per" value="${k}" ${p.janela_periodo === k ? 'checked' : ''}>${n}</label>`).join('')}</div>
+   <div class="jper">${Object.entries(PERIODOS).map(([k, n]) => { const on = perList(p).includes(k); return `<label class="${on ? 'on' : ''}"><input type="checkbox" value="${k}" ${on ? 'checked' : ''}>${n}</label>`; }).join('')}</div>
    <label class="jdono"><input type="checkbox" ${p.precisa_dono === false ? '' : 'checked'}> Precisa do dono presente</label></div>`; }
-function ligarJanela(id) { const el = document.getElementById(id); if (!el) return; el.querySelectorAll('.jdias input, .jper input').forEach(i => i.onchange = () => el.querySelectorAll('.jdias label, .jper label').forEach(l => l.classList.toggle('on', l.querySelector('input').checked))); }
-function lerJanela(id) { const el = document.getElementById(id); if (!el) return {}; const dias = [...el.querySelectorAll('.jdias input:checked')].map(i => +i.value), per = el.querySelector('.jper input:checked')?.value || null;
+function ligarJanela(id) { const el = document.getElementById(id); if (!el) return; el.querySelectorAll('.jdias input, .jper input').forEach(i => i.onchange = () => {
+    // "Dia todo" exclui os outros períodos (e vice-versa); manhã, tarde e noite combinam entre si
+    if (i.closest('.jper') && i.checked) el.querySelectorAll('.jper input').forEach(o => { if (o !== i && (i.value === 'dia_todo' || o.value === 'dia_todo')) o.checked = false; });
+    el.querySelectorAll('.jdias label, .jper label').forEach(l => l.classList.toggle('on', l.querySelector('input').checked)); }); }
+function lerJanela(id) { const el = document.getElementById(id); if (!el) return {}; const dias = [...el.querySelectorAll('.jdias input:checked')].map(i => +i.value), per = [...el.querySelectorAll('.jper input:checked')].map(i => i.value).join(',') || null;
   return { janela_dias: dias.length ? dias : null, janela_periodo: per, precisa_dono: el.querySelector('.jdono input').checked }; }
-const janelaTxt = p => { const ds = (p.janela_dias || []).slice().sort(), dt = ds.length === 6 && !ds.includes(0) ? 'Seg a Sáb' : ds.length === 7 ? 'Todos os dias' : ds.map(i => DIAS_SEM[i]).join(', '); return [dt, PERIODOS[p.janela_periodo], p.precisa_dono === false ? 'qualquer responsável' : (ds.length || p.janela_periodo) ? 'com o dono' : ''].filter(Boolean).join(' · '); };
+const janelaTxt = p => { const ds = (p.janela_dias || []).slice().sort(), dt = ds.length === 6 && !ds.includes(0) ? 'Seg a Sáb' : ds.length === 7 ? 'Todos os dias' : ds.map(i => DIAS_SEM[i]).join(', '); return [dt, perList(p).map(k => PERIODOS[k]).join(' e '), p.precisa_dono === false ? 'qualquer responsável' : (ds.length || p.janela_periodo) ? 'com o dono' : ''].filter(Boolean).join(' · '); };
 const CARGOS = ['Dono', 'Gerente', 'Funcionário'];
 function campoCanal(id, valor) {
   const custom = valor && !CANAIS.includes(valor);
