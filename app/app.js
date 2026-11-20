@@ -118,7 +118,7 @@ const ABAS = {
   operacao: [['rota', 'Dia de rota'], ['reposicao', 'Reposição'], ['resumo', 'Resumo do dia']] };
 let lado = 'comercial';
 function montar() {
-  lado = S.eu.papel === 'operacao' ? 'operacao' : 'comercial';
+  lado = 'comercial'; // todos abrem no Comercial; a Reposição fica a um toque
   $('#raiz').innerHTML = `<header><span class="brand">Jaeger’s Administração</span>
    <div class="roles"><button id="rG">Comercial</button><button id="rM">Reposição</button></div>
    <div class="userbox">${esc(S.eu.nome)} <button id="bSair">Sair</button></div></header>
