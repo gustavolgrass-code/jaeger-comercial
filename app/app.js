@@ -1253,7 +1253,8 @@ async function telaPainel(recarregarDados) {
   <div class="pgrid">
    <div class="panel"><h3>Ritmo do ${unid}</h3><p class="psub">Faturamento acumulado ${porAno ? 'mês a mês' : 'dia a dia'}${mFat ? ', contra a meta' : ''}</p>${grafLinhas('gRitmo', xsD, sRitmo, 'R$')}${legenda(sRitmo)}
     <div class="pnota">${mFat ? (atual ? (falta > 0 ? `Faltam <b>${brl(falta)}</b> em ${duRest} dias úteis: <b>${brl(duRest ? falta / duRest : falta)} por dia útil</b>.` : `<b>Meta do ${unid} batida.</b>`) : `Fechou em ${Math.round(N.fat / mFat * 100)}% da meta.`) : 'Defina a meta de faturamento em ⚙️ Metas para ver a linha da meta.'}</div></div>
-   <div class="panel"><h3>Faturamento · ${porAno ? 'meses de ' + PV.ano : '12 meses'}</h3><p class="psub">Barras: faturamento · traço: meta de cada mês</p>${grafBarras('g12', m12.map(k => mesNome(k, true)), [{ nome: 'Faturamento', cor: COR.s1, vals: fat12.map(n => n.fat) }], 'R$', { metas: m12.map(k => metaDe(k, PV.vend, 'fat')) })}</div>
+   ${porAno ? `<div class="panel"><h3>Faturamento · meses de ${PV.ano}</h3><p class="psub">Barras: faturamento · traço: meta de cada mês</p>${grafBarras('g12', m12.map(k => mesNome(k, true)), [{ nome: 'Faturamento', cor: COR.s1, vals: fat12.map(n => n.fat) }], 'R$', { metas: m12.map(k => metaDe(k, PV.vend, 'fat')) })}</div>`
+     : `<div class="panel"><h3>Faturamento por dia · ${mesNome(mes, true)}</h3><p class="psub">Quanto entrou em cada dia do mês${mFat ? ` · meta do mês ${fmtV(mFat, 'R$')}` : ''}</p>${grafBarras('g12', xsD, [{ nome: 'Faturamento', cor: COR.s1, vals: xsD.map((_, i) => { const d0 = new Date(+ini + i * DIA); return d0 > corte ? null : numeros(pedidosDe(D, d0, new Date(+d0 + DIA))).fat; }) }], 'R$')}</div>`}
   </div>
 
   <h2 class="psec">Saída de produtos</h2>
