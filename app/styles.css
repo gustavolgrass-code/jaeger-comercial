@@ -483,3 +483,14 @@ section:fullscreen #mapa{height:100vh}
 .rotabox.esp{background:var(--choc);color:#fff}
 .rotabox .rbn{font-family:Fraunces,Georgia,serif;font-size:20px;font-weight:700}
 .rotabox .btn{white-space:nowrap}
+/* filtro de etapas com várias escolhas */
+.msel{position:relative}
+.msbtn{border:1px solid var(--line);background:#FBF7F0;border-radius:10px;padding:9px 30px 9px 12px;font:inherit;font-size:14px;cursor:pointer;min-width:160px;text-align:left;position:relative}
+.msbtn::after{content:'▾';position:absolute;right:10px;top:50%;transform:translateY(-50%);color:var(--mute)}
+.msmenu{position:absolute;top:calc(100% + 4px);left:0;z-index:1200;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 24px rgba(46,26,18,.18);padding:8px;min-width:230px;display:flex;flex-direction:column;gap:2px}
+.msmenu[hidden]{display:none}
+.msmenu label{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;cursor:pointer;font-size:14px;margin:0;font-weight:400}
+.msmenu label:hover{background:var(--sand)}
+.msmenu input{width:16px;height:16px;margin:0;accent-color:var(--choc)}
+.msatalhos{display:flex;gap:4px;flex-wrap:wrap;padding:2px 2px 8px;border-bottom:1px solid var(--line);margin-bottom:4px}
+.msatalhos button{border:1px solid var(--line);background:#FBF7F0;border-radius:999px;padding:3px 9px;font-size:12px;cursor:pointer}

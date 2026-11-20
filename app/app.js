@@ -34,7 +34,7 @@ const KITS = [{ n: 'Brownie 32', q: { B1: 8, B2: 8, B3: 8, B4: 8 } }, { n: 'Cook
 const prazoDias = c => { const m = /(\d+) dias/.exec(c || ''); return m ? +m[1] : 0; };
 
 /* =================== estado =================== */
-const S = { contatos: [], eu: null, base: null, pdvs: [], sellouts: {}, aba: null, sel: null, rotaReg: null, contando: null, abPdv: null, sugestoes: [], legOculta: true }; // legenda do mapa começa minimizada
+const S = { contatos: [], eu: null, base: null, pdvs: [], sellouts: {}, aba: null, sel: null, rotaReg: null, contando: null, abPdv: null, sugestoes: [], legOculta: true, etapasMapa: new Set(['ativo']) }; // legenda do mapa começa minimizada
 const regraAval = () => S.base.regras.avaliacao || { reposicoes: 13, meta_minima_sellout: 6 };
 const cadPadrao = () => S.base.regras.cadencia_padrao || {};
 const regiaoDe = (lng, lat) => {
@@ -194,7 +194,9 @@ function telaMapa() {
   if (S.prosp) return telaProspeccao();
   $('#main').innerHTML = `<section class="view on" style="display:flex;height:100%"><div id="mapa"><div id="lmap"></div>
    <div class="maptools"><div class="mbusca"><input id="bBusca" autocomplete="off" placeholder="🔍 Buscar cliente…"><div id="bSug" class="sugs"></div></div><button class="btn pri" id="bAdd">+ Cadastrar ponto</button><button class="btn" id="bPend">Reposições pendentes <b id="nPend"></b></button><button class="btn" id="bLoc">📍 Minha localização</button>
-   <select id="fEt"><option value="">Todas as etapas</option>${ETAPAS.filter(NO_MAPA).map(e => `<option value="${e.k}">${e.n}</option>`).join('')}</select>
+   <div class="msel" id="fEt"><button type="button" class="msbtn" id="fEtBtn"></button><div class="msmenu" id="fEtMenu" hidden>
+    <div class="msatalhos"><button type="button" data-ms="todas">Todas</button><button type="button" data-ms="nenhuma">Nenhuma</button><button type="button" data-ms="carteira">Carteira</button><button type="button" data-ms="prosp">Prospecção</button></div>
+    ${ETAPAS.filter(NO_MAPA).map(e => `<label><input type="checkbox" value="${e.k}" ${S.etapasMapa.has(e.k) ? 'checked' : ''}><i class="dot" style="background:${e.c}"></i>${e.n}</label>`).join('')}</div></div>
    <select id="fReg"><option value="">Todas as regiões</option>${S.base.regioes.map(r => `<option value="${r.codigo}">${r.codigo} · ${esc(r.nome)}</option>`).join('')}</select>
    <label class="regchk"><input type="checkbox" id="tReg" ${mostrarReg ? 'checked' : ''}> Regiões</label><button class="btn ${S.nuvens ? 'car' : ''}" id="bNuvem">☁️ Nuvens de potencial</button></div>
    <div class="hint" id="hint">Toque no mapa onde fica o ponto</div>
@@ -214,7 +216,7 @@ function telaMapa() {
       const ls = S.pdvs.filter(x => x.etapa !== 'fechado' && norm([x.nome, x.razao_social, x.bairro, x.cidade].filter(Boolean).join(' ')).includes(q)).slice(0, 12);
       sug.innerHTML = ls.map(x => `<div data-pick="${x.id}"><b>${esc(x.nome)}</b> <small style="color:${etapa(x.etapa).c};font-weight:700">${etapa(x.etapa).n}</small><br><small style="color:var(--mute)">${esc([x.bairro, x.cidade].filter(Boolean).join(' · '))}${x.lat ? '' : ' · sem localização'}</small></div>`).join('') || '<div style="color:var(--mute)">Nenhum cliente encontrado</div>';
       sug.style.display = 'block';
-      sug.querySelectorAll('[data-pick]').forEach(d => d.onmousedown = e => { e.preventDefault(); const x = S.pdvs.find(y => y.id === d.dataset.pick); bu.value = ''; sug.style.display = 'none'; bu.blur();
+      sug.querySelectorAll('[data-pick]').forEach(d => d.onmousedown = e => { e.preventDefault(); const x = S.pdvs.find(y => y.id === d.dataset.pick); bu.value = ''; sug.style.display = 'none'; bu.blur(); if (!S.etapasMapa.has(x.etapa)) { S.etapasMapa.add(x.etapa); document.querySelectorAll('#fEtMenu input').forEach(i => i.checked = S.etapasMapa.has(i.value)); rotEt(); } // mostra a etapa do cliente buscado
         S.sel = x.id; if (x.lat) mapa.setView([x.lat, x.lng], Math.max(mapa.getZoom(), 16)); else toast('Esse cliente ainda não tem localização no mapa'); desenhar(); painel(); }); };
     bu.oninput = listar; bu.onfocus = listar; bu.onblur = () => setTimeout(() => { sug.style.display = 'none'; }, 150);
     bu.onkeydown = e => { if (e.key === 'Enter') sug.querySelector('[data-pick]')?.dispatchEvent(new MouseEvent('mousedown')); if (e.key === 'Escape') { bu.value = ''; listar(); } }; }
@@ -222,7 +224,16 @@ function telaMapa() {
   $('#bPend').onclick = () => { S.modoPend = !S.modoPend; S.sel = null; desenhar(); painel(); };
   $('#bLoc').onclick = () => alternarLocalizacao();
   if (S.rastreando) { mostrarEu(false); $('#bLoc').classList.add('pri'); }
-  $('#fEt').onchange = $('#fReg').onchange = desenhar;
+  $('#fReg').onchange = desenhar;
+  // etapas no mapa: várias de uma vez (começa só com Ativo)
+  const rotEt = () => { const n = S.etapasMapa.size, tot = ETAPAS.filter(NO_MAPA).length; $('#fEtBtn').textContent = n === 0 ? 'Nenhuma etapa' : n === tot ? 'Todas as etapas' : n === 1 ? etapa([...S.etapasMapa][0]).n : `${n} etapas`; };
+  const marcaEt = ks => { S.etapasMapa = new Set(ks); document.querySelectorAll('#fEtMenu input').forEach(i => i.checked = S.etapasMapa.has(i.value)); rotEt(); desenhar(); };
+  $('#fEtBtn').onclick = e => { e.stopPropagation(); $('#fEtMenu').hidden = !$('#fEtMenu').hidden; };
+  $('#fEtMenu').onclick = e => e.stopPropagation();
+  document.querySelectorAll('#fEtMenu input').forEach(i => i.onchange = () => { i.checked ? S.etapasMapa.add(i.value) : S.etapasMapa.delete(i.value); rotEt(); desenhar(); });
+  document.querySelectorAll('[data-ms]').forEach(b => b.onclick = () => marcaEt({ todas: ETAPAS.filter(NO_MAPA).map(e => e.k), nenhuma: [], carteira: CART, prosp: PROSP }[b.dataset.ms]));
+  if (!S.fechaMs) { S.fechaMs = true; document.addEventListener('click', () => { const m = $('#fEtMenu'); if (m) m.hidden = true; }); }
+  rotEt();
   $('#tReg').onchange = e => { mostrarReg = e.target.checked; desenhar(); };
   $('#legDot').onclick = () => { S.legOculta = !S.legOculta; $('#legend').classList.toggle('oculta', S.legOculta); $('#legDot').title = S.legOculta ? 'Mostrar legenda' : 'Esconder legenda'; };
   if (!S.cheiaLigado) { S.cheiaLigado = true; document.addEventListener('fullscreenchange', () => { const b = document.querySelector('.bt-cheia'); if (b) { b.innerHTML = document.fullscreenElement ? '✕' : '⛶'; b.title = document.fullscreenElement ? 'Sair da tela cheia' : 'Tela cheia'; } setTimeout(() => mapa && mapa.invalidateSize(), 150); }); }
@@ -238,11 +249,11 @@ function pino(cor, k = 1, tracejado = false) {
 function desenhar() {
   camada.clearLayers();
   if (mostrarReg) S.base.regioes.forEach(r => { const b = r.limites; if (!b) return; L.rectangle([[b[1], b[0]], [b[3], b[2]]], { color: r.cor, weight: 2, dashArray: '8 6', fillOpacity: .04, interactive: false }).addTo(camada).bindTooltip(`${r.codigo} · ${r.nome}`, { permanent: false }); });
-  const fe = $('#fEt').value, fr = $('#fReg').value;
+  const fr = $('#fReg').value;
   const pend = repPendentes();
   $('#nPend').textContent = pend.length ? `(${pend.length})` : '';
   $('#bPend').classList.toggle('car', !!S.modoPend);
-  (S.modoPend ? pend : S.pdvs).filter(p => p.lat && p.etapa !== 'fechado' && (!fe || p.etapa === fe) && (!fr || p.regiao === fr)).forEach(p => {
+  (S.modoPend ? pend : S.pdvs).filter(p => p.lat && p.etapa !== 'fechado' && (S.modoPend || S.etapasMapa.has(p.etapa)) && (!fr || p.regiao === fr)).forEach(p => {
     const m = L.marker([p.lat, p.lng], { icon: pino(etapa(p.etapa).c, S.sel === p.id ? 1.35 : p.classe === 'A' ? 1.15 : 1), zIndexOffset: S.sel === p.id ? 1000 : 0 });
     m.on('click', () => { if (S.rotaDe && S.rotaDe !== p.id) return tracarRota(S.rotaDe, p.id); S.sel = p.id; desenhar(); painel(); });
     m.bindTooltip(esc(p.nome)); m.addTo(camada);
