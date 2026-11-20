@@ -144,6 +144,13 @@ function irPara(a, semHist) {
   ({ agenda: telaAgenda, perfil: telaPerfil, contato: telaContato, contatos: telaContatos, uploads: telaUploads, mapa: telaMapa, funil: telaFunil, carteira: telaCarteira, abertura: telaAbertura, painel: telaPainel, regras: telaRegras, rota: telaRota, reposicao: telaReposicao, pedcli: telaPedidosCliente, resumo: telaResumo })[a]();
 }
 window.irPara = irPara;
+// texto do botão Voltar: diz para onde vai (ex.: "← Almeida 68" quando veio do perfil do negócio)
+function rotuloVoltar(padrao) { const t = S.hist[S.hist.length - 1];
+  if (!t) return padrao;
+  if (t.aba === 'perfil') return S.pdvs.find(x => x.id === t.perfilId)?.nome || 'Perfil do negócio';
+  if (t.aba === 'contato') return S.contatos.find(x => x.id === t.contatoId)?.nome || 'Contato';
+  if (t.aba === 'pedcli') return 'Detalhes dos pedidos';
+  return (Object.values(ABAS).flat().find(([k]) => k === t.aba) || [, padrao])[1]; }
 function voltar(padrao) { const h = S.hist.pop(); if (!h) return irPara(padrao, true); S.perfilId = h.perfilId; S.contatoId = h.contatoId; if (h.aba === 'perfil') S.sel = h.perfilId; irPara(h.aba, true); }
 // mantém os filtros de uma tela quando você sai e volta: restaura os valores e guarda a cada mudança
 function manter(tela, ids) { const f = S.fil[tela] = S.fil[tela] || {};
@@ -1932,7 +1939,7 @@ async function telaPerfil() {
   ev.sort((a, b) => new Date(b.em) - new Date(a.em));
   const podeComprar = p.etapa !== 'perdido';
   $('#main').innerHTML = `<section class="view on"><div class="dash" style="max-width:1100px">
-  <div class="row" style="gap:8px"><button class="btn" id="pVoltar">← Voltar</button><span style="color:var(--mute)">Perfil do negócio</span></div>
+  <div class="row" style="gap:8px"><button class="btn" id="pVoltar">← ${esc(rotuloVoltar('Negócios'))}</button><span style="color:var(--mute)">Perfil do negócio</span></div>
   <div style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:16px;align-items:start">
    <div style="display:flex;flex-direction:column;gap:16px">
     <div class="panel"><small style="color:var(--mute)">${esc(p.canal || '')} · ${esc([p.bairro, p.cidade].filter(Boolean).join(', '))}</small>
@@ -2142,7 +2149,7 @@ async function telaContato() {
   const c = S.contatos.find(x => x.id === S.contatoId); if (!c) return irPara('contatos');
   let tars = [], secDe = []; try { [tars, secDe] = await Promise.all([db.tarefasDoContato(c.id), db.vinculosDoContato(c.id).catch(() => [])]); } catch (e) { }
   const negs = S.pdvs.filter(p => p.contato_id === c.id || secDe.includes(p.id)), w = linkWpp(c.whatsapp || c.telefone);
-  $('#main').innerHTML = `<section class="view on"><div class="dash" style="max-width:900px"><div class="row"><button class="btn" id="cVoltar">← Contatos</button></div>
+  $('#main').innerHTML = `<section class="view on"><div class="dash" style="max-width:900px"><div class="row"><button class="btn" id="cVoltar">← ${esc(rotuloVoltar('Contatos'))}</button></div>
   <div class="panel"><small style="color:var(--mute)">Contato</small><h2 style="font-family:Fraunces,Georgia,serif;margin:4px 0">${esc(c.nome)} ${c.comprador ? '<span class="badge comp" style="font-family:inherit;font-size:13px;vertical-align:middle">🛒 Comprador</span>' : ''}</h2><div style="color:var(--soft)">${esc([c.cargo, c.empresa].filter(Boolean).join(' · '))}</div>
    <div class="kv"><div><small>Telefone</small><b>${esc(c.telefone || '—')}</b></div><div><small>WhatsApp</small><b>${esc(c.whatsapp || '—')}</b></div><div style="grid-column:1/-1"><small>E-mail</small><b style="font-size:14px">${esc(c.email || '—')}</b></div></div>
    ${c.observacao ? `<p style="color:var(--soft)">${esc(c.observacao)}</p>` : ''}
