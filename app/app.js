@@ -189,7 +189,7 @@ function ligarDesenho(m) {
   // enquanto desenha, o clique não seleciona nem marca ponto no mapa
   el.addEventListener('click', e => { if (D.modo && !e.target.closest('.leaflet-control')) e.stopPropagation(); }, true);
 }
-let aoMarcar = null, mapa = null, camada = null, camadaSug = null, marcando = false, mostrarReg = true;
+let camadaTraco = null, aoMarcar = null, mapa = null, camada = null, camadaSug = null, marcando = false, mostrarReg = true;
 function telaMapa() {
   if (S.prosp) return telaProspeccao();
   $('#main').innerHTML = `<section class="view on" style="display:flex;height:100%"><div id="mapa"><div id="lmap"></div>
@@ -198,6 +198,7 @@ function telaMapa() {
    <select id="fReg"><option value="">Todas as regiões</option>${S.base.regioes.map(r => `<option value="${r.codigo}">${r.codigo} · ${esc(r.nome)}</option>`).join('')}</select>
    <label class="regchk"><input type="checkbox" id="tReg" ${mostrarReg ? 'checked' : ''}> Regiões</label><button class="btn ${S.nuvens ? 'car' : ''}" id="bNuvem">☁️ Nuvens de potencial</button></div>
    <div class="hint" id="hint">Toque no mapa onde fica o ponto</div>
+   <div class="rotabox" id="rotaBox" hidden></div>
    <div class="legend ${S.legOculta ? 'oculta' : ''}" id="legend"></div><button class="legdot" id="legDot" title="${S.legOculta ? 'Mostrar legenda' : 'Esconder legenda'}"></button></div><aside id="side"></aside></section>`;
   if (mapa) { mapa.remove(); mapa = null; }
   mapa = L.map('lmap', { zoomControl: false }).setView([-29.98, -51.18], 12);
@@ -206,7 +207,7 @@ function telaMapa() {
   L.control.zoom({ position: 'bottomright' }).addTo(mapa);
   ligarDesenho(mapa);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(mapa);
-  camada = L.layerGroup().addTo(mapa); camadaSug = L.layerGroup().addTo(mapa);
+  camada = L.layerGroup().addTo(mapa); camadaSug = L.layerGroup().addTo(mapa); camadaTraco = L.layerGroup().addTo(mapa); S.rotaDe = null; S.rotaPar = null;
   mapa.on('click', e => { if (!marcando) return; marcando = false; $('#hint').style.display = 'none'; const f = aoMarcar || (ll => abrirCadastro(ll)); aoMarcar = null; f([e.latlng.lng, e.latlng.lat]); });
   { const bu = $('#bBusca'), sug = $('#bSug');
     const listar = () => { const q = norm(bu.value).trim(); if (!q) { sug.style.display = 'none'; return; }
@@ -243,7 +244,7 @@ function desenhar() {
   $('#bPend').classList.toggle('car', !!S.modoPend);
   (S.modoPend ? pend : S.pdvs).filter(p => p.lat && p.etapa !== 'fechado' && (!fe || p.etapa === fe) && (!fr || p.regiao === fr)).forEach(p => {
     const m = L.marker([p.lat, p.lng], { icon: pino(etapa(p.etapa).c, S.sel === p.id ? 1.35 : p.classe === 'A' ? 1.15 : 1), zIndexOffset: S.sel === p.id ? 1000 : 0 });
-    m.on('click', () => { S.sel = p.id; desenhar(); painel(); });
+    m.on('click', () => { if (S.rotaDe && S.rotaDe !== p.id) return tracarRota(S.rotaDe, p.id); S.sel = p.id; desenhar(); painel(); });
     m.bindTooltip(esc(p.nome)); m.addTo(camada);
   });
   $('#legend').innerHTML = ETAPAS.filter(NO_MAPA).map(e => `<span><i class="dot" style="background:${e.c}"></i>${e.n} (${S.pdvs.filter(p => p.etapa === e.k).length})</span>`).join('');
@@ -376,11 +377,27 @@ function painelZonas(s) {
 // prioridade para reativar clientes parados
 const PRIOR = { alta: { n: 'Alta', c: '#d03b3b', v: 3 }, media: { n: 'Média', c: '#fab219', v: 2 }, baixa: { n: 'Baixa', c: '#9A8F86', v: 1 } };
 const REATIVAR = ['inativo', 'perdido', 'risco', 'revisao'];
-const seloPrior = p => p.prioridade_reativacao && PRIOR[p.prioridade_reativacao] ? `<span class="badge prior" style="--c:${PRIOR[p.prioridade_reativacao].c}">Reativar · ${PRIOR[p.prioridade_reativacao].n}</span>` : '';
-const campoPrior = p => REATIVAR.includes(p.etapa) || p.prioridade_reativacao ? `<div class="sect prisect"><h3>Prioridade para reativar</h3><div class="prichips">${Object.entries(PRIOR).reverse().map(([k, x]) => `<button type="button" data-prior="${k}" class="${p.prioridade_reativacao === k ? 'on' : ''}" style="--c:${x.c}">${x.n}</button>`).join('')}</div></div>` : '';
+const seloPrior = p => REATIVAR.includes(p.etapa) && p.prioridade_reativacao && PRIOR[p.prioridade_reativacao] ? `<span class="badge prior" style="--c:${PRIOR[p.prioridade_reativacao].c}">Reativar · ${PRIOR[p.prioridade_reativacao].n}</span>` : '';
+const campoPrior = p => REATIVAR.includes(p.etapa) ? // só para quem está parado; cliente ativo não mostra `<div class="sect prisect"><h3>Prioridade para reativar</h3><div class="prichips">${Object.entries(PRIOR).reverse().map(([k, x]) => `<button type="button" data-prior="${k}" class="${p.prioridade_reativacao === k ? 'on' : ''}" style="--c:${x.c}">${x.n}</button>`).join('')}</div></div>` : '';
 function ligarPrior(p, depois) { document.querySelectorAll('[data-prior]').forEach(b => b.onclick = async () => { const v = p.prioridade_reativacao === b.dataset.prior ? null : b.dataset.prior;
   try { await db.atualizarPdv(p.id, { prioridade_reativacao: v }); await atualizarUm(p.id); toast(v ? `Prioridade para reativar: ${PRIOR[v].n}` : 'Prioridade removida'); depois(); }
   catch (e) { erro(/prioridade_reativacao/.test(e.message) ? new Error('Rode o 021_prioridade_reativacao.sql no Supabase') : e); } }); }
+// rota entre dois pontos do mapa, pelas ruas (mesmo cálculo do Dia de rota)
+const fmtDist = k => k < 1 ? `${Math.round(k * 1000)} m` : `${k.toFixed(k < 10 ? 1 : 0).replace('.', ',')} km`;
+function mostrarRotaBox(html, esperando) { const b = $('#rotaBox'); if (!b) return; b.hidden = false; b.classList.toggle('esp', !!esperando);
+  b.innerHTML = `<div>${html}</div><button class="btn" id="rbFechar">${esperando ? 'Cancelar' : 'Fechar rota'}</button>`;
+  $('#rbFechar').onclick = () => { S.rotaDe = null; S.rotaPar = null; camadaTraco?.clearLayers(); b.hidden = true; }; }
+async function tracarRota(deId, paraId) {
+  const a = S.pdvs.find(x => x.id === deId), b = S.pdvs.find(x => x.id === paraId); S.rotaDe = null; if (!a || !b) return;
+  mostrarRotaBox(`<b>${esc(a.nome)}</b> → <b>${esc(b.nome)}</b> · calculando…`, false);
+  const g = await caminhoRuas([[a.lat, a.lng], [b.lat, b.lng]]); camadaTraco.clearLayers();
+  const linha = g ? g.coords : [[a.lat, a.lng], [b.lat, b.lng]], km = g ? g.km : km2(a, b) * 1.35;
+  L.polyline(linha, { color: '#ffffff', weight: 8, opacity: .9 }).addTo(camadaTraco); L.polyline(linha, { color: '#2a78d6', weight: 5, opacity: .95 }).addTo(camadaTraco);
+  [[a, 'A'], [b, 'B']].forEach(([p, t]) => L.marker([p.lat, p.lng], { icon: L.divIcon({ className: '', html: `<div class="rpin" style="background:#2a78d6">${t}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] }), zIndexOffset: 2000 }).addTo(camadaTraco));
+  mapa.fitBounds(L.latLngBounds(linha).pad(0.2));
+  mostrarRotaBox(`<b>${esc(a.nome)}</b> → <b>${esc(b.nome)}</b><br><span class="rbn">${fmtDist(km)}</span>${g ? ` · ~${Math.round(g.min)} min de carro` : ' · estimativa em linha reta (sem conexão com o mapa de ruas)'}`, false);
+}
+const km2 = (a, b) => { const R = 6371, r = Math.PI / 180, dLa = (b.lat - a.lat) * r, dLo = (b.lng - a.lng) * r; const h = Math.sin(dLa / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLo / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); };
 function painel() {
   const s = $('#side'); if (!s) return;
   const antes = s.classList.contains('open'); setTimeout(() => { if (mapa && s.classList.contains('open') !== antes) mapa.invalidateSize(); }, 0);
@@ -391,7 +408,7 @@ function painel() {
   s.classList.add('open');
   const podeComprar = p.etapa !== 'perdido';
   const gm = p.lat ? `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}` : null;
-  s.innerHTML = `<button class="btn" style="float:right;padding:4px 10px" id="xSide">✕</button>
+  s.innerHTML = `<button class="btn" style="float:right;padding:4px 10px" id="xSide">✕</button>${p.lat ? `<button class="btn" style="float:right;padding:4px 10px;margin-right:6px" id="bTraco">🧭 Traçar rota</button>` : ''}
   <small style="color:var(--mute)">${esc(p.canal || '')} · ${esc(p.cidade || '')}</small><h2>${esc(p.nome)}</h2>${p.contato_nome ? `<div style="color:var(--soft)">Contato: <b>${esc(p.contato_nome)}</b>${p.contato_telefone ? ' · ' + esc(p.contato_telefone) : ''}</div>` : ''}
   <div class="badges"><span class="badge st" style="background:${etapa(p.etapa).c}">${etapa(p.etapa).n}</span>${p.classe ? `<span class="badge">Classe ${p.classe}</span>` : ''}<span class="badge">${p.regiao || '—'} · ${esc(regNome(p.regiao))}</span>${p.expositor_id ? `<span class="badge">Expositor ${esc(expo(p.expositor_id).nome)}</span>` : ''}${seloPrior(p)}</div>
   ${campoPrior(p)}
@@ -412,6 +429,7 @@ function painel() {
    <button class="btn" id="bPerfil">Abrir perfil do negócio</button>
    ${gm ? `<a class="btn" href="${gm}" target="_blank" rel="noopener">Abrir no Google Maps ↗</a>` : ''}</div>`;
   $('#bPerfil').onclick = () => abrirPerfil(p.id);
+  if ($('#bTraco')) $('#bTraco').onclick = () => { S.rotaDe = p.id; camadaTraco?.clearLayers(); mostrarRotaBox(`<b>${esc(p.nome)}</b> → toque no ponto de destino`, true); };
   $('#xSide').onclick = () => { S.sel = null; desenhar(); painel(); };
   db.ultimosPedidos(p.id, 500).then(todos => { const el = $('#sPeds'); if (!el || S.sel !== p.id) return; const ls = todos.slice(0, 5);
     el.insertAdjacentHTML('beforebegin', fluxoPedidos(todos, true));
@@ -753,7 +771,7 @@ function telaCarteira() {
   const cols = [['nome', 'PDV'], ['regiao', 'Região'], ['canal', 'Canal'], ['etapa', 'Etapa'], ['classe', 'Classe'], ['potencial', 'Potencial'], ['so', 'Sell-out médio'], ['ultima_compra', 'Última compra'], ['proxima_reposicao', 'Próx. reposição'], ['pr', 'Reativar']];
   const desenhaT = () => {
     const q = $('#q').value.toLowerCase(), et = $('#tEt').value, pr = $('#tPr').value;
-    let ds = S.pdvs.filter(p => (!et || p.etapa === et) && (!pr || (pr === '-' ? !p.prioridade_reativacao : p.prioridade_reativacao === pr)) && (!q || p.nome.toLowerCase().includes(q))).map(p => { const s = (S.sellouts[p.id] || []).slice(-6), rp = RP[p.id]; return { ...p, so: s.length ? s.reduce((a, x) => a + x.sellout, 0) / s.length : rp ? rp.un / rp.n : null, soPed: !s.length && !!rp, ultima_compra: rp?.ult || null, pr: PRIOR[p.prioridade_reativacao]?.v || 0 }; });
+    let ds = S.pdvs.filter(p => (!et || p.etapa === et) && (!pr || (pr === '-' ? !(REATIVAR.includes(p.etapa) && p.prioridade_reativacao) : REATIVAR.includes(p.etapa) && p.prioridade_reativacao === pr)) && (!q || p.nome.toLowerCase().includes(q))).map(p => { const s = (S.sellouts[p.id] || []).slice(-6), rp = RP[p.id]; return { ...p, so: s.length ? s.reduce((a, x) => a + x.sellout, 0) / s.length : rp ? rp.un / rp.n : null, soPed: !s.length && !!rp, ultima_compra: rp?.ult || null, pr: REATIVAR.includes(p.etapa) ? PRIOR[p.prioridade_reativacao]?.v || 0 : 0 }; });
     ds.sort((a, b) => { const x = a[ord.k] ?? '', y = b[ord.k] ?? ''; return (x > y ? 1 : x < y ? -1 : 0) * ord.d; });
     $('#tN').textContent = ds.length + ' pontos';
     $('#tbl').innerHTML = `<tr>${cols.map(([k, n]) => `<th data-k="${k}">${n}${ord.k === k ? (ord.d > 0 ? ' ↑' : ' ↓') : ''}</th>`).join('')}</tr>` + ds.map(p => `<tr data-id="${p.id}" style="cursor:pointer"><td><b>${esc(p.nome)}</b></td><td>${p.regiao || '—'}</td><td>${esc(p.canal || '')}</td><td><i class="dot" style="background:${etapa(p.etapa).c}"></i> ${etapa(p.etapa).n}</td><td>${p.classe || '—'}</td><td>${'★'.repeat(p.potencial || 0)}</td><td ${p.soPed ? 'title="Média de unidades por pedido (Bling)"' : ''}>${p.so === null ? '—' : Math.round(p.so) + ' un.' + (p.soPed ? '<small style="color:var(--mute)"> /pedido</small>' : '')}</td><td>${p.ultima_compra ? dataLonga(p.ultima_compra) + `<br><small style="color:var(--mute)">há ${Math.floor((Date.now() - new Date(p.ultima_compra)) / DIA)} dias</small>` : '—'}</td><td>${p.proxima_reposicao ? dstr(p.proxima_reposicao) + ' · ' + prazoTxt(p) : '—'}</td><td>${seloPrior(p).replace('Reativar · ', '') || '—'}</td></tr>`).join('');
@@ -1491,7 +1509,20 @@ function ligarRota(k, todas) {
   $('#rSalvar').onclick = async () => { await salvarRotaDia({ paradas: fixar() }, 'Rota salva'); desenharRota(); };
   $('#rRecalc').onclick = async () => { await salvarRotaDia({ paradas: fixar() }, 'Rota recalculada a partir de agora'); desenharRota(); };
   document.querySelectorAll('[data-inc]').forEach(b => b.onclick = async () => { const id = b.dataset.inc; await salvarRotaDia({ incluir: [...new Set([...R.incluir, id])], tirar: R.tirar.filter(x => x !== id) }); desenharRota(); });
-  document.querySelectorAll('[data-tira]').forEach(b => b.onclick = async () => { const id = b.dataset.tira; await salvarRotaDia({ tirar: [...new Set([...R.tirar, id])], incluir: R.incluir.filter(x => x !== id), paradas: (R.paradas || []).filter(x => x.id !== id) }); desenharRota(); });
+  // tirar da rota: pergunta o motivo (postergar ou cliente negou) e grava no histórico do negócio
+  document.querySelectorAll('[data-tira]').forEach(b => b.onclick = () => { const id = b.dataset.tira, p = S.pdvs.find(x => x.id === id);
+    modal(`<h3>Tirar ${esc(p.nome)} da rota</h3>
+     <div class="tiraops"><label><input type="radio" name="tmot" value="adiar" checked><span><b>Postergar a entrega</b><small>Fica para outro dia</small></span></label>
+      <label><input type="radio" name="tmot" value="negou"><span><b>Cliente negou a reposição</b><small>Não quis repor agora</small></span></label></div>
+     <label>Motivo</label><textarea id="tTxt" rows="3" style="width:100%" placeholder="Ex.: dono viajando, volta segunda; ainda tem bastante produto…"></textarea>
+     <p style="color:var(--soft);font-size:12px;margin:6px 0 0">Fica registrado no histórico do negócio.</p>
+     <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="tOk">Tirar da rota</button></div>`);
+    $('#tOk').onclick = async () => { const tipo = document.querySelector('input[name=tmot]:checked').value, txt = $('#tTxt').value.trim();
+      if (!txt) return toast('Escreva o motivo');
+      const nota = `${tipo === 'adiar' ? '🗓️ Entrega postergada' : '🚫 Cliente negou a reposição'} (rota de ${dstr(R.data + 'T12:00')}): ${txt}`;
+      $('#tOk').disabled = true;
+      try { await db.criarNota(id, nota, S.eu.id); } catch (e) { $('#tOk').disabled = false; return erro(/pdv_notas/.test(e.message) ? new Error('Rode o 022_observacoes.sql no Supabase para guardar o motivo') : e); }
+      fecharModal(); await salvarRotaDia({ tirar: [...new Set([...R.tirar, id])], incluir: R.incluir.filter(x => x !== id), paradas: (R.paradas || []).filter(x => x.id !== id) }, 'Tirado da rota · motivo no histórico'); desenharRota(); }; });
   document.querySelectorAll('[data-rep]').forEach(b => b.onclick = async () => { if (!R.paradas?.length) await salvarRotaDia({ paradas: fixar() }); S.contando = b.dataset.rep; irPara('reposicao'); });
   document.querySelectorAll('[data-aus]').forEach(b => b.onclick = async () => { const id = b.dataset.aus, p = S.pdvs.find(x => x.id === id);
     const ps = (R.paradas?.length ? R.paradas : fixar()).map(x => x.id === id ? { ...x, status: 'ausente' } : x);
@@ -1578,10 +1609,10 @@ async function telaReposicao() {
      <div class="sab"><b>${esc(pr.sabor)}</b><small>deixado: ${a}${precos[pr.id] != null ? ` · ${brl(preco(pr))}` : ''}</small></div>
      <div class="cel"><small>Encontrado</small>${stepper('enc', rc ? rc.encontrado : a)}</div>
      <div class="cel"><small>Troca</small>${stepper('trc', rc ? rc.troca : 0, true)}</div>
-     <div class="cel"><small>Repor</small>${stepper('rep', rc ? rc.reposto : 0, false, rc ? 'data-mexeu="1"' : '')}</div>
+     <div class="cel"><small>Repor</small>${stepper('rep', rc ? Math.max(0, rc.reposto - rc.troca) : 0, false, rc ? 'data-mexeu="1"' : '')}</div>
      <div class="res"><small>sell-out</small><b class="so">0</b><small class="val">—</small></div></div>`; });
   h += `</div><div class="panel totpanel"><div class="kits"><b>Atalhos do pedido</b> <small style="color:var(--mute)">cada toque soma um kit em "Repor"</small><div class="row" style="flex-wrap:wrap;gap:6px;margin-top:6px">${KITS.map((k, i) => `<button class="btn" type="button" data-kit="${i}">+ ${k.n} <b class="kq" data-kq="${i}"></b></button>`).join('')}<button class="btn" type="button" id="kZerar">Zerar repor</button></div></div>
-  <div class="row" style="justify-content:space-between;flex-wrap:wrap;margin-top:12px"><div><b id="tUn">0 un.</b> a repor · sell-out <b id="tSo">0 un.</b> · trocas <b id="tTr">0</b></div><div style="font-family:Fraunces,Georgia,serif;font-size:24px" id="tVal">R$ 0,00</div></div>
+  <div class="row" style="justify-content:space-between;flex-wrap:wrap;margin-top:12px"><div><b id="tUn">0 un.</b> a repor · sell-out <b id="tSo">0 un.</b> · trocas <b id="tTr">0</b> <small style="color:var(--mute)">(repostas sem cobrar)</small></div><div style="font-family:Fraunces,Georgia,serif;font-size:24px" id="tVal">R$ 0,00</div></div>
   ${cons ? `<div class="esteira" style="margin-top:12px"><b>Cliente em consignado.</b><p>Cobra só o que foi vendido desde a última visita: <b id="tCons">R$ 0,00</b>.</p></div>` : ''}
   <h3 style="margin:14px 0 6px">Pagamento</h3><div class="row" style="flex-wrap:wrap;gap:14px;align-items:flex-end"><div class="pay" style="margin:0">${FORMAS.map(c => `<label><input type="radio" name="pg" value="${c}" ${c === formaIni ? 'checked' : ''}> ${c}</label>`).join('')}</div>
    <div><label class="lb">Vencimento</label><input id="rVenc" type="date" value="${re?.vencimento || isoDe(new Date(Date.now() + (formaIni === 'Dinheiro' ? 0 : 7) * DIA))}"></div></div>
@@ -1592,7 +1623,8 @@ async function telaReposicao() {
   const kitsUsados = {};
   const calc = () => { let un = 0, so = 0, tr = 0, val = 0, vc = 0;
     linhas().forEach(r => { const a = +r.dataset.ant, enc = r.querySelector('.enc').value, t = +r.querySelector('.trc').value || 0, pre = +r.dataset.pre;
-      if (enc !== '' && !r.querySelector('.rep').dataset.mexeu) r.querySelector('.rep').value = Math.max(0, +r.dataset.alvo - (+enc - t));
+      // repor = o que é vendido (cobrado); as trocas são repostas 1 a 1 sem cobrar e não entram aqui
+      if (enc !== '' && !r.querySelector('.rep').dataset.mexeu) r.querySelector('.rep').value = Math.max(0, +r.dataset.alvo - +enc);
       const rep = +r.querySelector('.rep').value || 0, s = enc === '' ? null : Math.max(0, a - +enc);
       r.querySelector('.so').textContent = s === null ? '—' : s; r.querySelector('.val').textContent = rep ? 'repor ' + brl(rep * pre) : '—';
       r.classList.toggle('vendeu', (s || 0) > 0);
@@ -1611,9 +1643,10 @@ async function telaReposicao() {
   $('#bVoltar').onclick = () => { S.reabrir = null; irPara('rota'); };
   $('#fechar').onclick = async () => {
     const t = calc(), pg = document.querySelector('input[name=pg]:checked').value, venc = $('#rVenc').value || null, mandar = $('#rBling').checked;
-    const contagens = linhas().map(r => ({ produto_id: +r.dataset.p, deixado_anterior: +r.dataset.ant, encontrado: +r.querySelector('.enc').value, troca: +r.querySelector('.trc').value || 0, reposto: +r.querySelector('.rep').value || 0 }));
+    // reposto (físico) = vendido + trocas repostas; o pedido cobra só o vendido
+    const contagens = linhas().map(r => ({ produto_id: +r.dataset.p, deixado_anterior: +r.dataset.ant, encontrado: +r.querySelector('.enc').value, troca: +r.querySelector('.trc').value || 0, reposto: (+r.querySelector('.rep').value || 0) + (+r.querySelector('.trc').value || 0) }));
     const itens = cons ? linhas().map(r => ({ produto_id: +r.dataset.p, quantidade: Math.max(0, +r.dataset.ant - +r.querySelector('.enc').value), preco_unit: +r.dataset.pre, bonificado: 0 }))
-                       : contagens.map(c => ({ produto_id: c.produto_id, quantidade: c.reposto, preco_unit: +linhas().find(r => +r.dataset.p === c.produto_id).dataset.pre, bonificado: 0 }));
+                       : contagens.map(c => ({ produto_id: c.produto_id, quantidade: c.reposto - c.troca, preco_unit: +linhas().find(r => +r.dataset.p === c.produto_id).dataset.pre, bonificado: 0 }));
     $('#fechar').disabled = true;
     try {
       const reg = await db.registrarReposicao({ pdvId: p.id, usuarioId: S.eu.id, contagens, itens,
