@@ -40,13 +40,26 @@ export async function carregarTrocas(dias = 28) {
 export async function carregarPedidosDesde(iso) {
   return ok(await sb.from('pedidos').select('*, pdvs(nome)').gte('criado_em', iso).order('criado_em', { ascending: false }));
 }
-// o que ficou no expositor na última visita com contagem (abertura ou reposição)
+// o que ficou no cliente: a última contagem; se depois dela houve um pedido (Bling ou venda), vale o que foi entregue nesse pedido
 export async function ultimoDeixado(pdvId) {
-  const v = ok(await sb.from('visitas').select('id').eq('pdv_id', pdvId).in('tipo', ['abertura', 'reposicao'])
-    .order('em', { ascending: false }).limit(1));
-  if (!v.length) return {};
-  const c = ok(await sb.from('contagens').select('produto_id, deixado_agora').eq('visita_id', v[0].id));
-  return Object.fromEntries(c.map(x => [x.produto_id, x.deixado_agora]));
+  const [v, o] = await Promise.all([
+    sb.from('visitas').select('id, em').eq('pdv_id', pdvId).in('tipo', ['abertura', 'reposicao']).order('em', { ascending: false }).limit(1).then(ok),
+    sb.from('pedidos').select('id, criado_em, visita_id').eq('pdv_id', pdvId).order('criado_em', { ascending: false }).limit(1).then(ok),
+  ]);
+  const ped = o[0], vis = v[0];
+  if (vis && (!ped || ped.visita_id === vis.id || new Date(ped.criado_em) <= new Date(new Date(vis.em).getTime() + 10 * 6e4))) {
+    const c = ok(await sb.from('contagens').select('produto_id, deixado_agora').eq('visita_id', vis.id));
+    if (c.length) return { por: Object.fromEntries(c.map(x => [x.produto_id, x.deixado_agora])), fonte: 'contagem', em: vis.em };
+  }
+  if (!ped) return { por: {}, fonte: null, em: null };
+  let its = ok(await sb.from('pedido_itens').select('produto_id, quantidade').eq('pedido_id', ped.id));
+  if (!its.length) {
+    const [bi, prods] = await Promise.all([sb.from('bling_itens').select('codigo, quantidade').eq('pedido_id', ped.id).then(ok).catch(() => []), sb.from('produtos').select('id, bling_codigo').then(ok)]);
+    const porCod = Object.fromEntries(prods.filter(p => p.bling_codigo).map(p => [p.bling_codigo, p.id]));
+    its = bi.filter(i => porCod[i.codigo]).map(i => ({ produto_id: porCod[i.codigo], quantidade: i.quantidade }));
+  }
+  const por = {}; its.forEach(i => por[i.produto_id] = (por[i.produto_id] || 0) + Math.round(+i.quantidade));
+  return { por, fonte: 'pedido', em: ped.criado_em };
 }
 
 /* ---------- gravações ---------- */

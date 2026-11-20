@@ -1166,6 +1166,11 @@ function prever(raw) {
     const ul = ps[ps.length - 1];
     if (ul) { (pi[ul.id] || []).forEach(i => r.pedido[i.produto_id] = (r.pedido[i.produto_id] || 0) + +i.quantidade);
       if (!Object.keys(r.pedido).length) (bi[ul.id] || []).forEach(i => { const id = porCod[i.codigo]; if (id) r.pedido[id] = (r.pedido[id] || 0) + +i.quantidade; }); }
+    // deixado: o que ficou no cliente (última contagem ou o último pedido entregue) e a estimativa de quanto ainda tem hoje
+    const qPed = Object.values(r.pedido).reduce((a, b) => a + b, 0) || Math.round(ul?.unidades || 0);
+    if (u && (!ul || new Date(u.em) >= new Date(ul.criado_em) - 6e5)) { r.deixado = Object.values(u.por).reduce((a, b) => a + b, 0); r.deixadoEm = u.em; }
+    else if (ul) { r.deixado = qPed; r.deixadoEm = ul.criado_em; }
+    if (r.deixado != null && r.estoque == null && r.vd != null) r.estoque = Math.max(0, r.deixado - r.vd * (agora - new Date(r.deixadoEm)) / DIA);
     if (u && p.expositor_id && r.vd) { const fr = r.estoque / Math.max(1, Object.values(u.por).reduce((a, b) => a + b, 0)); const ped = {};
       S.base.produtos.forEach(pr => { const q = alvo(p.expositor_id, pr.id) - Math.round((u.por[pr.id] || 0) * fr); if (q > 0) ped[pr.id] = q; }); if (Object.keys(ped).length) r.pedido = ped; }
     r.un = Object.values(r.pedido).reduce((a, b) => a + b, 0) || Math.round(ul?.unidades || 0);
@@ -1185,35 +1190,49 @@ function simular(ordem, ini, fim, base, t0 = ini, pos0 = base) {
   const volta = t + viagem(pos, base); if (volta > fim) return null;
   return { hs, volta, km: ordem.reduce((a, s, i) => a + km(i ? ordem[i - 1].p : pos0, s.p), 0) + (ordem.length ? km(ordem[ordem.length - 1].p, base) : 0) };
 }
-// monta a ordem: urgentes primeiro, respeitando a janela de cada um; depois encaixa as prospecções onde couber
+// monta a ordem: a urgência só decide QUEM entra; a ordem é pela proximidade, saindo da base e voltando para ela.
+// janela de horário só pesa para quem tem horário cadastrado (vira restrição, não preferência)
 function montarOrdem(reps, prosps, ini, fim, base, t0, pos0) {
-  const peso = { ruptura: 60, ideal: 20, espera: 0 };
-  let ordem = [], resto = reps.slice(), t = t0, pos = pos0;
-  while (resto.length) {
-    let melhor = null, ms = 1e9;
-    resto.forEach(s => { const tent = simular([...ordem, s], ini, fim, base, t0, pos0); if (!tent) return; const h = tent.hs[tent.hs.length - 1];
-      const sc = (h.comeca - t) - peso[s.urg] + (s.jan[1] - h.comeca) * 0.05; if (sc < ms) { ms = sc; melhor = s; } });
-    if (!melhor) break;
-    ordem.push(melhor); resto = resto.filter(s => s !== melhor);
-    const sim = simular(ordem, ini, fim, base, t0, pos0); t = sim.hs[sim.hs.length - 1].comeca + melhor.serv; pos = melhor.p;
+  const dist = o => o.reduce((a, s, i) => a + km(i ? o[i - 1].p : pos0, s.p), 0) + (o.length ? km(o[o.length - 1].p, base) : 0);
+  const sim = o => simular(o, ini, fim, base, t0, pos0);
+  // vizinho mais próximo a partir da saída
+  const vizinho = lista => { const o = []; let resto = lista.slice(), pos = pos0;
+    while (resto.length) { let b = resto[0]; resto.forEach(s => { if (km(pos, s.p) < km(pos, b.p)) b = s; }); o.push(b); pos = b.p; resto = resto.filter(s => s !== b); } return o; };
+  // 2-opt: desfaz cruzamentos enquanto encurtar o caminho (e não quebrar janela de quem tem horário)
+  const melhorar = o => { let melhorou = true, d = dist(o), ok = !!sim(o);
+    while (melhorou && o.length > 2) { melhorou = false;
+      for (let i = 0; i < o.length - 1; i++) for (let j = i + 1; j < o.length; j++) {
+        const nova = [...o.slice(0, i), ...o.slice(i, j + 1).reverse(), ...o.slice(j + 1)], d2 = dist(nova);
+        if (d2 < d - 0.01) { const ok2 = !!sim(nova); if (ok2 || !ok) { o = nova; d = d2; ok = ok2; melhorou = true; } } } }
+    // move uma parada para a posição onde ela custa menos (or-opt)
+    melhorou = true;
+    while (melhorou && o.length > 2) { melhorou = false;
+      for (let i = 0; i < o.length && !melhorou; i++) { const sem = [...o.slice(0, i), ...o.slice(i + 1)];
+        for (let k = 0; k <= sem.length && !melhorou; k++) { if (k === i) continue; const nova = [...sem.slice(0, k), o[i], ...sem.slice(k)], d2 = dist(nova);
+          if (d2 < d - 0.01) { const ok2 = !!sim(nova); if (ok2 || !ok) { o = nova; d = d2; ok = ok2; melhorou = true; } } } } }
+    return o; };
+  let ordem = melhorar(vizinho(reps));
+  // quem tem janela e ficou fora dela: tenta reposicionar na melhor posição que respeite os horários
+  if (!sim(ordem)) ordem.filter(s => s.temJan).forEach(s => { const sem = ordem.filter(x => x !== s); let best = null, bd = 1e9;
+    for (let k = 0; k <= sem.length; k++) { const nova = [...sem.slice(0, k), s, ...sem.slice(k)]; if (sim(nova) && dist(nova) < bd) { bd = dist(nova); best = nova; } }
+    if (best) ordem = best; });
+  // não cabe no dia: sai primeiro o menos urgente, e entre eles o que mais desvia o caminho
+  const prio = { ruptura: 2, ideal: 1, espera: 0 }, foraRep = [];
+  while (ordem.length && !sim(ordem)) {
+    let pior = null, pc = -1e9;
+    ordem.forEach((s, i) => { const nova = ordem.filter((_, k) => k !== i), ganho = dist(ordem) - dist(nova) + (sim(nova) ? 1000 : 0) - prio[s.urg] * 10000; if (ganho > pc) { pc = ganho; pior = s; } });
+    ordem = melhorar(ordem.filter(s => s !== pior)); foraRep.push(pior);
   }
-  // melhora a ordem trocando trechos (2-opt) sem deixar ninguém fora da janela
-  let melhorou = true, sim = simular(ordem, ini, fim, base, t0, pos0);
-  while (melhorou && ordem.length > 3) { melhorou = false;
-    for (let i = 0; i < ordem.length - 1 && !melhorou; i++) for (let j = i + 1; j < ordem.length && !melhorou; j++) {
-      const nova = [...ordem.slice(0, i), ...ordem.slice(i, j + 1).reverse(), ...ordem.slice(j + 1)], s2 = simular(nova, ini, fim, base, t0, pos0);
-      if (s2 && s2.volta < sim.volta - 1) { ordem = nova; sim = s2; melhorou = true; } } }
-  const foraRep = resto;
-  // prospecções: a mais barata de encaixar primeiro
+  // prospecções: encaixa onde aumentar menos o caminho
   let pz = prosps.slice(); const foraP = [];
   while (pz.length) {
     let best = null, bc = 1e9, bo = null;
-    pz.forEach(s => { for (let k = 0; k <= ordem.length; k++) { const nova = [...ordem.slice(0, k), s, ...ordem.slice(k)], s2 = simular(nova, ini, fim, base, t0, pos0);
-      if (s2) { const c = s2.volta - (sim ? sim.volta : t0); if (c < bc) { bc = c; best = s; bo = nova; } } } });
+    pz.forEach(s => { for (let k = 0; k <= ordem.length; k++) { const nova = [...ordem.slice(0, k), s, ...ordem.slice(k)];
+      if (sim(nova)) { const c = dist(nova) - dist(ordem); if (c < bc) { bc = c; best = s; bo = nova; } } } });
     if (!best) { foraP.push(...pz); break; }
-    ordem = bo; sim = simular(ordem, ini, fim, base, t0, pos0); pz = pz.filter(s => s !== best);
+    ordem = bo; pz = pz.filter(s => s !== best);
   }
-  return { ordem, sim: sim || simular(ordem, ini, fim, base, t0, pos0), foraRep, foraP };
+  return { ordem, sim: sim(ordem), foraRep, foraP };
 }
 
 const RT = { data: null, cfg: null, raw: null, prev: null, perfis: [], salvo: null, plano: null, visitas: [], mapa: null };
@@ -1222,7 +1241,7 @@ async function telaRota() {
   RT.data = RT.data || hoje();
   try {
     await recarregar();
-    const [raw, perfis, salvo, vis] = await Promise.all([RT.raw ? RT.raw : db.dadosRota(), RT.perfis.length ? RT.perfis : db.perfisTodos().catch(() => [S.eu]), db.obterRota(RT.data).catch(e => { RT.semTabela = true; return null; }), db.visitasDoDia(RT.data)]);
+    const [raw, perfis, salvo, vis] = await Promise.all([db.dadosRota(), RT.perfis.length ? RT.perfis : db.perfisTodos().catch(() => [S.eu]), db.obterRota(RT.data).catch(e => { RT.semTabela = true; return null; }), db.visitasDoDia(RT.data)]);
     RT.raw = raw; RT.perfis = perfis; RT.visitas = vis; RT.prev = prever(raw);
     RT.salvo = salvo || { data: RT.data, motorista: S.eu.id, tipo: 'reposicao', inicio: '08:00', fim: '18:00', incluir: [], tirar: [], paradas: [] };
   } catch (e) { return erro(e); }
@@ -1239,7 +1258,7 @@ function calcularRota() {
   const fila = S.pdvs.filter(p => ROTA_ETAPAS.includes(p.etapa) && p.lat).map(p => ({ p, ...RT.prev[p.id] })).filter(x => x.urg).sort((a, b) => a.dias - b.dias);
   const entra = x => { if (tira.has(x.p.id)) return false; if (incl.has(x.p.id)) return true; if (R.tipo === 'prospeccao') return false;
     if (!atendeHoje(x.p)) return false; if (ehCanoas(x.p) && !moises && x.urg !== 'ruptura') return false; return x.urg !== 'espera'; };
-  const reps = fila.filter(entra).map(x => ({ id: x.p.id, tipo: 'rep', p: x.p, urg: x.urg, jan: jan(x.p), serv: c.tempo_rep }));
+  const reps = fila.filter(entra).map(x => ({ id: x.p.id, tipo: 'rep', p: x.p, urg: x.urg, jan: jan(x.p), temJan: !!x.p.janela_periodo, serv: c.tempo_rep }));
   // prospecções: no misto, até 500 m de alguma parada de reposição; na prospecção, as que você escolheu
   let prosps = [];
   if (R.tipo !== 'reposicao') {
@@ -1284,7 +1303,7 @@ function desenharRota() {
      <div class="info"><div class="rhora">${est === 'feito' ? '✅ feito' : est === 'ausente' ? '🚪 não estava' : h ? `${hhmm(h.comeca)}${h.espera > 4 ? ` <small>(chega ${hhmm(h.chega)}, espera ${Math.round(h.espera)} min)</small>` : ''}` : ''}</div>
       <b>${esc(p.nome)}</b> ${rep ? `<span class="badge" style="background:${u.c}22">${u.i} ${pv.dias <= 0 ? 'já acabou' : `~${Math.round(pv.dias)} dia${Math.round(pv.dias) === 1 ? '' : 's'}`}</span>` : '<span class="badge" style="background:#7B4FC022">🟣 prospecção</span>'}
       ${p.precisa_dono !== false && (p.janela_dias?.length || p.janela_periodo) ? ' <span title="Precisa do dono">🔒</span>' : ''}${ehCanoas(p) ? ' <span class="badge">Canoas</span>' : ''}
-      <br><small style="color:var(--mute)">${esc(p.bairro || '')}${janelaTxt(p) ? ' · 🕘 ' + esc(janelaTxt(p)) : ' · sem janela cadastrada'}${rep && pv.un ? ` · ~${pv.un} un.` : ''}${rep ? ` · previsão por ${pv.fonte}` : ''}</small></div>
+      <br><small style="color:var(--mute)">${esc(p.bairro || '')}${janelaTxt(p) ? ' · 🕘 ' + esc(janelaTxt(p)) : ' · sem janela cadastrada'}${rep && pv.deixado != null ? ` · deixado ${pv.deixado} un. em ${dstr(pv.deixadoEm)}${pv.estoque != null ? `, hoje ~${Math.round(pv.estoque)}` : ''}` : ''}${rep && pv.un ? ` · repor ~${pv.un} un.` : ''}${rep ? ` · previsão por ${pv.fonte}` : ''}</small></div>
      ${est ? '' : `<div class="racoes">${rep ? `<button class="btn pri" data-rep="${p.id}">Repor</button>` : `<button class="btn pri" data-pv="${p.id}">Visitei</button>`}<button class="mini" data-aus="${p.id}">não estava</button><button class="mini" data-tira="${p.id}">tirar</button></div>`}</div>`; };
   const nRep = todas.filter(s => s.tipo === 'rep'), nPr = todas.filter(s => s.tipo === 'prosp');
   const feitosN = l => l.filter(s => k.feitos.has(s.id) || k.st[s.id] === 'feito').length;
@@ -1377,10 +1396,10 @@ async function telaReposicao() {
   const p = S.pdvs.find(x => x.id === S.contando);
   if (!p) { $('#main').innerHTML = '<section class="view on"><div class="empty">Escolha um PDV na <b>Rota de hoje</b> para começar.</div></section>'; return; }
   $('#main').innerHTML = '<section class="view on"><div class="loading">Carregando a última contagem…</div></section>';
-  let ant; try { ant = await db.ultimoDeixado(p.id); } catch (e) { return erro(e); }
+  let ant, dx; try { dx = await db.ultimoDeixado(p.id); ant = dx.por; } catch (e) { return erro(e); }
   const ex = expo(p.expositor_id), cons = p.condicao === 'Consignado';
   let h = `<section class="view on"><div class="count"><div class="toolbar"><h2 style="font-family:Fraunces,Georgia,serif;margin:0">${esc(p.nome)}</h2><span class="badge">Expositor ${esc(ex.nome)} · ${ex.capacidade} un.</span></div>
-  <p style="color:var(--soft);margin-top:0">Conte o que tem de cada sabor no expositor, inclusive o que vai ser trocado. O sistema sugere quanto repor e calcula o sell-out.</p>
+  <p style="color:var(--soft);margin-top:0">Conte o que tem de cada sabor no expositor, inclusive o que vai ser trocado. O sistema sugere quanto repor e calcula o sell-out.<br><small>Deixado: ${dx.fonte === 'contagem' ? `contagem de ${dstr(dx.em)}` : dx.fonte === 'pedido' ? `o que foi entregue no último pedido (${dstr(dx.em)}), pelo histórico` : 'sem histórico deste cliente'}</small></p>
   <div id="ct" class="contagem">`;
   let l = '';
   S.base.produtos.forEach(pr => { if (pr.linha !== l) { l = pr.linha; h += `<div class="lingrp">${esc(l)}</div>`; }
