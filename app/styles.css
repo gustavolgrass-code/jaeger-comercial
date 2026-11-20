@@ -501,3 +501,6 @@ section:fullscreen #mapa{height:100vh}
 .qkv{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12.5px;margin:6px 0 4px;color:var(--soft)}
 .qkv b{color:var(--choc)}
 .mini.on{background:var(--choc);color:#fff;border-color:var(--choc)}
+.acats{display:flex;flex-wrap:wrap;gap:4px 6px}
+.acats label{display:flex;align-items:center;gap:5px;background:var(--sand);border-radius:999px;padding:3px 9px;font-size:12.5px;margin:0;font-weight:400;cursor:pointer}
+.acats input{width:14px;height:14px;margin:0;accent-color:var(--choc)}

@@ -169,7 +169,10 @@ function ligarDesenho(m) {
   const forma = f => f.t === 'c' ? L.circle([f.lat, f.lng], { radius: f.r, color: f.cor, weight: 3, fillOpacity: .12, interactive: false })
     : f.t === 'r' ? L.rectangle(f.b, { color: f.cor, weight: 3, fillOpacity: .12, interactive: false })
     : L.polyline(f.pts, { color: f.cor, weight: 5, opacity: .8, lineCap: 'round', lineJoin: 'round', interactive: false });
-  const redesenhar = () => { camadaD.clearLayers(); D.formas.forEach(f => { forma(f).addTo(camadaD); if (f.t === 'c') rotulo(f).addTo(camadaD); }); };
+  // círculos e quadrados viram áreas clicáveis: tocar abre as buscas do Outscraper para aquela área
+  const redesenhar = () => { camadaD.clearLayers(); D.formas.forEach((f, i) => { const l = forma(f);
+    if (f.t !== 'p') { l.options.interactive = true; l.on('click', e => { if (D.modo) return; L.DomEvent.stop(e); S.sel = null; painelArea(f, i); }); l.bindTooltip('Toque para extrair esta área no Outscraper', { sticky: true }); }
+    l.addTo(camadaD); if (f.t === 'c') rotulo(f).addTo(camadaD); }); };
   const mostraRaio = t => { const e = m.getContainer().querySelector('.dsraio'); if (e) { e.textContent = t || ''; e.hidden = !t; } };
   const salvar = async () => { try { await db.salvarRegra('desenhos_mapa', D.formas); S.base.regras.desenhos_mapa = D.formas.slice(); } catch (e) { erro(e); } };
   redesenhar();
@@ -340,6 +343,43 @@ function alternarLocalizacao() {
 
 /* ---------- nuvens de potencial: onde já vendemos bem, num raio de 2 km ---------- */
 let camadaNuvem = null, camadaQuad = null;
+/* ---- área desenhada → buscas para o Outscraper ---- */
+// pontos de busca espalhados dentro da área (a cada ~1,2 km), cada um vira um link de busca do Google Maps por categoria
+function pontosDaArea(f) {
+  const passo = 1.2, dLa = passo / 111.2, dLo = passo / 96.3, pts = [];
+  if (f.t === 'c') { const n = Math.ceil(f.r / 1000 / passo); for (let i = -n; i <= n; i++) for (let j = -n; j <= n; j++) { const q = { lat: f.lat + i * dLa, lng: f.lng + j * dLo }; if (distM(q, f) <= f.r) pts.push(q); } if (!pts.length) pts.push({ lat: f.lat, lng: f.lng }); }
+  else { const [a, b] = f.b, la0 = Math.min(a[0], b[0]), la1 = Math.max(a[0], b[0]), lo0 = Math.min(a[1], b[1]), lo1 = Math.max(a[1], b[1]);
+    for (let la = la0 + dLa / 2; la < la1; la += dLa) for (let lo = lo0 + dLo / 2; lo < lo1; lo += dLo) pts.push({ lat: la, lng: lo }); if (!pts.length) pts.push({ lat: (la0 + la1) / 2, lng: (lo0 + lo1) / 2 }); }
+  return pts;
+}
+const dentroDaArea = (f, p) => f.t === 'c' ? distM(p, f) <= f.r : (() => { const [a, b] = f.b; return p.lat >= Math.min(a[0], b[0]) && p.lat <= Math.max(a[0], b[0]) && p.lng >= Math.min(a[1], b[1]) && p.lng <= Math.max(a[1], b[1]); })();
+function painelArea(f, i) {
+  const s = $('#side'); s.classList.add('open'); mapa.invalidateSize();
+  const c = f.t === 'c' ? { lat: f.lat, lng: f.lng } : { lat: (f.b[0][0] + f.b[1][0]) / 2, lng: (f.b[0][1] + f.b[1][1]) / 2 };
+  const larg = f.t === 'r' ? Math.abs(f.b[0][1] - f.b[1][1]) * 96.3 : 0, alt = f.t === 'r' ? Math.abs(f.b[0][0] - f.b[1][0]) * 111.2 : 0;
+  const km2a = f.t === 'c' ? Math.PI * (f.r / 1000) ** 2 : larg * alt, raioKm = f.t === 'c' ? f.r / 1000 : Math.hypot(larg, alt) / 2;
+  const zoom = raioKm <= 1 ? 15 : raioKm <= 2.5 ? 14 : raioKm <= 5 ? 13 : 12, fmtO = `@${c.lat.toFixed(5)},${c.lng.toFixed(5)},${zoom}z`;
+  const pts = pontosDaArea(f), dentro = S.pdvs.filter(p => p.lat && dentroDaArea(f, p)), cli = dentro.filter(p => CART.includes(p.etapa)), pro = dentro.filter(p => PROSP.includes(p.etapa));
+  const bairros = [...new Set(dentro.map(p => p.bairro?.trim()).filter(Boolean))], cidade = dentro.find(p => p.cidade)?.cidade || 'Porto Alegre';
+  const cats = S.areaCats || BUSCAS_PDV.slice(), nLinks = pts.length * cats.length;
+  s.innerHTML = `<div class="row" style="justify-content:space-between"><h2 style="margin:0">Área desenhada</h2><button class="btn" id="xArea" style="padding:4px 10px">✕</button></div>
+   <p style="color:var(--soft);font-size:13px;margin-top:6px">${f.t === 'c' ? `Círculo de raio ${dec(raioKm)} km` : `Quadrado de ${dec(larg)} × ${dec(alt)} km`} · ${dec(km2a)} km²</p>
+   <div class="zkv"><div><small>Clientes dentro</small><b>${cli.length}</b></div><div><small>Prospects dentro</small><b>${pro.length}</b></div><div><small>Pontos de busca</small><b>${pts.length}</b></div><div><small>Buscas no total</small><b>${nLinks}</b></div></div>
+   <div class="zcoord"><div><small>Formato do Outscraper (centro e zoom)</small><b>${fmtO}</b></div>${bairros.length ? `<div><small>Bairros com pontos já cadastrados</small><b style="font-weight:600">${esc(bairros.join(', '))}</b></div>` : ''}</div>
+   <h3 style="margin:14px 0 6px">Categorias</h3><div class="acats">${BUSCAS_PDV.map(t => `<label><input type="checkbox" value="${esc(t)}" ${cats.includes(t) ? 'checked' : ''}>${esc(t)}</label>`).join('')}</div>
+   <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:12px"><button class="btn pri" id="aLinks">Baixar buscas da área (.txt)</button><button class="btn" id="aCopia">Copiar ${fmtO}</button><a class="btn" style="text-decoration:none" target="_blank" rel="noopener" href="https://www.google.com/maps/${fmtO}">Ver no Google Maps ↗</a></div>
+   <p style="color:var(--mute);font-size:12px;margin-top:10px">Cada linha do arquivo é uma busca do Google Maps (categoria + ponto da área). No Outscraper (Google Maps Scraper), cole as linhas em "Queries", rode e exporte em CSV. Depois suba o CSV em Uploads → Google Maps: os pontos entram como Mapeado.</p>
+   <button class="mini" id="aExcluir" style="margin-top:6px">apagar este desenho</button>`;
+  $('#xArea').onclick = () => { s.classList.remove('open'); painel(); };
+  s.querySelectorAll('.acats input').forEach(x => x.onchange = () => { S.areaCats = [...s.querySelectorAll('.acats input:checked')].map(i => i.value); painelArea(f, i); });
+  $('#aCopia').onclick = async () => { try { await navigator.clipboard.writeText(fmtO); toast('Copiado: ' + fmtO); } catch { prompt('Copie:', fmtO); } };
+  $('#aLinks').onclick = () => { if (!cats.length) return toast('Escolha pelo menos uma categoria');
+    const ls = []; cats.forEach(t => pts.forEach(q => ls.push(`https://www.google.com/maps/search/${encodeURIComponent(t)}/@${q.lat.toFixed(5)},${q.lng.toFixed(5)},15z`)));
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([ls.join('\n') + '\n'], { type: 'text/plain;charset=utf-8' })); a.download = `buscas_area_${cidade.replace(/\s+/g, '_')}_${dec(raioKm).replace(',', '-')}km.txt`; document.body.appendChild(a); a.click(); a.remove();
+    toast(`${ls.length} buscas (${pts.length} pontos × ${cats.length} categorias)`); };
+  $('#aExcluir').onclick = () => { const D = S.desenho; D.formas.splice(i, 1); db.salvarRegra('desenhos_mapa', D.formas).then(() => { S.base.regras.desenhos_mapa = D.formas.slice(); }).catch(erro); s.classList.remove('open'); irPara('mapa', true); };
+}
+
 /* ---- quadrantes da carteira: agrupa os clientes pela proximidade e mede quanto cada grupo compra ---- */
 const COR_Q = ['#2a78d6', '#eb6834', '#1baf7a', '#7B4FC0', '#d03b3b', '#B8860B'];
 function agruparQuad(pts, k) {
