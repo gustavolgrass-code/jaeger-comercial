@@ -113,7 +113,7 @@ function telaPrimeiroAcesso(user) {
 /* =================== estrutura =================== */
 const ABAS = {
   comercial: [['mapa', 'Mapa'], ['funil', 'CRM'], ['agenda', 'Agenda'], ['carteira', 'Negócios'], ['contatos', 'Contatos'], ['abertura', 'Abertura de cliente'], ['painel', 'Painel'], ['uploads', 'Uploads'], ['regras', 'Regras e metas']],
-  operacao: [['rota', 'Rota de hoje'], ['reposicao', 'Reposição'], ['resumo', 'Resumo do dia']] };
+  operacao: [['rota', 'Dia de rota'], ['reposicao', 'Reposição'], ['resumo', 'Resumo do dia']] };
 let lado = 'comercial';
 function montar() {
   lado = S.eu.papel === 'operacao' ? 'operacao' : 'comercial';
@@ -1124,24 +1124,245 @@ function telaRegras() {
   document.querySelectorAll('.rDia').forEach(s => s.onchange = async () => { try { const v = s.value === '' ? null : +s.value; await db.salvarRegiao(s.dataset.c, { dia_rota: v }); S.base.regioes.find(g => g.codigo === s.dataset.c).dia_rota = v; S.rotaReg = null; toast('Dia de rota salvo'); } catch (e) { erro(e); } });
 }
 
-/* =================== rota (reposição) =================== */
-function aRepor(reg) { return S.pdvs.filter(p => p.regiao === reg && ROTA_ETAPAS.includes(p.etapa) && (!p.proxima_reposicao || (atraso(p) ?? -99) >= -2)); }
-function ordenar(pool) { const o = []; let cur = [...pool].sort((a, b) => b.lat - a.lat)[0]; pool = pool.filter(p => p !== cur); while (cur) { o.push(cur); let best = null, bd = 1e9; pool.forEach(p => { const d = (p.lng - cur.lng) ** 2 + (p.lat - cur.lat) ** 2; if (d < bd) { bd = d; best = p; } }); pool = pool.filter(p => p !== best); cur = best; } return o; }
+/* =================== dia de rota (um carro por dia) =================== */
+// janela de cada período, em minutos do dia
+const JANELAS = { manha: [8 * 60, 12 * 60], tarde: [13 * 60, 18 * 60], noite: [18 * 60, 22 * 60], dia_todo: [8 * 60, 20 * 60] };
+const TIPOS_DIA = { reposicao: 'Reposição', prospeccao: 'Prospecção', misto: 'Misto' };
+const URG = { ruptura: { n: 'Ruptura', i: '🔴', c: '#d03b3b' }, ideal: { n: 'Janela ideal', i: '🟠', c: '#fab219' }, espera: { n: 'Pode esperar', i: '⚪', c: '#9A8F86' } };
+
+const hhmm = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(Math.round(m % 60)).padStart(2, '0')}`;
+const minDe = s => { const [h, m] = String(s || '08:00').split(':'); return +h * 60 + (+m || 0); };
+const hoje = () => new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+const km = (a, b) => { const R = 6371, r = Math.PI / 180, dLa = (b.lat - a.lat) * r, dLo = (b.lng - a.lng) * r; const h = Math.sin(dLa / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLo / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); };
+// tempo de carro na cidade: distância em linha reta × 1,35 (ruas), a 25 km/h, mais 3 min para estacionar
+const viagem = (a, b) => km(a, b) < 0.05 ? 0 : km(a, b) * 1.35 / 25 * 60 + 3;
+const ehCanoas = p => ['C1', 'C2'].includes(p.regiao) || norm(p.cidade) === 'canoas';
+const cfgRota = () => ({ tempo_rep: 20, tempo_prosp: 15, ...(S.base.regras.rota || {}) });
+const diaSemana = data => new Date(data + 'T12:00').getDay();
+function proximoDiaJanela(p, data) { const ds = p.janela_dias?.length ? p.janela_dias : [1, 2, 3, 4, 5, 6]; for (let i = 1; i <= 7; i++) { const d = new Date(new Date(data + 'T12:00').getTime() + i * DIA); if (ds.includes(d.getDay())) return `${DIAS_SEM[d.getDay()]} ${dstr(d)}`; } return '—'; }
+
+// previsão de ruptura de cada cliente: contagem (quando tem) ou ritmo de pedidos; cai na cadência se não tiver nada
+function prever(raw) {
+  const porPdv = {}; raw.pedidos.forEach(o => (porPdv[o.pdv_id] = porPdv[o.pdv_id] || []).push(o));
+  const pi = {}; raw.pitens.forEach(i => (pi[i.pedido_id] = pi[i.pedido_id] || []).push(i));
+  const bi = {}; raw.bitens.forEach(i => (bi[i.pedido_id] = bi[i.pedido_id] || []).push(i));
+  const porCod = {}; S.base.produtos.forEach(p => { if (p.bling_codigo) porCod[p.bling_codigo] = p.id; });
+  const ult = {}; raw.contagens.forEach(c => { const v = c.visitas; const u = ult[v.pdv_id]; if (!u || v.em > u.em) ult[v.pdv_id] = { id: v.id, em: v.em, por: {} }; });
+  raw.contagens.forEach(c => { const u = ult[c.visitas.pdv_id]; if (u && u.id === c.visitas.id) u.por[c.produto_id] = (u.por[c.produto_id] || 0) + c.deixado_agora; });
+  const agora = Date.now(), out = {};
+  S.pdvs.filter(p => ROTA_ETAPAS.includes(p.etapa)).forEach(p => {
+    const ps = (porPdv[p.id] || []).slice(-7), r = { fonte: 'cadência', dias: null, vd: null, estoque: null, pedido: {}, un: 0 };
+    if (ps.length >= 2) { const span = (new Date(ps[ps.length - 1].criado_em) - new Date(ps[0].criado_em)) / DIA, inter = span / (ps.length - 1);
+      const unMed = ps.reduce((a, o) => a + (o.unidades || 0), 0) / ps.length; if (inter > 0) { r.vd = unMed / inter;
+        r.dias = inter - (agora - new Date(ps[ps.length - 1].criado_em)) / DIA; r.fonte = 'ritmo de pedidos'; } }
+    const sel = (S.sellouts[p.id] || []).slice(-6), u = ult[p.id];
+    if (sel.length >= 2) { const d = (new Date(sel[sel.length - 1].em) - new Date(sel[0].em)) / DIA; if (d > 0) r.vd = sel.slice(1).reduce((a, s) => a + s.sellout, 0) / d; }
+    if (u && r.vd) { const tot = Object.values(u.por).reduce((a, b) => a + b, 0); r.estoque = Math.max(0, tot - r.vd * (agora - new Date(u.em)) / DIA); r.dias = r.estoque / r.vd; r.fonte = 'contagem'; }
+    if (r.dias === null && ps.length === 1) { const inter = p.cadencia_efetiva || 14; r.vd = (ps[0].unidades || 0) / inter; r.dias = inter - (agora - new Date(ps[0].criado_em)) / DIA; r.fonte = 'cadência'; }
+    if (r.dias === null && p.proxima_reposicao) r.dias = -atraso(p);
+    if (r.dias === null) { r.dias = 99; r.fonte = 'sem histórico'; }
+    r.urg = r.dias <= 2 ? 'ruptura' : r.dias <= 5 ? 'ideal' : 'espera';
+    // pedido esperado: os itens do último pedido (se o ponto tem contagem e expositor, completa o expositor)
+    const ul = ps[ps.length - 1];
+    if (ul) { (pi[ul.id] || []).forEach(i => r.pedido[i.produto_id] = (r.pedido[i.produto_id] || 0) + +i.quantidade);
+      if (!Object.keys(r.pedido).length) (bi[ul.id] || []).forEach(i => { const id = porCod[i.codigo]; if (id) r.pedido[id] = (r.pedido[id] || 0) + +i.quantidade; }); }
+    if (u && p.expositor_id && r.vd) { const fr = r.estoque / Math.max(1, Object.values(u.por).reduce((a, b) => a + b, 0)); const ped = {};
+      S.base.produtos.forEach(pr => { const q = alvo(p.expositor_id, pr.id) - Math.round((u.por[pr.id] || 0) * fr); if (q > 0) ped[pr.id] = q; }); if (Object.keys(ped).length) r.pedido = ped; }
+    r.un = Object.values(r.pedido).reduce((a, b) => a + b, 0) || Math.round(ul?.unidades || 0);
+    out[p.id] = r;
+  });
+  return out;
+}
+
+// simula uma ordem fixa de paradas; devolve horários ou null se alguma parada não couber
+function simular(ordem, ini, fim, base, t0 = ini, pos0 = base) {
+  let t = t0, pos = pos0; const hs = [];
+  for (const s of ordem) {
+    const [w0, w1] = s.jan, chega = t + viagem(pos, s.p), comeca = Math.max(chega, w0);
+    if (comeca + s.serv > w1) return null;
+    hs.push({ chega, comeca, espera: comeca - chega }); t = comeca + s.serv; pos = s.p;
+  }
+  const volta = t + viagem(pos, base); if (volta > fim) return null;
+  return { hs, volta, km: ordem.reduce((a, s, i) => a + km(i ? ordem[i - 1].p : pos0, s.p), 0) + (ordem.length ? km(ordem[ordem.length - 1].p, base) : 0) };
+}
+// monta a ordem: urgentes primeiro, respeitando a janela de cada um; depois encaixa as prospecções onde couber
+function montarOrdem(reps, prosps, ini, fim, base, t0, pos0) {
+  const peso = { ruptura: 60, ideal: 20, espera: 0 };
+  let ordem = [], resto = reps.slice(), t = t0, pos = pos0;
+  while (resto.length) {
+    let melhor = null, ms = 1e9;
+    resto.forEach(s => { const tent = simular([...ordem, s], ini, fim, base, t0, pos0); if (!tent) return; const h = tent.hs[tent.hs.length - 1];
+      const sc = (h.comeca - t) - peso[s.urg] + (s.jan[1] - h.comeca) * 0.05; if (sc < ms) { ms = sc; melhor = s; } });
+    if (!melhor) break;
+    ordem.push(melhor); resto = resto.filter(s => s !== melhor);
+    const sim = simular(ordem, ini, fim, base, t0, pos0); t = sim.hs[sim.hs.length - 1].comeca + melhor.serv; pos = melhor.p;
+  }
+  // melhora a ordem trocando trechos (2-opt) sem deixar ninguém fora da janela
+  let melhorou = true, sim = simular(ordem, ini, fim, base, t0, pos0);
+  while (melhorou && ordem.length > 3) { melhorou = false;
+    for (let i = 0; i < ordem.length - 1 && !melhorou; i++) for (let j = i + 1; j < ordem.length && !melhorou; j++) {
+      const nova = [...ordem.slice(0, i), ...ordem.slice(i, j + 1).reverse(), ...ordem.slice(j + 1)], s2 = simular(nova, ini, fim, base, t0, pos0);
+      if (s2 && s2.volta < sim.volta - 1) { ordem = nova; sim = s2; melhorou = true; } } }
+  const foraRep = resto;
+  // prospecções: a mais barata de encaixar primeiro
+  let pz = prosps.slice(); const foraP = [];
+  while (pz.length) {
+    let best = null, bc = 1e9, bo = null;
+    pz.forEach(s => { for (let k = 0; k <= ordem.length; k++) { const nova = [...ordem.slice(0, k), s, ...ordem.slice(k)], s2 = simular(nova, ini, fim, base, t0, pos0);
+      if (s2) { const c = s2.volta - (sim ? sim.volta : t0); if (c < bc) { bc = c; best = s; bo = nova; } } } });
+    if (!best) { foraP.push(...pz); break; }
+    ordem = bo; sim = simular(ordem, ini, fim, base, t0, pos0); pz = pz.filter(s => s !== best);
+  }
+  return { ordem, sim: sim || simular(ordem, ini, fim, base, t0, pos0), foraRep, foraP };
+}
+
+const RT = { data: null, cfg: null, raw: null, prev: null, perfis: [], salvo: null, plano: null, visitas: [], mapa: null };
 async function telaRota() {
-  $('#main').innerHTML = '<section class="view on"><div class="loading">Atualizando a rota…</div></section>';
-  try { await recarregar(); } catch (e) { return erro(e); }
-  const dia = new Date().getDay();
-  if (!S.rotaReg) S.rotaReg = (S.base.regioes.find(g => g.dia_rota === dia) || S.base.regioes[0]).codigo;
-  const r = ordenar(aRepor(S.rotaReg).filter(p => p.lat)).slice(0, 15);
-  const pts = r.map(p => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`);
-  const url = pts.length ? `https://www.google.com/maps/dir/?api=1&destination=${pts[pts.length - 1]}&waypoints=${pts.slice(0, -1).slice(0, 9).join('%7C')}&travelmode=driving` : null;
-  const doDia = S.base.regioes.filter(g => g.dia_rota === dia).map(g => g.codigo).join(' e ') || 'nenhuma';
-  $('#main').innerHTML = `<section class="view on"><div class="route"><div class="toolbar"><h2 style="font-family:Fraunces,Georgia,serif;margin:0 12px 0 0">Rota · ${r.length} paradas</h2>${url ? `<a class="btn car" href="${url}" target="_blank" rel="noopener" style="text-decoration:none">Abrir rota no Google Maps ↗</a>` : ''}</div>
-  <div class="toolbar"><span>${DIAS[dia]}: regiões do dia <b>${doDia}</b>. Montar rota de</span><select id="rReg">${S.base.regioes.map(g => `<option value="${g.codigo}" ${g.codigo === S.rotaReg ? 'selected' : ''}>${g.codigo} · ${esc(g.nome)} · ${DIAS[g.dia_rota] || '—'} (${aRepor(g.codigo).length} a repor)</option>`).join('')}</select></div>
-  <p style="color:var(--soft);margin-top:0">Entram os PDVs da região com reposição vencida ou vencendo em até 2 dias, do mais próximo para o seguinte.</p>
-  ${r.map((p, i) => `<div class="stop"><div class="n">${i + 1}</div><div class="info"><b>${esc(p.nome)}</b> <span class="badge" style="background:${(atraso(p) ?? 0) > 0 ? '#F3D6CF' : 'var(--sand)'}">${prazoTxt(p)}</span><br><small style="color:var(--mute)">${esc(p.canal || '')} · ${p.expositor_id ? 'expositor ' + esc(expo(p.expositor_id).nome) + ' · ' : ''}${etapa(p.etapa).n}${p.etapa === 'avaliacao' ? ` ${p.aval_reposicoes || 0}/${regraAval().reposicoes}` : ''} · ${esc(p.condicao || '')} · a cada ${p.cadencia_efetiva} dias</small></div><button class="btn pri" data-rep="${p.id}">Repor</button></div>`).join('') || '<div class="empty">Nenhuma reposição vencida nessa região.</div>'}</div></section>`;
-  $('#rReg').onchange = e => { S.rotaReg = e.target.value; telaRota(); };
-  document.querySelectorAll('[data-rep]').forEach(b => b.onclick = () => { S.contando = b.dataset.rep; irPara('reposicao'); });
+  $('#main').innerHTML = '<section class="view on"><div class="loading">Montando o dia de rota…</div></section>';
+  RT.data = RT.data || hoje();
+  try {
+    await recarregar();
+    const [raw, perfis, salvo, vis] = await Promise.all([RT.raw ? RT.raw : db.dadosRota(), RT.perfis.length ? RT.perfis : db.perfisTodos().catch(() => [S.eu]), db.obterRota(RT.data).catch(e => { RT.semTabela = true; return null; }), db.visitasDoDia(RT.data)]);
+    RT.raw = raw; RT.perfis = perfis; RT.visitas = vis; RT.prev = prever(raw);
+    RT.salvo = salvo || { data: RT.data, motorista: S.eu.id, tipo: 'reposicao', inicio: '08:00', fim: '18:00', incluir: [], tirar: [], paradas: [] };
+  } catch (e) { return erro(e); }
+  desenharRota();
+}
+function baseRota() { const c = cfgRota(); return c.lat ? { lat: c.lat, lng: c.lng, end: c.endereco } : { lat: -29.9177, lng: -51.1836, end: null }; }
+function calcularRota() {
+  const R = RT.salvo, c = cfgRota(), base = baseRota(), dow = diaSemana(R.data), ini = minDe(R.inicio), fim = minDe(R.fim);
+  const mot = RT.perfis.find(x => x.id === R.motorista) || S.eu, moises = /mois/i.test(semAcento(mot.nome || ''));
+  const feitos = new Set(RT.visitas.map(v => v.pdv_id)), incl = new Set(R.incluir), tira = new Set(R.tirar);
+  const jan = p => { const j = JANELAS[p.janela_periodo] || [ini, fim]; return [Math.max(j[0], 0), Math.min(j[1], 24 * 60)]; };
+  const atendeHoje = p => !p.janela_dias?.length || p.janela_dias.includes(dow);
+  // fila de reposição
+  const fila = S.pdvs.filter(p => ROTA_ETAPAS.includes(p.etapa) && p.lat).map(p => ({ p, ...RT.prev[p.id] })).filter(x => x.urg).sort((a, b) => a.dias - b.dias);
+  const entra = x => { if (tira.has(x.p.id)) return false; if (incl.has(x.p.id)) return true; if (R.tipo === 'prospeccao') return false;
+    if (!atendeHoje(x.p)) return false; if (ehCanoas(x.p) && !moises && x.urg !== 'ruptura') return false; return x.urg !== 'espera'; };
+  const reps = fila.filter(entra).map(x => ({ id: x.p.id, tipo: 'rep', p: x.p, urg: x.urg, jan: jan(x.p), serv: c.tempo_rep }));
+  // prospecções: no misto, até 500 m de alguma parada de reposição; na prospecção, as que você escolheu
+  let prosps = [];
+  if (R.tipo !== 'reposicao') {
+    const perto = S.pdvs.filter(p => PROSP_ETAPAS.includes(p.etapa) && p.lat && !tira.has(p.id) && atendeHoje(p) && (incl.has(p.id) || (R.tipo === 'misto' && reps.some(r => km(r.p, p) <= 0.5))));
+    prosps = perto.sort((a, b) => (b.potencial || 0) - (a.potencial || 0)).slice(0, 25).map(p => ({ id: p.id, tipo: 'prosp', p, urg: 'espera', jan: jan(p), serv: c.tempo_prosp }));
+  }
+  // rota já em andamento: o que foi feito fica, o resto é recalculado a partir de agora
+  const st = Object.fromEntries((R.paradas || []).map(s => [s.id, s.status]));
+  const feito = s => feitos.has(s.id) || st[s.id] === 'feito' || st[s.id] === 'ausente';
+  const ordemSalva = (R.paradas || []).map(s => [...reps, ...prosps].find(x => x.id === s.id) || (() => { const p = S.pdvs.find(q => q.id === s.id); return p && p.lat ? { id: p.id, tipo: s.tipo, p, urg: RT.prev[p.id]?.urg || 'espera', jan: jan(p), serv: s.tipo === 'prosp' ? c.tempo_prosp : c.tempo_rep } : null; })()).filter(Boolean);
+  const fixos = ordemSalva.filter(feito);
+  // paradas que já estavam na rota salva continuam nela, mesmo que tenham deixado de ser urgentes
+  ordemSalva.filter(s => !feito(s) && !tira.has(s.id)).forEach(s => { if (s.tipo === 'rep' && !reps.some(x => x.id === s.id)) reps.push(s); if (s.tipo === 'prosp' && !prosps.some(x => x.id === s.id)) prosps.push(s); });
+  const ehHoje = R.data === hoje(), agoraMin = new Date().getHours() * 60 + new Date().getMinutes();
+  const t0 = fixos.length && ehHoje && agoraMin > ini && agoraMin < fim ? agoraMin : ini, pos0 = fixos.length ? fixos[fixos.length - 1].p : base;
+  const pend = x => !fixos.some(f => f.id === x.id);
+  const m = montarOrdem(reps.filter(pend), prosps.filter(pend), ini, fim, base, t0, pos0);
+  const naoHoje = fila.filter(x => R.tipo !== 'prospeccao' && !tira.has(x.p.id) && x.urg !== 'espera' && !atendeHoje(x.p) && !incl.has(x.p.id));
+  return { base, ini, fim, t0, pos0, fixos, ordem: m.ordem, sim: m.sim, foraRep: m.foraRep, foraP: m.foraP, fila, naoHoje, moises, mot, st, feitos };
+}
+function carga(ordem) {
+  const tot = {}; ordem.filter(s => s.tipo === 'rep').forEach(s => Object.entries(RT.prev[s.id]?.pedido || {}).forEach(([k, q]) => tot[k] = (tot[k] || 0) + q));
+  return S.base.produtos.filter(p => tot[p.id]).map(p => ({ p, q: tot[p.id], levar: Math.ceil(tot[p.id] * 1.1) }));
+}
+function linksMaps(base, ordem) {
+  const pts = ordem.map(s => `${s.p.lat.toFixed(5)},${s.p.lng.toFixed(5)}`), o = `${base.lat.toFixed(5)},${base.lng.toFixed(5)}`, out = [];
+  for (let i = 0; i < pts.length; i += 9) { const tr = pts.slice(i, i + 9), fimTr = i + 9 >= pts.length;
+    out.push({ n: `${i + 1}–${i + tr.length}`, url: `https://www.google.com/maps/dir/?api=1&origin=${i ? pts[i - 1] : o}&destination=${fimTr ? o : tr[tr.length - 1]}&waypoints=${(fimTr ? tr : tr.slice(0, -1)).join('%7C')}&travelmode=driving` }); }
+  return out;
+}
+async function salvarRotaDia(patch, msg) {
+  Object.assign(RT.salvo, patch);
+  try { const { data, motorista, tipo, inicio, fim, incluir, tirar, paradas } = RT.salvo; RT.salvo = await db.salvarRota({ data, motorista, tipo, inicio, fim, incluir, tirar, paradas }); RT.semTabela = false; if (msg) toast(msg); }
+  catch (e) { RT.semTabela = true; toast('Não salvou: rode o 019_dia_de_rota.sql no Supabase'); }
+}
+function desenharRota() {
+  const R = RT.salvo, k = calcularRota(), c = cfgRota();
+  const todas = [...k.fixos, ...k.ordem], hs = k.sim ? k.sim.hs : [];
+  const linha = (s, i, h) => { const p = s.p, pv = RT.prev[p.id] || {}, est = k.feitos.has(p.id) || k.st[p.id] === 'feito' ? 'feito' : k.st[p.id] === 'ausente' ? 'ausente' : null;
+    const u = URG[pv.urg] || URG.espera, rep = s.tipo === 'rep';
+    return `<div class="stop rstop ${est ? 'done' : ''}" data-id="${p.id}"><div class="n" style="background:${rep ? '#2a78d6' : '#7B4FC0'}">${i + 1}</div>
+     <div class="info"><div class="rhora">${est === 'feito' ? '✅ feito' : est === 'ausente' ? '🚪 não estava' : h ? `${hhmm(h.comeca)}${h.espera > 4 ? ` <small>(chega ${hhmm(h.chega)}, espera ${Math.round(h.espera)} min)</small>` : ''}` : ''}</div>
+      <b>${esc(p.nome)}</b> ${rep ? `<span class="badge" style="background:${u.c}22">${u.i} ${pv.dias <= 0 ? 'já acabou' : `~${Math.round(pv.dias)} dia${Math.round(pv.dias) === 1 ? '' : 's'}`}</span>` : '<span class="badge" style="background:#7B4FC022">🟣 prospecção</span>'}
+      ${p.precisa_dono !== false && (p.janela_dias?.length || p.janela_periodo) ? ' <span title="Precisa do dono">🔒</span>' : ''}${ehCanoas(p) ? ' <span class="badge">Canoas</span>' : ''}
+      <br><small style="color:var(--mute)">${esc(p.bairro || '')}${janelaTxt(p) ? ' · 🕘 ' + esc(janelaTxt(p)) : ' · sem janela cadastrada'}${rep && pv.un ? ` · ~${pv.un} un.` : ''}${rep ? ` · previsão por ${pv.fonte}` : ''}</small></div>
+     ${est ? '' : `<div class="racoes">${rep ? `<button class="btn pri" data-rep="${p.id}">Repor</button>` : `<button class="btn pri" data-pv="${p.id}">Visitei</button>`}<button class="mini" data-aus="${p.id}">não estava</button><button class="mini" data-tira="${p.id}">tirar</button></div>`}</div>`; };
+  const nRep = todas.filter(s => s.tipo === 'rep'), nPr = todas.filter(s => s.tipo === 'prosp');
+  const feitosN = l => l.filter(s => k.feitos.has(s.id) || k.st[s.id] === 'feito').length;
+  const cg = carga(todas.filter(s => !k.feitos.has(s.id)));
+  const foraLista = [...k.foraRep.map(s => ({ p: s.p, m: 'não cabe no horário' })), ...k.naoHoje.map(x => ({ p: x.p, m: 'não atende neste dia' }))];
+  const naFila = k.fila.filter(x => !todas.some(s => s.id === x.p.id) && !foraLista.some(f => f.p.id === x.p.id));
+  const base = k.base;
+  $('#main').innerHTML = `<section class="view on"><div class="route rotadia">
+  <div class="toolbar"><h2 style="font-family:Fraunces,Georgia,serif;margin:0 10px 0 0">Dia de rota</h2>
+   <input type="date" id="rData" value="${R.data}"><label class="rlbl">Quem roda <select id="rMot">${RT.perfis.map(p => `<option value="${p.id}" ${p.id === R.motorista ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}</select></label>
+   <div class="seg" id="rTipo">${Object.entries(TIPOS_DIA).map(([t, n]) => `<button class="${R.tipo === t ? 'on' : ''}" data-t="${t}">${n}</button>`).join('')}</div>
+   <label class="rlbl">das <input type="time" id="rIni" value="${R.inicio}"></label><label class="rlbl">às <input type="time" id="rFim" value="${R.fim}"></label></div>
+  <div class="toolbar"><span class="rbase">🏠 Saída e volta: <b>${base.end ? esc(base.end) : '⚠️ endereço do Moisés não cadastrado (usando o centro de Canoas)'}</b> <button class="mini" id="rBase">alterar</button></span>
+   ${RT.semTabela ? '<span class="badge" style="background:#F3D6CF">Rode o 019_dia_de_rota.sql para salvar a rota</span>' : ''}</div>
+  <div class="tiles rtiles"><div class="tile hi"><small>Paradas</small><b>${todas.length}</b><small>${nRep.length} reposição · ${nPr.length} prospecção</small></div>
+   <div class="tile"><small>Volta para casa</small><b>${k.sim ? hhmm(k.sim.volta) : '—'}</b><small>${k.sim ? `~${Math.round(k.sim.km * 1.35)} km rodados` : ''}</small></div>
+   <div class="tile"><small>🔵 Reposição</small><b>${feitosN(nRep)}/${nRep.length}</b><small>feitas</small></div>
+   <div class="tile"><small>🟣 Prospecção</small><b>${feitosN(nPr)}/${nPr.length}</b><small>visitadas</small></div></div>
+  <div class="rgrid"><div>
+   <div class="toolbar">${todas.length ? linksMaps(base, k.ordem).map(l => `<a class="btn car" href="${l.url}" target="_blank" rel="noopener" style="text-decoration:none">Google Maps · paradas ${l.n} ↗</a>`).join('') : ''}
+    <button class="btn" id="rRecalc">↻ Recalcular o resto</button><button class="btn pri" id="rSalvar">${R.paradas?.length ? 'Salvar rota' : 'Começar a rota'}</button></div>
+   <div class="stop rstop rcasa"><div class="n">🏠</div><div class="info"><div class="rhora">${R.inicio}</div><b>Saída</b> <small style="color:var(--mute)">carregar o carro (lista abaixo)</small></div></div>
+   ${todas.map((s, i) => linha(s, i, i >= k.fixos.length ? hs[i - k.fixos.length] : null)).join('') || '<div class="empty">Nenhuma parada para este dia. Escolha clientes na fila abaixo.</div>'}
+   ${todas.length ? `<div class="stop rstop rcasa"><div class="n">🏠</div><div class="info"><div class="rhora">${k.sim ? hhmm(k.sim.volta) : ''}</div><b>Volta</b></div></div>` : ''}
+  </div><div><div id="rmap"></div>
+   <div class="panel" style="margin-top:12px"><h3 style="margin-top:0">🚗 Carga do carro <small style="font-weight:400;color:var(--mute)">· pedido esperado de cada parada + 10% para trocas</small></h3>
+    ${cg.length ? `<table class="rcarga"><tr><th>Produto</th><th>Previsto</th><th>Levar</th></tr>${cg.map(x => `<tr><td>${esc(x.p.linha.split(' ')[0])} · ${esc(x.p.sabor)}</td><td>${x.q}</td><td><b>${x.levar}</b></td></tr>`).join('')}<tr><td><b>Total</b></td><td>${cg.reduce((a, x) => a + x.q, 0)}</td><td><b>${cg.reduce((a, x) => a + x.levar, 0)}</b></td></tr></table>` : '<span style="color:var(--mute)">Sem reposições na rota.</span>'}</div></div></div>
+  ${foraLista.length ? `<div class="panel rfora"><h3 style="margin-top:0">⚠️ Urgentes que ficaram fora</h3>${foraLista.map(f => `<div class="rfila"><span>${URG[RT.prev[f.p.id]?.urg]?.i || ''} <b>${esc(f.p.nome)}</b> <small>${f.m} · próximo dia na janela: ${proximoDiaJanela(f.p, R.data)}</small></span>${f.m === 'não cabe no horário' ? `<button class="mini" data-tira="${f.p.id}">tirar de hoje</button>` : `<button class="mini" data-inc="${f.p.id}">pôr mesmo assim</button>`}</div>`).join('')}</div>` : ''}
+  <div class="panel" style="margin-top:12px"><h3 style="margin-top:0">Fila de urgência <small style="font-weight:400;color:var(--mute)">· clientes que não estão na rota de hoje</small></h3>
+   ${['ruptura', 'ideal', 'espera'].map(u => { const l = naFila.filter(x => x.urg === u); return l.length ? `<div class="lingrp">${URG[u].i} ${URG[u].n} · ${l.length}</div>${l.map(x => `<div class="rfila"><span><b>${esc(x.p.nome)}</b> <small>${x.dias <= 0 ? 'já deve ter acabado' : `~${Math.round(x.dias)} dias`} · ${esc(x.p.bairro || regNome(x.p.regiao))}${ehCanoas(x.p) ? ' · Canoas (Moisés)' : ''}${janelaTxt(x.p) ? ' · 🕘 ' + esc(janelaTxt(x.p)) : ''}</small></span><button class="mini" data-inc="${x.p.id}">+ pôr na rota</button></div>`).join('')}` : ''; }).join('') || '<span style="color:var(--mute)">Todos os clientes já estão na rota.</span>'}
+   ${R.tipo !== 'reposicao' ? `<div class="lingrp">🟣 Prospecção ${R.tipo === 'misto' ? '· até 500 m da rota entram sozinhos; busque outros' : ''}</div><div class="mbusca" style="max-width:420px"><input id="rProsp" autocomplete="off" placeholder="🔍 Pôr um prospect na rota…"><div id="rProspSug" class="sugs"></div></div>${k.foraP.length ? `<small style="color:var(--mute)">${k.foraP.length} prospect(s) perto da rota não couberam no horário.</small>` : ''}` : ''}
+  </div></div></section>`;
+  ligarRota(k, todas);
+}
+function ligarRota(k, todas) {
+  const R = RT.salvo, comStatus = () => (R.paradas || []).filter(x => x.status), troca = async patch => { await salvarRotaDia({ ...patch, paradas: comStatus() }); desenharRota(); };
+  $('#rData').onchange = e => { RT.data = e.target.value; telaRota(); };
+  $('#rMot').onchange = e => troca({ motorista: e.target.value });
+  $('#rTipo').onclick = e => { const t = e.target.dataset.t; if (t) troca({ tipo: t }); };
+  $('#rIni').onchange = e => troca({ inicio: e.target.value }); $('#rFim').onchange = e => troca({ fim: e.target.value });
+  const fixar = () => [...k.fixos, ...k.ordem].map(s => ({ id: s.id, tipo: s.tipo, status: (R.paradas || []).find(x => x.id === s.id)?.status || null }));
+  $('#rSalvar').onclick = async () => { await salvarRotaDia({ paradas: fixar() }, 'Rota salva'); desenharRota(); };
+  $('#rRecalc').onclick = async () => { await salvarRotaDia({ paradas: fixar() }, 'Rota recalculada a partir de agora'); desenharRota(); };
+  document.querySelectorAll('[data-inc]').forEach(b => b.onclick = async () => { const id = b.dataset.inc; await salvarRotaDia({ incluir: [...new Set([...R.incluir, id])], tirar: R.tirar.filter(x => x !== id) }); desenharRota(); });
+  document.querySelectorAll('[data-tira]').forEach(b => b.onclick = async () => { const id = b.dataset.tira; await salvarRotaDia({ tirar: [...new Set([...R.tirar, id])], incluir: R.incluir.filter(x => x !== id), paradas: (R.paradas || []).filter(x => x.id !== id) }); desenharRota(); });
+  document.querySelectorAll('[data-rep]').forEach(b => b.onclick = async () => { if (!R.paradas?.length) await salvarRotaDia({ paradas: fixar() }); S.contando = b.dataset.rep; irPara('reposicao'); });
+  document.querySelectorAll('[data-aus]').forEach(b => b.onclick = async () => { const id = b.dataset.aus, p = S.pdvs.find(x => x.id === id);
+    const ps = (R.paradas?.length ? R.paradas : fixar()).map(x => x.id === id ? { ...x, status: 'ausente' } : x);
+    await salvarRotaDia({ paradas: ps }); toast(`${p.nome}: não estava. Próximo dia na janela: ${proximoDiaJanela(p, R.data)}`); desenharRota(); });
+  document.querySelectorAll('[data-pv]').forEach(b => b.onclick = async () => { const p = S.pdvs.find(x => x.id === b.dataset.pv);
+    try { await db.registrarVisita(p.id, 'prospeccao', null, S.eu.id); if (p.etapa === 'mapeado') await db.atualizarPdv(p.id, { etapa: 'visitado' }); } catch (e) { return erro(e); }
+    await salvarRotaDia({ paradas: (R.paradas?.length ? R.paradas : fixar()).map(x => x.id === p.id ? { ...x, status: 'feito' } : x) }, 'Visita registrada'); telaRota(); });
+  $('#rBase').onclick = () => { const b = baseRota();
+    modal(`<h3>Ponto de saída e volta</h3><p style="color:var(--soft);margin-top:0">Casa do Moisés, onde fica o estoque. A rota sai daqui e volta para cá.</p><label>Endereço</label><input id="rbEnd" value="${esc(b.end || '')}" placeholder="Rua, número, bairro, Canoas" style="width:100%">
+     <div class="row" style="margin-top:8px"><div style="flex:1"><label>Tempo em cada reposição (min)</label><input id="rbTr" type="number" value="${cfgRota().tempo_rep}"></div><div style="flex:1"><label>Tempo em cada prospecção (min)</label><input id="rbTp" type="number" value="${cfgRota().tempo_prosp}"></div></div>
+     <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="rbOk">Salvar</button></div>`);
+    $('#rbOk').onclick = async () => { const end = $('#rbEnd').value.trim(), nv = { ...cfgRota(), tempo_rep: +$('#rbTr').value || 20, tempo_prosp: +$('#rbTp').value || 15 };
+      if (end && end !== b.end) { $('#rbOk').disabled = true; $('#rbOk').textContent = 'Localizando…';
+        try { const r = await (await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=br&accept-language=pt-BR&q=${encodeURIComponent(end)}`)).json();
+          if (!r.length) { $('#rbOk').disabled = false; $('#rbOk').textContent = 'Salvar'; return toast('Não achei esse endereço. Confira número e cidade.'); }
+          Object.assign(nv, { endereco: end, lat: +r[0].lat, lng: +r[0].lon }); } catch (e) { return erro(e); } }
+      try { await db.salvarRegra('rota', nv); S.base.regras.rota = nv; fecharModal(); toast('Ponto de saída salvo'); desenharRota(); } catch (e) { erro(e); } }; };
+  const inp = $('#rProsp');
+  if (inp) inp.oninput = () => { const t = norm(inp.value), box = $('#rProspSug'); if (t.length < 2) { box.innerHTML = ''; return; }
+    const l = S.pdvs.filter(p => PROSP_ETAPAS.includes(p.etapa) && p.lat && norm(p.nome + ' ' + (p.bairro || '')).includes(t)).slice(0, 8);
+    box.innerHTML = l.map(p => `<button data-inc="${p.id}">${esc(p.nome)} <small>${esc(p.bairro || '')}</small></button>`).join('') || '<div style="padding:8px;color:var(--mute)">Nada encontrado</div>';
+    box.querySelectorAll('[data-inc]').forEach(b => b.onclick = async () => { await salvarRotaDia({ incluir: [...new Set([...R.incluir, b.dataset.inc])], tirar: R.tirar.filter(x => x !== b.dataset.inc) }); desenharRota(); }); };
+  // mapa
+  if (RT.mapa) { RT.mapa.remove(); RT.mapa = null; }
+  const el = $('#rmap'); if (!el || !window.L) return;
+  const m = RT.mapa = L.map(el, { zoomControl: true }); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(m);
+  const b = k.base, pts = [[b.lat, b.lng]];
+  L.marker([b.lat, b.lng], { icon: L.divIcon({ className: '', html: '<div class="rpin casa">🏠</div>', iconSize: [28, 28], iconAnchor: [14, 14] }) }).addTo(m).bindTooltip('Saída e volta');
+  todas.forEach((s, i) => { pts.push([s.p.lat, s.p.lng]); const ok = k.feitos.has(s.id) || k.st[s.id];
+    L.marker([s.p.lat, s.p.lng], { icon: L.divIcon({ className: '', html: `<div class="rpin" style="background:${s.tipo === 'rep' ? '#2a78d6' : '#7B4FC0'};opacity:${ok ? .45 : 1}">${i + 1}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] }) }).addTo(m).bindTooltip(esc(s.p.nome)); });
+  pts.push([b.lat, b.lng]);
+  if (todas.length) L.polyline(pts, { color: '#2E1A12', weight: 2, opacity: .6, dashArray: '6 6' }).addTo(m);
+  setTimeout(() => { m.invalidateSize(); m.fitBounds(L.latLngBounds(pts).pad(0.1)); }, 50);
 }
 
 /* =================== reposição (contagem) =================== */

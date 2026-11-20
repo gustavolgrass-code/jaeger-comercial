@@ -154,3 +154,19 @@ export async function excluirPedido(id, visitaId) {
   ok(await sb.from('pedidos').delete().eq('id', id));
   if (visitaId) ok(await sb.from('visitas').delete().eq('id', visitaId));
 }
+
+/* ---------- dia de rota ---------- */
+export async function perfisTodos() { return ok(await sb.from('perfis').select('id, nome, papel').order('nome')); }
+export async function obterRota(data) { return ok(await sb.from('rotas').select('*').eq('data', data).maybeSingle()); }
+export async function salvarRota(obj) { return ok(await sb.from('rotas').upsert({ ...obj, atualizado_em: new Date().toISOString() }).select().single()); }
+// o que a rota precisa para prever a ruptura e montar a carga: pedidos com itens e a última contagem de cada ponto
+export async function dadosRota() {
+  const desde = new Date(Date.now() - 365 * 864e5).toISOString(), desdeC = new Date(Date.now() - 180 * 864e5).toISOString();
+  const [pedidos, pitens, bitens, contagens] = await Promise.all([
+    tudo(() => sb.from('pedidos').select('id, pdv_id, criado_em, unidades, valor').gte('criado_em', desde).order('criado_em')),
+    tudo(() => sb.from('pedido_itens').select('pedido_id, produto_id, quantidade')),
+    tudo(() => sb.from('bling_itens').select('pedido_id, codigo, quantidade')).catch(() => []),
+    tudo(() => sb.from('contagens').select('produto_id, deixado_agora, visitas!inner(id, pdv_id, em, tipo)').in('visitas.tipo', ['abertura', 'reposicao']).gte('visitas.em', desdeC)).catch(() => []),
+  ]);
+  return { pedidos, pitens, bitens, contagens };
+}

@@ -361,3 +361,28 @@ section:fullscreen #mapa{height:100vh}
 .jdias input,.jper input{display:none}
 .jdono{margin:0;display:flex;align-items:center;gap:6px;font-size:13px}
 .jdono input{width:auto}
+/* dia de rota */
+.route.rotadia{max-width:1280px}
+.rlbl{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--soft)}
+.rbase{font-size:13px;color:var(--soft)}
+.rtiles{margin-bottom:14px}
+.rgrid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:900px){.rgrid{grid-template-columns:1fr}}
+#rmap{height:420px;border-radius:12px;border:1px solid var(--line)}
+.rstop .n{font-size:13px}
+.rstop .rhora{font-size:12px;font-weight:700;color:var(--choc);margin-bottom:2px}
+.rstop .rhora small{font-weight:400;color:var(--mute)}
+.rstop .racoes{display:flex;flex-direction:column;gap:4px;align-items:stretch}
+.rstop.rcasa{background:transparent;border-style:dashed}
+.rstop.rcasa .n{background:var(--sand)}
+.rpin{width:26px;height:26px;border-radius:50%;color:#fff;font:700 12px/26px system-ui;text-align:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35)}
+.rpin.casa{background:#FBF7F0;width:28px;height:28px;line-height:28px;font-size:15px}
+.rfila{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:14px}
+.rfila small{color:var(--mute)}
+.rfora{margin-top:12px;background:#FBF1E6;border-color:#EBCB9F}
+.rcarga{width:100%;border-collapse:collapse;font-size:14px}
+.rcarga th,.rcarga td{text-align:left;padding:4px 6px;border-bottom:1px solid var(--line)}
+.rcarga th:not(:first-child),.rcarga td:not(:first-child){text-align:right}
+#rProspSug:not(:empty){display:block}
+#rProspSug button{display:block;width:100%;text-align:left;border:0;background:transparent;padding:8px 12px;border-bottom:1px solid var(--line);cursor:pointer}
+#rProspSug button:hover{background:var(--sand)}
