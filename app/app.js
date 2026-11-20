@@ -141,10 +141,13 @@ function ligarDesenho(m) {
   const D = S.desenho = S.desenho || { modo: null, cor: CORES_DES[0], formas: null };
   if (!D.formas) D.formas = (S.base.regras.desenhos_mapa || []).slice();
   const camadaD = L.layerGroup().addTo(m);
+  const fmtRaio = r => r < 1000 ? `${Math.round(r)} m` : `${(r / 1000).toFixed(r < 10000 ? 2 : 1).replace('.', ',')} km`;
+  const rotulo = f => L.tooltip({ permanent: true, direction: 'top', className: 'dsrot', interactive: false }).setLatLng([f.lat + f.r / 111320, f.lng]).setContent('raio ' + fmtRaio(f.r));
   const forma = f => f.t === 'c' ? L.circle([f.lat, f.lng], { radius: f.r, color: f.cor, weight: 3, fillOpacity: .12, interactive: false })
     : f.t === 'r' ? L.rectangle(f.b, { color: f.cor, weight: 3, fillOpacity: .12, interactive: false })
     : L.polyline(f.pts, { color: f.cor, weight: 5, opacity: .8, lineCap: 'round', lineJoin: 'round', interactive: false });
-  const redesenhar = () => { camadaD.clearLayers(); D.formas.forEach(f => forma(f).addTo(camadaD)); };
+  const redesenhar = () => { camadaD.clearLayers(); D.formas.forEach(f => { forma(f).addTo(camadaD); if (f.t === 'c') rotulo(f).addTo(camadaD); }); };
+  const mostraRaio = t => { const e = m.getContainer().querySelector('.dsraio'); if (e) { e.textContent = t || ''; e.hidden = !t; } };
   const salvar = async () => { try { await db.salvarRegra('desenhos_mapa', D.formas); S.base.regras.desenhos_mapa = D.formas.slice(); } catch (e) { erro(e); } };
   redesenhar();
   const Ctrl = L.Control.extend({ options: { position: 'bottomright' }, onAdd() {
@@ -154,6 +157,7 @@ function ligarDesenho(m) {
       <span class="dscores">${CORES_DES.map(c => `<a href="#" data-cor="${c}" title="Cor" style="--c:${c}"><i></i></a>`).join('')}</span>
       <a href="#" data-a="desfazer" title="Desfazer o último">↶</a><a href="#" data-a="limpar" title="Apagar todos os desenhos">🗑</a></div>
       <a href="#" class="bt-cheia dsabre" title="Desenhar no mapa">🖌</a>`;
+    const raio = L.DomUtil.create('div', 'dsraio'); raio.hidden = true; setTimeout(() => d.parentNode && d.parentNode.insertBefore(raio, d), 0);
     L.DomEvent.disableClickPropagation(d); L.DomEvent.disableScrollPropagation(d);
     const barra = d.querySelector('.dsbarra');
     const marcar = () => { d.querySelectorAll('[data-m]').forEach(a => a.classList.toggle('on', a.dataset.m === D.modo)); d.querySelectorAll('[data-cor]').forEach(a => a.classList.toggle('on', a.dataset.cor === D.cor));
@@ -161,8 +165,8 @@ function ligarDesenho(m) {
     d.querySelector('.dsabre').onclick = e => { e.preventDefault(); barra.hidden = !barra.hidden; if (barra.hidden) D.modo = null; marcar(); };
     d.querySelectorAll('[data-m]').forEach(a => a.onclick = e => { e.preventDefault(); D.modo = D.modo === a.dataset.m ? null : a.dataset.m; marcar(); });
     d.querySelectorAll('[data-cor]').forEach(a => a.onclick = e => { e.preventDefault(); D.cor = a.dataset.cor; marcar(); });
-    d.querySelector('[data-a=desfazer]').onclick = e => { e.preventDefault(); if (!D.formas.length) return; D.formas.pop(); redesenhar(); salvar(); };
-    d.querySelector('[data-a=limpar]').onclick = e => { e.preventDefault(); if (!D.formas.length) return; modal(`<h3>Apagar todos os desenhos do mapa?</h3><p style="color:var(--soft)">São ${D.formas.length} desenho(s). Some para todos que usam o app.</p><div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="dsOk">Apagar</button></div>`); $('#dsOk').onclick = () => { D.formas = []; redesenhar(); salvar(); fecharModal(); }; };
+    d.querySelector('[data-a=desfazer]').onclick = e => { e.preventDefault(); if (!D.formas.length) return; D.formas.pop(); redesenhar(); mostraRaio(''); salvar(); };
+    d.querySelector('[data-a=limpar]').onclick = e => { e.preventDefault(); if (!D.formas.length) return; modal(`<h3>Apagar todos os desenhos do mapa?</h3><p style="color:var(--soft)">São ${D.formas.length} desenho(s). Some para todos que usam o app.</p><div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="dsOk">Apagar</button></div>`); $('#dsOk').onclick = () => { D.formas = []; redesenhar(); mostraRaio(''); salvar(); fecharModal(); }; };
     marcar(); return d; } });
   new Ctrl().addTo(m);
   // traço com o dedo ou o mouse (pointer events servem para os dois)
@@ -173,12 +177,12 @@ function ligarDesenho(m) {
     temp = forma(atual).addTo(m); });
   el.addEventListener('pointermove', e => { if (!atual) return; const p = ll(e);
     if (atual.t === 'p') { atual.pts.push([p.lat, p.lng]); temp.addLatLng(p); }
-    else if (atual.t === 'c') { atual.r = ini.distanceTo(p); temp.setRadius(atual.r); }
+    else if (atual.t === 'c') { atual.r = ini.distanceTo(p); temp.setRadius(atual.r); mostraRaio('Raio ' + fmtRaio(atual.r)); }
     else { atual.b = [[ini.lat, ini.lng], [p.lat, p.lng]]; temp.setBounds(atual.b); } });
   const fim = () => { if (!atual) return; m.removeLayer(temp);
     const ok = atual.t === 'p' ? atual.pts.length > 2 : atual.t === 'c' ? atual.r > 5 : Math.abs(atual.b[0][0] - atual.b[1][0]) + Math.abs(atual.b[0][1] - atual.b[1][1]) > 1e-5;
     if (ok) { if (atual.t === 'p') atual.pts = atual.pts.filter((q, i) => i % 2 === 0 || i === atual.pts.length - 1).map(q => [+q[0].toFixed(6), +q[1].toFixed(6)]); D.formas.push(atual); redesenhar(); salvar(); }
-    atual = null; };
+    if (atual.t === 'c' && ok) mostraRaio('Raio ' + fmtRaio(atual.r)); atual = null; };
   el.addEventListener('pointerup', fim); el.addEventListener('pointercancel', fim);
   // enquanto desenha, o clique não seleciona nem marca ponto no mapa
   el.addEventListener('click', e => { if (D.modo && !e.target.closest('.leaflet-control')) e.stopPropagation(); }, true);
@@ -367,6 +371,14 @@ function painelZonas(s) {
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([ls.join('\n') + '\n'], { type: 'text/plain;charset=utf-8' })); a.download = `buscas_zona_Z${+b.dataset.buscas + 1}.txt`; document.body.appendChild(a); a.click(); a.remove();
     toast(`${ls.length} buscas da zona Z${+b.dataset.buscas + 1} (${bs.length} bairros × ${BUSCAS_PDV.length} categorias)`); });
 }
+// prioridade para reativar clientes parados
+const PRIOR = { alta: { n: 'Alta', c: '#d03b3b', v: 3 }, media: { n: 'Média', c: '#fab219', v: 2 }, baixa: { n: 'Baixa', c: '#9A8F86', v: 1 } };
+const REATIVAR = ['inativo', 'perdido', 'risco', 'revisao'];
+const seloPrior = p => p.prioridade_reativacao && PRIOR[p.prioridade_reativacao] ? `<span class="badge prior" style="--c:${PRIOR[p.prioridade_reativacao].c}">Reativar · ${PRIOR[p.prioridade_reativacao].n}</span>` : '';
+const campoPrior = p => REATIVAR.includes(p.etapa) || p.prioridade_reativacao ? `<div class="sect prisect"><h3>Prioridade para reativar</h3><div class="prichips">${Object.entries(PRIOR).reverse().map(([k, x]) => `<button type="button" data-prior="${k}" class="${p.prioridade_reativacao === k ? 'on' : ''}" style="--c:${x.c}">${x.n}</button>`).join('')}</div></div>` : '';
+function ligarPrior(p, depois) { document.querySelectorAll('[data-prior]').forEach(b => b.onclick = async () => { const v = p.prioridade_reativacao === b.dataset.prior ? null : b.dataset.prior;
+  try { await db.atualizarPdv(p.id, { prioridade_reativacao: v }); await atualizarUm(p.id); toast(v ? `Prioridade para reativar: ${PRIOR[v].n}` : 'Prioridade removida'); depois(); }
+  catch (e) { erro(/prioridade_reativacao/.test(e.message) ? new Error('Rode o 021_prioridade_reativacao.sql no Supabase') : e); } }); }
 function painel() {
   const s = $('#side'); if (!s) return;
   const antes = s.classList.contains('open'); setTimeout(() => { if (mapa && s.classList.contains('open') !== antes) mapa.invalidateSize(); }, 0);
@@ -379,7 +391,8 @@ function painel() {
   const gm = p.lat ? `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}` : null;
   s.innerHTML = `<button class="btn" style="float:right;padding:4px 10px" id="xSide">✕</button>
   <small style="color:var(--mute)">${esc(p.canal || '')} · ${esc(p.cidade || '')}</small><h2>${esc(p.nome)}</h2>${p.contato_nome ? `<div style="color:var(--soft)">Contato: <b>${esc(p.contato_nome)}</b>${p.contato_telefone ? ' · ' + esc(p.contato_telefone) : ''}</div>` : ''}
-  <div class="badges"><span class="badge st" style="background:${etapa(p.etapa).c}">${etapa(p.etapa).n}</span>${p.classe ? `<span class="badge">Classe ${p.classe}</span>` : ''}<span class="badge">${p.regiao || '—'} · ${esc(regNome(p.regiao))}</span>${p.expositor_id ? `<span class="badge">Expositor ${esc(expo(p.expositor_id).nome)}</span>` : ''}</div>
+  <div class="badges"><span class="badge st" style="background:${etapa(p.etapa).c}">${etapa(p.etapa).n}</span>${p.classe ? `<span class="badge">Classe ${p.classe}</span>` : ''}<span class="badge">${p.regiao || '—'} · ${esc(regNome(p.regiao))}</span>${p.expositor_id ? `<span class="badge">Expositor ${esc(expo(p.expositor_id).nome)}</span>` : ''}${seloPrior(p)}</div>
+  ${campoPrior(p)}
   ${janelaTxt(p) || p.melhor_horario ? `<div style="margin-top:8px;font-size:13px">🕘 <b>${esc(janelaTxt(p) || '')}</b>${p.melhor_horario ? `${janelaTxt(p) ? ' · ' : ''}${esc(p.melhor_horario)}` : ''}</div>` : ''}
   ${caixaComentario(p)}
   ${caixaEsteira(p)}
@@ -406,6 +419,7 @@ function painel() {
   if ($('#sCad')) $('#sCad').onchange = e => salvarPdv(p.id, { cadencia_dias: e.target.value ? +e.target.value : null }, 'Frequência atualizada');
   if ($('#bComprar')) $('#bComprar').onclick = () => { S.abPdv = p.id; S.vendaVolta = { aba: 'mapa', id: p.id }; irPara('abertura'); };
   $('#bVisita').onclick = () => visitaRapida(p);
+  ligarPrior(p, () => { desenhar(); painel(); });
   ligarComentario(() => painel());
   s.querySelectorAll('[data-rev]').forEach(b => b.onclick = () => revisar(p, b.dataset.rev));
 }
@@ -730,18 +744,18 @@ function listaTarefas(ts, vazio) {
 let ord = { k: 'nome', d: 1 };
 function telaCarteira() {
   const RP = {};
-  $('#main').innerHTML = `<section class="view on"><div class="tablewrap"><div class="toolbar"><input id="q" placeholder="Buscar PDV…" style="width:240px"><select id="tEt"><option value="">Todas as etapas</option>${ETAPAS.map(e => `<option value="${e.k}">${e.n}</option>`).join('')}</select><span id="tN" style="color:var(--mute)"></span></div><table id="tbl"></table></div></section>`;
-  const cols = [['nome', 'PDV'], ['regiao', 'Região'], ['canal', 'Canal'], ['etapa', 'Etapa'], ['classe', 'Classe'], ['potencial', 'Potencial'], ['so', 'Sell-out médio'], ['ultima_compra', 'Última compra'], ['proxima_reposicao', 'Próx. reposição']];
+  $('#main').innerHTML = `<section class="view on"><div class="tablewrap"><div class="toolbar"><input id="q" placeholder="Buscar PDV…" style="width:240px"><select id="tEt"><option value="">Todas as etapas</option>${ETAPAS.map(e => `<option value="${e.k}">${e.n}</option>`).join('')}</select><select id="tPr"><option value="">Toda prioridade de reativação</option>${Object.entries(PRIOR).map(([k, x]) => `<option value="${k}">Reativar · ${x.n}</option>`).join('')}<option value="-">Sem prioridade definida</option></select><span id="tN" style="color:var(--mute)"></span></div><table id="tbl"></table></div></section>`;
+  const cols = [['nome', 'PDV'], ['regiao', 'Região'], ['canal', 'Canal'], ['etapa', 'Etapa'], ['classe', 'Classe'], ['potencial', 'Potencial'], ['so', 'Sell-out médio'], ['ultima_compra', 'Última compra'], ['proxima_reposicao', 'Próx. reposição'], ['pr', 'Reativar']];
   const desenhaT = () => {
-    const q = $('#q').value.toLowerCase(), et = $('#tEt').value;
-    let ds = S.pdvs.filter(p => (!et || p.etapa === et) && (!q || p.nome.toLowerCase().includes(q))).map(p => { const s = (S.sellouts[p.id] || []).slice(-6), rp = RP[p.id]; return { ...p, so: s.length ? s.reduce((a, x) => a + x.sellout, 0) / s.length : rp ? rp.un / rp.n : null, soPed: !s.length && !!rp, ultima_compra: rp?.ult || null }; });
+    const q = $('#q').value.toLowerCase(), et = $('#tEt').value, pr = $('#tPr').value;
+    let ds = S.pdvs.filter(p => (!et || p.etapa === et) && (!pr || (pr === '-' ? !p.prioridade_reativacao : p.prioridade_reativacao === pr)) && (!q || p.nome.toLowerCase().includes(q))).map(p => { const s = (S.sellouts[p.id] || []).slice(-6), rp = RP[p.id]; return { ...p, so: s.length ? s.reduce((a, x) => a + x.sellout, 0) / s.length : rp ? rp.un / rp.n : null, soPed: !s.length && !!rp, ultima_compra: rp?.ult || null, pr: PRIOR[p.prioridade_reativacao]?.v || 0 }; });
     ds.sort((a, b) => { const x = a[ord.k] ?? '', y = b[ord.k] ?? ''; return (x > y ? 1 : x < y ? -1 : 0) * ord.d; });
     $('#tN').textContent = ds.length + ' pontos';
-    $('#tbl').innerHTML = `<tr>${cols.map(([k, n]) => `<th data-k="${k}">${n}${ord.k === k ? (ord.d > 0 ? ' ↑' : ' ↓') : ''}</th>`).join('')}</tr>` + ds.map(p => `<tr data-id="${p.id}" style="cursor:pointer"><td><b>${esc(p.nome)}</b>${faltaContato(p).length ? `<br>${avisoContato(p, true)}` : ''}</td><td>${p.regiao || '—'}</td><td>${esc(p.canal || '')}</td><td><i class="dot" style="background:${etapa(p.etapa).c}"></i> ${etapa(p.etapa).n}</td><td>${p.classe || '—'}</td><td>${'★'.repeat(p.potencial || 0)}</td><td ${p.soPed ? 'title="Média de unidades por pedido (Bling)"' : ''}>${p.so === null ? '—' : Math.round(p.so) + ' un.' + (p.soPed ? '<small style="color:var(--mute)"> /pedido</small>' : '')}</td><td>${p.ultima_compra ? dataLonga(p.ultima_compra) + `<br><small style="color:var(--mute)">há ${Math.floor((Date.now() - new Date(p.ultima_compra)) / DIA)} dias</small>` : '—'}</td><td>${p.proxima_reposicao ? dstr(p.proxima_reposicao) + ' · ' + prazoTxt(p) : '—'}</td></tr>`).join('');
+    $('#tbl').innerHTML = `<tr>${cols.map(([k, n]) => `<th data-k="${k}">${n}${ord.k === k ? (ord.d > 0 ? ' ↑' : ' ↓') : ''}</th>`).join('')}</tr>` + ds.map(p => `<tr data-id="${p.id}" style="cursor:pointer"><td><b>${esc(p.nome)}</b>${faltaContato(p).length ? `<br>${avisoContato(p, true)}` : ''}</td><td>${p.regiao || '—'}</td><td>${esc(p.canal || '')}</td><td><i class="dot" style="background:${etapa(p.etapa).c}"></i> ${etapa(p.etapa).n}</td><td>${p.classe || '—'}</td><td>${'★'.repeat(p.potencial || 0)}</td><td ${p.soPed ? 'title="Média de unidades por pedido (Bling)"' : ''}>${p.so === null ? '—' : Math.round(p.so) + ' un.' + (p.soPed ? '<small style="color:var(--mute)"> /pedido</small>' : '')}</td><td>${p.ultima_compra ? dataLonga(p.ultima_compra) + `<br><small style="color:var(--mute)">há ${Math.floor((Date.now() - new Date(p.ultima_compra)) / DIA)} dias</small>` : '—'}</td><td>${p.proxima_reposicao ? dstr(p.proxima_reposicao) + ' · ' + prazoTxt(p) : '—'}</td><td>${seloPrior(p).replace('Reativar · ', '') || '—'}</td></tr>`).join('');
     $('#tbl').querySelectorAll('th').forEach(th => th.onclick = () => { ord = { k: th.dataset.k, d: ord.k === th.dataset.k ? -ord.d : 1 }; desenhaT(); });
     $('#tbl').querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => abrirPerfil(tr.dataset.id));
   };
-  $('#q').oninput = $('#tEt').onchange = desenhaT; desenhaT();
+  $('#q').oninput = $('#tEt').onchange = $('#tPr').onchange = desenhaT; desenhaT();
   db.resumoPedidos().then(ls => { ls.forEach(o => { const x = RP[o.pdv_id] = RP[o.pdv_id] || { n: 0, un: 0, ult: null }; x.n++; x.un += Number(o.unidades) > 0 ? Number(o.unidades) : Math.round((Number(o.valor) || 0) / 4.6); if (!x.ult || o.criado_em > x.ult) x.ult = o.criado_em; }); if ($('#tbl')) desenhaT(); }).catch(() => { });
 }
 
@@ -1721,6 +1735,7 @@ async function telaPerfil() {
     <div class="panel"><h3>Histórico</h3>${ev.map(e => `<div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--sand)"><i style="width:12px;height:12px;border-radius:50%;background:${e.cor};flex:none;margin-top:4px"></i><div style="flex:1"><div>${e.t}</div>${e.obs ? `<div style="color:var(--soft);margin-top:2px">“${esc(e.obs)}”</div>` : ''}<small style="color:var(--mute)">${quando(e.em)}${e.quem ? ' · ' + esc(e.quem) : ''}</small></div></div>`).join('') || '<p class="empty">Sem histórico ainda.</p>'}</div>
    </div>
    <div style="display:flex;flex-direction:column;gap:16px">
+    ${campoPrior(p) ? `<div class="panel">${campoPrior(p)}</div>` : ''}
     <div class="panel"><h3>Contatos</h3>${c ? `<small class="ctpapel">Principal</small><div style="font-size:18px;font-weight:700">${esc(c.nome)}</div><div style="color:var(--soft)">${esc([c.cargo, c.empresa].filter(Boolean).join(' · '))}</div>
      <p style="margin:8px 0;line-height:1.7">${c.telefone ? `📞 ${esc(c.telefone)}<br>` : ''}${c.email ? `✉️ ${esc(c.email)}<br>` : ''}</p>
      <div class="row" style="flex-wrap:wrap">${linkWpp(c.whatsapp || c.telefone) ? `<a class="btn car" style="text-decoration:none" target="_blank" rel="noopener" href="${linkWpp(c.whatsapp || c.telefone)}">WhatsApp ↗</a>` : ''}<button class="btn" id="pVerContato">Abrir contato</button><button class="btn" id="pTrocarContato">Trocar</button></div>`
@@ -1757,6 +1772,7 @@ async function telaPerfil() {
   $('#pTrocarContato').onclick = () => { modal(`<h3>Contato de ${esc(p.nome)}</h3>${campoContato()}<div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="kOk">Vincular</button></div>`); document.querySelector('#modalBox details').open = true;
     $('#kOk').onclick = async () => { try { const id = await contatoDoForm(p.nome); if (!id) return toast('Escolha um contato ou preencha o nome'); await db.atualizarPdv(p.id, { contato_id: id }); fecharModal(); await atualizarUm(p.id); toast('Contato vinculado'); telaPerfil(); } catch (e) { erro(e); } }; };
   $('#pExcluirTopo').onclick = () => $('#pExcluir').click();
+  ligarPrior(p, () => telaPerfil());
   if ($('#pAddSec')) $('#pAddSec').onclick = () => { modal(`<h3>Contato secundário de ${esc(p.nome)}</h3><p style="color:var(--soft);margin-top:0">Ex.: o gerente, quando o principal é o dono.</p>${campoContato()}<div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="kOk">Adicionar</button></div>`); document.querySelector('#modalBox details').open = true;
     $('#kOk').onclick = async () => { try { const id = await contatoDoForm(p.nome); if (!id) return toast('Escolha um contato ou preencha o nome'); if (id === p.contato_id) return toast('Esse já é o contato principal');
       await db.vincularContato(p.id, id); fecharModal(); toast('Contato secundário adicionado'); telaPerfil(); } catch (e) { erro(/pdv_contatos/.test(e.message) ? new Error('Rode o 020_contatos_secundarios.sql no Supabase') : e); } }; };
