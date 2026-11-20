@@ -434,3 +434,8 @@ section:fullscreen #mapa{height:100vh}
 .chkcomp{display:flex;align-items:center;gap:8px;margin-top:10px;font-weight:600}
 .chkcomp small{font-weight:400;color:var(--mute)}
 .mini.ultped{background:var(--choc);color:#fff;border-color:var(--choc)}
+#modalBox label.chkcomp{display:flex;align-items:center;gap:10px;margin-top:12px;font-weight:600;cursor:pointer}
+#modalBox label.chkcomp input{width:18px;height:18px;margin:0;flex:none;accent-color:var(--choc)}
+#modalBox label.chkbox{background:var(--sand);border-radius:10px;padding:10px 12px}
+#modalBox label.chkbox span{display:flex;flex-direction:column;line-height:1.3}
+#modalBox label.chkbox small{font-weight:400;color:var(--mute);font-size:12px}

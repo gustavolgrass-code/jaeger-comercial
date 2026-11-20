@@ -530,7 +530,7 @@ function faltaContato(p) {
   return [semPessoa && 'pessoa de contato', !c.cargo && 'cargo', !(c.telefone || c.whatsapp || p.telefone) && 'telefone', !c.email && 'e-mail'].filter(Boolean);
 }
 const avisoContato = (p, curto) => { const f = faltaContato(p); return f.length ? `<span class="aviso-ct" title="Faltam dados do contato: ${f.join(', ')}">⚠️ ${curto ? 'Falta ' : 'Faltam dados: '}${f.join(', ')}</span>` : ''; };
-const MOTIVOS = ['Preço', 'Sem espaço', 'Concorrente', 'Dono não decide', 'Sem interesse', 'Sem potencial', 'Outro'];
+const MOTIVOS = ['Sem potencial', 'Preço', 'Sem espaço', 'Concorrente', 'Dono não decide', 'Sem interesse', 'Outro'];
 const ymd = x => !x ? '' : typeof x === 'object' && x.toISOString ? x.toISOString().slice(0, 10) : String(x).slice(0, 10);
 const hojeISO = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10); };
 const isoDe = d => new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
@@ -548,12 +548,12 @@ async function mudarEtapa(id, nova, depois) {
     const ret = isoDe(new Date(Date.now() + 60 * DIA));
     modal(`<h3>${esc(p.nome)} · perdido</h3><label>Motivo</label><select id="mMot">${MOTIVOS.map(m => `<option>${m}</option>`).join('')}</select>
     <input id="mOutro" placeholder="Descreva o motivo" style="display:none;margin-top:6px;width:100%">
-    <label class="chkcomp"><input type="checkbox" id="mNao"> Não retornar</label>
+    <label class="chkcomp chkbox"><input type="checkbox" id="mNao"><span><b>Não retornar</b><small>Não cria tarefa de retomada na agenda</small></span></label>
     <div id="mRetBox"><label>Retomar o contato em</label><input id="mRet" type="date" value="${ret}">
     <p style="color:var(--soft);font-size:12px;margin:6px 0 0">Cria uma tarefa na sua agenda para essa data.</p></div>
     <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="mOk">Marcar como perdido</button></div>`);
     const naoRet = v => { $('#mNao').checked = v; $('#mRetBox').style.display = v ? 'none' : 'block'; };
-    $('#mNao').onchange = () => naoRet($('#mNao').checked);
+    $('#mNao').onchange = () => naoRet($('#mNao').checked); naoRet($('#mMot').value === 'Sem potencial');
     $('#mMot').onchange = () => { $('#mOutro').style.display = $('#mMot').value === 'Outro' ? 'block' : 'none'; if ($('#mMot').value === 'Sem potencial') naoRet(true); };
     $('#mOk').onclick = async () => {
       const mot = $('#mMot').value === 'Outro' ? ($('#mOutro').value.trim() || 'Outro') : $('#mMot').value, ret = $('#mNao').checked ? null : ($('#mRet').value || null);
