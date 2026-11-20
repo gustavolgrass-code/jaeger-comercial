@@ -347,3 +347,9 @@ table.bo input{width:120px}
 #mapa + aside#side:not(.open){display:none}
 section:fullscreen{background:var(--cream);width:100vw;height:100vh}
 section:fullscreen #mapa{height:100vh}
+/* controles do mapa menores e legenda recolhível */
+.leaflet-control-zoom a,.leaflet-bar a.bt-cheia{width:26px!important;height:26px!important;line-height:26px!important;font-size:15px!important}
+.leaflet-bar a.bt-cheia{display:block;text-align:center;text-decoration:none;color:var(--choc);background:#fff}
+.legend{bottom:12px;left:40px}
+.legend.oculta{display:none}
+.legdot{position:absolute;bottom:14px;left:12px;z-index:500;width:20px;height:20px;border-radius:50%;padding:0;border:2px solid #FBF7F0;box-shadow:0 1px 4px rgba(0,0,0,.3);cursor:pointer;background:conic-gradient(#2F7D4E 0 25%,#D08A3C 0 50%,#6B4FA0 0 75%,#3E2C24 0)}
