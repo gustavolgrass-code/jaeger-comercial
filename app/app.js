@@ -1128,28 +1128,42 @@ function telaRegras() {
 // janela de cada período, em minutos do dia
 const JANELAS = { manha: [8 * 60, 12 * 60], tarde: [13 * 60, 18 * 60], noite: [18 * 60, 22 * 60], dia_todo: [8 * 60, 20 * 60] };
 const TIPOS_DIA = { reposicao: 'Reposição', prospeccao: 'Prospecção', misto: 'Misto' };
-const URG = { ruptura: { n: 'Ruptura', i: '🔴', c: '#d03b3b' }, ideal: { n: 'Janela ideal', i: '🟠', c: '#fab219' }, espera: { n: 'Pode esperar', i: '⚪', c: '#9A8F86' } };
+const URG = { ruptura: { n: 'Possível zerado (até 2 dias)', i: '🔴', c: '#d03b3b' }, ideal: { n: 'Janela ideal', i: '🟠', c: '#fab219' }, espera: { n: 'Pode esperar', i: '⚪', c: '#9A8F86' } };
 
 const hhmm = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(Math.round(m % 60)).padStart(2, '0')}`;
 const minDe = s => { const [h, m] = String(s || '08:00').split(':'); return +h * 60 + (+m || 0); };
 const hoje = () => new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
 const km = (a, b) => { const R = 6371, r = Math.PI / 180, dLa = (b.lat - a.lat) * r, dLo = (b.lng - a.lng) * r; const h = Math.sin(dLa / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLo / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); };
 // tempo de carro na cidade: distância em linha reta × 1,35 (ruas), a 25 km/h, mais 3 min para estacionar
-const viagem = (a, b) => km(a, b) < 0.05 ? 0 : km(a, b) * 1.35 / 25 * 60 + 3;
+// tempos e distâncias reais pelas ruas (OSRM, o mesmo tipo de cálculo do Google Maps); sem internet, cai na estimativa em linha reta
+const MZ = { idx: {}, dur: [], dist: [] }, chaveP = p => p.lat.toFixed(5) + ',' + p.lng.toFixed(5);
+const mzIJ = (a, b) => { const i = MZ.idx[chaveP(a)], j = MZ.idx[chaveP(b)]; return i != null && j != null && MZ.dur[i]?.[j] != null ? [i, j] : null; };
+const viagem = (a, b) => { const ij = mzIJ(a, b); if (ij) return ij[0] === ij[1] ? 0 : MZ.dur[ij[0]][ij[1]] / 60 + 2; return km(a, b) < 0.05 ? 0 : km(a, b) * 1.35 / 25 * 60 + 3; };
+const kmRua = (a, b) => { const ij = mzIJ(a, b); return ij && MZ.dist[ij[0]]?.[ij[1]] != null ? MZ.dist[ij[0]][ij[1]] / 1000 : km(a, b) * 1.35; };
+async function garantirMatriz(pontos) {
+  const uniq = [...new Map(pontos.filter(p => p && p.lat).map(p => [chaveP(p), p])).values()];
+  if (uniq.every(p => MZ.idx[chaveP(p)] != null) || uniq.length < 2) return false;
+  const todos = [...new Map([...Object.keys(MZ.idx).map(k => { const [lat, lng] = k.split(',').map(Number); return [k, { lat, lng }]; }), ...uniq.map(p => [chaveP(p), p])]).values()];
+  const lista = todos.length > 95 ? uniq.slice(0, 95) : todos;
+  try { const ctl = new AbortController(); setTimeout(() => ctl.abort(), 12000);
+    const r = await (await fetch(`https://router.project-osrm.org/table/v1/driving/${lista.map(p => `${p.lng.toFixed(5)},${p.lat.toFixed(5)}`).join(';')}?annotations=duration,distance`, { signal: ctl.signal })).json();
+    if (r.code !== 'Ok') return false;
+    MZ.idx = Object.fromEntries(lista.map((p, i) => [chaveP(p), i])); MZ.dur = r.durations; MZ.dist = r.distances || []; return true;
+  } catch { return false; } }
 const ehCanoas = p => ['C1', 'C2'].includes(p.regiao) || norm(p.cidade) === 'canoas';
 const cfgRota = () => ({ tempo_rep: 20, tempo_prosp: 15, ...(S.base.regras.rota || {}) });
 const diaSemana = data => new Date(data + 'T12:00').getDay();
 function proximoDiaJanela(p, data) { const ds = p.janela_dias?.length ? p.janela_dias : [1, 2, 3, 4, 5, 6]; for (let i = 1; i <= 7; i++) { const d = new Date(new Date(data + 'T12:00').getTime() + i * DIA); if (ds.includes(d.getDay())) return `${DIAS_SEM[d.getDay()]} ${dstr(d)}`; } return '—'; }
 
 // previsão de ruptura de cada cliente: contagem (quando tem) ou ritmo de pedidos; cai na cadência se não tiver nada
-function prever(raw) {
+function prever(raw, data) {
   const porPdv = {}; raw.pedidos.forEach(o => (porPdv[o.pdv_id] = porPdv[o.pdv_id] || []).push(o));
   const pi = {}; raw.pitens.forEach(i => (pi[i.pedido_id] = pi[i.pedido_id] || []).push(i));
   const bi = {}; raw.bitens.forEach(i => (bi[i.pedido_id] = bi[i.pedido_id] || []).push(i));
   const porCod = {}; S.base.produtos.forEach(p => { if (p.bling_codigo) porCod[p.bling_codigo] = p.id; });
   const ult = {}; raw.contagens.forEach(c => { const v = c.visitas; const u = ult[v.pdv_id]; if (!u || v.em > u.em) ult[v.pdv_id] = { id: v.id, em: v.em, por: {} }; });
   raw.contagens.forEach(c => { const u = ult[c.visitas.pdv_id]; if (u && u.id === c.visitas.id) u.por[c.produto_id] = (u.por[c.produto_id] || 0) + c.deixado_agora; });
-  const agora = Date.now(), out = {};
+  const agora = data && data !== hoje() ? new Date(data + 'T08:00').getTime() : Date.now(), out = {};
   S.pdvs.filter(p => ROTA_ETAPAS.includes(p.etapa)).forEach(p => {
     const ps = (porPdv[p.id] || []).slice(-7), r = { fonte: 'cadência', dias: null, vd: null, estoque: null, pedido: {}, un: 0 };
     if (ps.length >= 2) { const span = (new Date(ps[ps.length - 1].criado_em) - new Date(ps[0].criado_em)) / DIA, inter = span / (ps.length - 1);
@@ -1159,7 +1173,7 @@ function prever(raw) {
     if (sel.length >= 2) { const d = (new Date(sel[sel.length - 1].em) - new Date(sel[0].em)) / DIA; if (d > 0) r.vd = sel.slice(1).reduce((a, s) => a + s.sellout, 0) / d; }
     if (u && r.vd) { const tot = Object.values(u.por).reduce((a, b) => a + b, 0); r.estoque = Math.max(0, tot - r.vd * (agora - new Date(u.em)) / DIA); r.dias = r.estoque / r.vd; r.fonte = 'contagem'; }
     if (r.dias === null && ps.length === 1) { const inter = p.cadencia_efetiva || 14; r.vd = (ps[0].unidades || 0) / inter; r.dias = inter - (agora - new Date(ps[0].criado_em)) / DIA; r.fonte = 'cadência'; }
-    if (r.dias === null && p.proxima_reposicao) r.dias = -atraso(p);
+    if (r.dias === null && p.proxima_reposicao) r.dias = (new Date(p.proxima_reposicao) - agora) / DIA;
     if (r.dias === null) { r.dias = 99; r.fonte = 'sem histórico'; }
     r.urg = r.dias <= 2 ? 'ruptura' : r.dias <= 5 ? 'ideal' : 'espera';
     // pedido esperado: os itens do último pedido (se o ponto tem contagem e expositor, completa o expositor)
@@ -1188,16 +1202,17 @@ function simular(ordem, ini, fim, base, t0 = ini, pos0 = base) {
     hs.push({ chega, comeca, espera: comeca - chega }); t = comeca + s.serv; pos = s.p;
   }
   const volta = t + viagem(pos, base); if (volta > fim) return null;
-  return { hs, volta, km: ordem.reduce((a, s, i) => a + km(i ? ordem[i - 1].p : pos0, s.p), 0) + (ordem.length ? km(ordem[ordem.length - 1].p, base) : 0) };
+  return { hs, volta, km: ordem.reduce((a, s, i) => a + kmRua(i ? ordem[i - 1].p : pos0, s.p), 0) + (ordem.length ? kmRua(ordem[ordem.length - 1].p, base) : 0) };
 }
 // monta a ordem: a urgência só decide QUEM entra; a ordem é pela proximidade, saindo da base e voltando para ela.
 // janela de horário só pesa para quem tem horário cadastrado (vira restrição, não preferência)
 function montarOrdem(reps, prosps, ini, fim, base, t0, pos0) {
-  const dist = o => o.reduce((a, s, i) => a + km(i ? o[i - 1].p : pos0, s.p), 0) + (o.length ? km(o[o.length - 1].p, base) : 0);
+  // caminho a partir da saída, do mais perto para o mais longe; a volta para casa não entra na ordem (é direta no fim)
+  const dist = o => o.reduce((a, s, i) => a + kmRua(i ? o[i - 1].p : pos0, s.p), 0);
   const sim = o => simular(o, ini, fim, base, t0, pos0);
   // vizinho mais próximo a partir da saída
   const vizinho = lista => { const o = []; let resto = lista.slice(), pos = pos0;
-    while (resto.length) { let b = resto[0]; resto.forEach(s => { if (km(pos, s.p) < km(pos, b.p)) b = s; }); o.push(b); pos = b.p; resto = resto.filter(s => s !== b); } return o; };
+    while (resto.length) { let b = resto[0]; resto.forEach(s => { if (kmRua(pos, s.p) < kmRua(pos, b.p)) b = s; }); o.push(b); pos = b.p; resto = resto.filter(s => s !== b); } return o; };
   // 2-opt: desfaz cruzamentos enquanto encurtar o caminho (e não quebrar janela de quem tem horário)
   const melhorar = o => { let melhorou = true, d = dist(o), ok = !!sim(o);
     while (melhorou && o.length > 2) { melhorou = false;
@@ -1242,9 +1257,10 @@ async function telaRota() {
   try {
     await recarregar();
     const [raw, perfis, salvo, vis] = await Promise.all([db.dadosRota(), RT.perfis.length ? RT.perfis : db.perfisTodos().catch(() => [S.eu]), db.obterRota(RT.data).catch(e => { RT.semTabela = true; return null; }), db.visitasDoDia(RT.data)]);
-    RT.raw = raw; RT.perfis = perfis; RT.visitas = vis; RT.prev = prever(raw);
+    RT.raw = raw; RT.perfis = perfis; RT.visitas = vis; RT.prev = prever(raw, RT.data);
     RT.salvo = salvo || { data: RT.data, motorista: S.eu.id, tipo: 'reposicao', inicio: '08:00', fim: '18:00', incluir: [], tirar: [], paradas: [] };
   } catch (e) { return erro(e); }
+  RT.salvo.data = RT.data;
   desenharRota();
 }
 function baseRota() { const c = cfgRota(); return c.lat ? { lat: c.lat, lng: c.lng, end: c.endereco } : { lat: -29.9177, lng: -51.1836, end: null }; }
@@ -1269,9 +1285,13 @@ function calcularRota() {
   const st = Object.fromEntries((R.paradas || []).map(s => [s.id, s.status]));
   const feito = s => feitos.has(s.id) || st[s.id] === 'feito' || st[s.id] === 'ausente';
   const ordemSalva = (R.paradas || []).map(s => [...reps, ...prosps].find(x => x.id === s.id) || (() => { const p = S.pdvs.find(q => q.id === s.id); return p && p.lat ? { id: p.id, tipo: s.tipo, p, urg: RT.prev[p.id]?.urg || 'espera', jan: jan(p), serv: s.tipo === 'prosp' ? c.tempo_prosp : c.tempo_rep } : null; })()).filter(Boolean);
-  const fixos = ordemSalva.filter(feito);
+  const doTipo = s => R.tipo === 'misto' || (R.tipo === 'reposicao' ? s.tipo === 'rep' : s.tipo === 'prosp');
+  const fixos = ordemSalva.filter(s => feito(s) && doTipo(s));
+  // quem já foi atendido hoje (mesmo fora da rota salva) entra como feito
+  RT.visitas.filter(v => v.tipo === 'reposicao' || v.tipo === 'prospeccao').forEach(v => { if (fixos.some(f => f.id === v.pdv_id)) return; const p = S.pdvs.find(q => q.id === v.pdv_id); if (!p || !p.lat) return;
+    const s = { id: p.id, tipo: v.tipo === 'reposicao' ? 'rep' : 'prosp', p, urg: RT.prev[p.id]?.urg || 'espera', jan: jan(p), serv: v.tipo === 'reposicao' ? c.tempo_rep : c.tempo_prosp }; if (doTipo(s)) fixos.push(s); });
   // paradas que já estavam na rota salva continuam nela, mesmo que tenham deixado de ser urgentes
-  ordemSalva.filter(s => !feito(s) && !tira.has(s.id)).forEach(s => { if (s.tipo === 'rep' && !reps.some(x => x.id === s.id)) reps.push(s); if (s.tipo === 'prosp' && !prosps.some(x => x.id === s.id)) prosps.push(s); });
+  ordemSalva.filter(s => !feito(s) && !tira.has(s.id) && doTipo(s)).forEach(s => { if (s.tipo === 'rep' && !reps.some(x => x.id === s.id)) reps.push(s); if (s.tipo === 'prosp' && !prosps.some(x => x.id === s.id)) prosps.push(s); });
   const ehHoje = R.data === hoje(), agoraMin = new Date().getHours() * 60 + new Date().getMinutes();
   const t0 = fixos.length && ehHoje && agoraMin > ini && agoraMin < fim ? agoraMin : ini, pos0 = fixos.length ? fixos[fixos.length - 1].p : base;
   const pend = x => !fixos.some(f => f.id === x.id);
@@ -1291,20 +1311,25 @@ function linksMaps(base, ordem) {
 }
 async function salvarRotaDia(patch, msg) {
   Object.assign(RT.salvo, patch);
-  try { const { data, motorista, tipo, inicio, fim, incluir, tirar, paradas } = RT.salvo; RT.salvo = await db.salvarRota({ data, motorista, tipo, inicio, fim, incluir, tirar, paradas }); RT.semTabela = false; if (msg) toast(msg); }
+  try { const { data, motorista, tipo, inicio, fim, incluir, tirar, paradas } = RT.salvo; RT.salvo = await db.salvarRota({ data, motorista, tipo, inicio, fim, incluir, tirar, paradas }); RT.salvo.data = data; RT.semTabela = false; if (msg) toast(msg); }
   catch (e) { RT.semTabela = true; toast('Não salvou: rode o 019_dia_de_rota.sql no Supabase'); }
 }
-function desenharRota() {
-  const R = RT.salvo, k = calcularRota(), c = cfgRota();
+async function desenharRota() {
+  let k = calcularRota();
+  if (await garantirMatriz([k.base, ...k.fixos.map(s => s.p), ...k.ordem.map(s => s.p), ...k.foraRep.map(s => s.p)])) k = calcularRota();
+  pintarRota(k);
+}
+function pintarRota(k) {
+  const R = RT.salvo, c = cfgRota();
   const todas = [...k.fixos, ...k.ordem], hs = k.sim ? k.sim.hs : [];
   const linha = (s, i, h) => { const p = s.p, pv = RT.prev[p.id] || {}, est = k.feitos.has(p.id) || k.st[p.id] === 'feito' ? 'feito' : k.st[p.id] === 'ausente' ? 'ausente' : null;
     const u = URG[pv.urg] || URG.espera, rep = s.tipo === 'rep';
-    return `<div class="stop rstop ${est ? 'done' : ''}" data-id="${p.id}"><div class="n" style="background:${rep ? '#2a78d6' : '#7B4FC0'}">${i + 1}</div>
+    return `<div class="stop rstop ${est ? 'done' : ''}" data-id="${p.id}"><div class="n" style="background:${corPin(s, est)}">${est === 'feito' ? '✓' : est === 'ausente' ? '🚪' : i + 1}</div>
      <div class="info"><div class="rhora">${est === 'feito' ? '✅ feito' : est === 'ausente' ? '🚪 não estava' : h ? `${hhmm(h.comeca)}${h.espera > 4 ? ` <small>(chega ${hhmm(h.chega)}, espera ${Math.round(h.espera)} min)</small>` : ''}` : ''}</div>
-      <b>${esc(p.nome)}</b> ${rep ? `<span class="badge" style="background:${u.c}22">${u.i} ${pv.dias <= 0 ? 'já acabou' : `~${Math.round(pv.dias)} dia${Math.round(pv.dias) === 1 ? '' : 's'}`}</span>` : '<span class="badge" style="background:#7B4FC022">🟣 prospecção</span>'}
+      <b>${esc(p.nome)}</b> ${est ? '' : rep ? `<span class="badge" style="background:${u.c}22">${u.i} ${pv.dias <= 0 ? 'possível zerado' : `~${Math.round(pv.dias)} dia${Math.round(pv.dias) === 1 ? '' : 's'}`}</span>` : '<span class="badge" style="background:#7B4FC022">🟣 prospecção</span>'}
       ${p.precisa_dono !== false && (p.janela_dias?.length || p.janela_periodo) ? ' <span title="Precisa do dono">🔒</span>' : ''}${ehCanoas(p) ? ' <span class="badge">Canoas</span>' : ''}
-      <br><small style="color:var(--mute)">${esc(p.bairro || '')}${janelaTxt(p) ? ' · 🕘 ' + esc(janelaTxt(p)) : ' · sem janela cadastrada'}${rep && pv.deixado != null ? ` · deixado ${pv.deixado} un. em ${dstr(pv.deixadoEm)}${pv.estoque != null ? `, hoje ~${Math.round(pv.estoque)}` : ''}` : ''}${rep && pv.un ? ` · repor ~${pv.un} un.` : ''}${rep ? ` · previsão por ${pv.fonte}` : ''}</small></div>
-     ${est ? '' : `<div class="racoes">${rep ? `<button class="btn pri" data-rep="${p.id}">Repor</button>` : `<button class="btn pri" data-pv="${p.id}">Visitei</button>`}<button class="mini" data-aus="${p.id}">não estava</button><button class="mini" data-tira="${p.id}">tirar</button></div>`}</div>`; };
+      <br><small style="color:var(--mute)">${esc(p.bairro || '')}${janelaTxt(p) ? ' · 🕘 ' + esc(janelaTxt(p)) : ' · sem janela cadastrada'}${rep && pv.deixado != null ? ` · deixado ${pv.deixado} un. em ${dstr(pv.deixadoEm)}${pv.estoque != null ? ` · estimado ~${Math.round(pv.estoque)}` : ''}` : ''}${rep && pv.un ? ` · repor ~${pv.un} un.` : ''}${rep ? ` · previsão por ${pv.fonte}` : ''}</small></div>
+     ${est === 'feito' && rep && RT.visitas.some(v => v.pdv_id === p.id && v.tipo === 'reposicao') ? `<div class="racoes"><button class="mini reabrir" data-reab="${p.id}">reabrir reposição</button></div>` : ''}${est ? '' : `<div class="racoes">${rep ? `<button class="btn pri" data-rep="${p.id}">Repor</button>` : `<button class="btn pri" data-pv="${p.id}">Visitei</button>`}<button class="mini" data-aus="${p.id}">não estava</button><button class="mini" data-tira="${p.id}">tirar</button></div>`}</div>`; };
   const nRep = todas.filter(s => s.tipo === 'rep'), nPr = todas.filter(s => s.tipo === 'prosp');
   const feitosN = l => l.filter(s => k.feitos.has(s.id) || k.st[s.id] === 'feito').length;
   const cg = carga(todas.filter(s => !k.feitos.has(s.id)));
@@ -1319,7 +1344,7 @@ function desenharRota() {
   <div class="toolbar"><span class="rbase">🏠 Saída e volta: <b>${base.end ? esc(base.end) : '⚠️ endereço do Moisés não cadastrado (usando o centro de Canoas)'}</b> <button class="mini" id="rBase">alterar</button></span>
    ${RT.semTabela ? '<span class="badge" style="background:#F3D6CF">Rode o 019_dia_de_rota.sql para salvar a rota</span>' : ''}</div>
   <div class="tiles rtiles"><div class="tile hi"><small>Paradas</small><b>${todas.length}</b><small>${nRep.length} reposição · ${nPr.length} prospecção</small></div>
-   <div class="tile"><small>Volta para casa</small><b>${k.sim ? hhmm(k.sim.volta) : '—'}</b><small>${k.sim ? `~${Math.round(k.sim.km * 1.35)} km rodados` : ''}</small></div>
+   <div class="tile"><small>Volta para casa</small><b>${k.sim ? hhmm(k.sim.volta) : '—'}</b><small id="rKm">${k.sim ? `~${Math.round(k.sim.km)} km rodados` : ''}</small></div>
    <div class="tile"><small>🔵 Reposição</small><b>${feitosN(nRep)}/${nRep.length}</b><small>feitas</small></div>
    <div class="tile"><small>🟣 Prospecção</small><b>${feitosN(nPr)}/${nPr.length}</b><small>visitadas</small></div></div>
   <div class="rgrid"><div>
@@ -1333,7 +1358,7 @@ function desenharRota() {
     ${cg.length ? `<table class="rcarga"><tr><th>Produto</th><th>Previsto</th><th>Levar</th></tr>${cg.map(x => `<tr><td>${esc(x.p.linha.split(' ')[0])} · ${esc(x.p.sabor)}</td><td>${x.q}</td><td><b>${x.levar}</b></td></tr>`).join('')}<tr><td><b>Total</b></td><td>${cg.reduce((a, x) => a + x.q, 0)}</td><td><b>${cg.reduce((a, x) => a + x.levar, 0)}</b></td></tr></table>` : '<span style="color:var(--mute)">Sem reposições na rota.</span>'}</div></div></div>
   ${foraLista.length ? `<div class="panel rfora"><h3 style="margin-top:0">⚠️ Urgentes que ficaram fora</h3>${foraLista.map(f => `<div class="rfila"><span>${URG[RT.prev[f.p.id]?.urg]?.i || ''} <b>${esc(f.p.nome)}</b> <small>${f.m} · próximo dia na janela: ${proximoDiaJanela(f.p, R.data)}</small></span>${f.m === 'não cabe no horário' ? `<button class="mini" data-tira="${f.p.id}">tirar de hoje</button>` : `<button class="mini" data-inc="${f.p.id}">pôr mesmo assim</button>`}</div>`).join('')}</div>` : ''}
   <div class="panel" style="margin-top:12px"><h3 style="margin-top:0">Fila de urgência <small style="font-weight:400;color:var(--mute)">· clientes que não estão na rota de hoje</small></h3>
-   ${['ruptura', 'ideal', 'espera'].map(u => { const l = naFila.filter(x => x.urg === u); return l.length ? `<div class="lingrp">${URG[u].i} ${URG[u].n} · ${l.length}</div>${l.map(x => `<div class="rfila"><span><b>${esc(x.p.nome)}</b> <small>${x.dias <= 0 ? 'já deve ter acabado' : `~${Math.round(x.dias)} dias`} · ${esc(x.p.bairro || regNome(x.p.regiao))}${ehCanoas(x.p) ? ' · Canoas (Moisés)' : ''}${janelaTxt(x.p) ? ' · 🕘 ' + esc(janelaTxt(x.p)) : ''}</small></span><button class="mini" data-inc="${x.p.id}">+ pôr na rota</button></div>`).join('')}` : ''; }).join('') || '<span style="color:var(--mute)">Todos os clientes já estão na rota.</span>'}
+   ${['ruptura', 'ideal', 'espera'].map(u => { const l = naFila.filter(x => x.urg === u); return l.length ? `<div class="lingrp">${URG[u].i} ${URG[u].n} · ${l.length}</div>${l.map(x => `<div class="rfila"><span><b>${esc(x.p.nome)}</b> <small>${x.dias <= 0 ? 'possível zerado' : `~${Math.round(x.dias)} dias`} · ${esc(x.p.bairro || regNome(x.p.regiao))}${ehCanoas(x.p) ? ' · Canoas (Moisés)' : ''}${janelaTxt(x.p) ? ' · 🕘 ' + esc(janelaTxt(x.p)) : ''}</small></span><button class="mini" data-inc="${x.p.id}">+ pôr na rota</button></div>`).join('')}` : ''; }).join('') || '<span style="color:var(--mute)">Todos os clientes já estão na rota.</span>'}
    ${R.tipo !== 'reposicao' ? `<div class="lingrp">🟣 Prospecção ${R.tipo === 'misto' ? '· até 500 m da rota entram sozinhos; busque outros' : ''}</div><div class="mbusca" style="max-width:420px"><input id="rProsp" autocomplete="off" placeholder="🔍 Pôr um prospect na rota…"><div id="rProspSug" class="sugs"></div></div>${k.foraP.length ? `<small style="color:var(--mute)">${k.foraP.length} prospect(s) perto da rota não couberam no horário.</small>` : ''}` : ''}
   </div></div></section>`;
   ligarRota(k, todas);
@@ -1356,6 +1381,15 @@ function ligarRota(k, todas) {
   document.querySelectorAll('[data-pv]').forEach(b => b.onclick = async () => { const p = S.pdvs.find(x => x.id === b.dataset.pv);
     try { await db.registrarVisita(p.id, 'prospeccao', null, S.eu.id); if (p.etapa === 'mapeado') await db.atualizarPdv(p.id, { etapa: 'visitado' }); } catch (e) { return erro(e); }
     await salvarRotaDia({ paradas: (R.paradas?.length ? R.paradas : fixar()).map(x => x.id === p.id ? { ...x, status: 'feito' } : x) }, 'Visita registrada'); telaRota(); });
+  document.querySelectorAll('[data-reab]').forEach(b => b.onclick = () => { const p = S.pdvs.find(x => x.id === b.dataset.reab), v = RT.visitas.filter(x => x.pdv_id === p.id && x.tipo === 'reposicao').sort((a, b) => new Date(b.em) - new Date(a.em))[0];
+    modal(`<h3>Reabrir a reposição de ${esc(p.nome)}?</h3><p style="color:var(--soft)">Apaga a reposição lançada (pedido e contagem) e <b>exclui o pedido de venda no Bling</b>. Depois abre a contagem com os mesmos números para você corrigir e fechar de novo, o que cria um pedido novo no Bling.</p><div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="reOk">Reabrir</button></div>`);
+    $('#reOk').onclick = async () => { $('#reOk').disabled = true; $('#reOk').textContent = 'Reabrindo…';
+      try { const d = await db.dadosReabrir(v.id);
+        if (d.pedido?.bling_id) await db.bling('excluir_pedido', { pedido_id: d.pedido.id });
+        if (d.pedido) await db.excluirPedido(d.pedido.id, v.id); else await db.excluirPedido('00000000-0000-0000-0000-000000000000', v.id);
+        S.reabrir = { pdvId: p.id, contagens: d.contagens, condicao: d.pedido?.condicao, vencimento: d.pedido?.vencimento };
+        fecharModal(); toast(d.pedido?.bling_id ? `Pedido nº ${d.pedido.bling_pedido_id || d.pedido.bling_id} excluído do Bling` : 'Reposição reaberta'); await recarregar(); S.contando = p.id; irPara('reposicao');
+      } catch (e) { fecharModal(); modal(`<h3>Não deu para reabrir</h3><p style="font-size:13px;color:#7A2414">${esc(e.message)}</p><p style="color:var(--soft)">Nada foi apagado no app. Se o Bling recusou (por exemplo, pedido já faturado), cancele por lá primeiro.</p><div class="row" style="justify-content:flex-end"><button class="btn pri" onclick="fecharModal()">Ok</button></div>`); } }; });
   $('#rBase').onclick = () => { const b = baseRota();
     modal(`<h3>Ponto de saída e volta</h3><p style="color:var(--soft);margin-top:0">Casa do Moisés, onde fica o estoque. A rota sai daqui e volta para cá.</p><label>Endereço</label><input id="rbEnd" value="${esc(b.end || '')}" placeholder="Rua, número, bairro, Canoas" style="width:100%">
      <div class="row" style="margin-top:8px"><div style="flex:1"><label>Tempo em cada reposição (min)</label><input id="rbTr" type="number" value="${cfgRota().tempo_rep}"></div><div style="flex:1"><label>Tempo em cada prospecção (min)</label><input id="rbTp" type="number" value="${cfgRota().tempo_prosp}"></div></div>
@@ -1371,18 +1405,31 @@ function ligarRota(k, todas) {
     const l = S.pdvs.filter(p => PROSP_ETAPAS.includes(p.etapa) && p.lat && norm(p.nome + ' ' + (p.bairro || '')).includes(t)).slice(0, 8);
     box.innerHTML = l.map(p => `<button data-inc="${p.id}">${esc(p.nome)} <small>${esc(p.bairro || '')}</small></button>`).join('') || '<div style="padding:8px;color:var(--mute)">Nada encontrado</div>';
     box.querySelectorAll('[data-inc]').forEach(b => b.onclick = async () => { await salvarRotaDia({ incluir: [...new Set([...R.incluir, b.dataset.inc])], tirar: R.tirar.filter(x => x !== b.dataset.inc) }); desenharRota(); }); };
-  // mapa
+  // mapa: mesma cor e símbolo da lista (urgência, prospecção, feito, não estava) e o caminho pelas ruas
   if (RT.mapa) { RT.mapa.remove(); RT.mapa = null; }
   const el = $('#rmap'); if (!el || !window.L) return;
   const m = RT.mapa = L.map(el, { zoomControl: true }); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(m);
   const b = k.base, pts = [[b.lat, b.lng]];
-  L.marker([b.lat, b.lng], { icon: L.divIcon({ className: '', html: '<div class="rpin casa">🏠</div>', iconSize: [28, 28], iconAnchor: [14, 14] }) }).addTo(m).bindTooltip('Saída e volta');
-  todas.forEach((s, i) => { pts.push([s.p.lat, s.p.lng]); const ok = k.feitos.has(s.id) || k.st[s.id];
-    L.marker([s.p.lat, s.p.lng], { icon: L.divIcon({ className: '', html: `<div class="rpin" style="background:${s.tipo === 'rep' ? '#2a78d6' : '#7B4FC0'};opacity:${ok ? .45 : 1}">${i + 1}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] }) }).addTo(m).bindTooltip(esc(s.p.nome)); });
+  L.marker([b.lat, b.lng], { icon: L.divIcon({ className: '', html: '<div class="rpin casa">🏠</div>', iconSize: [28, 28], iconAnchor: [14, 14] }), zIndexOffset: 1000 }).addTo(m).bindTooltip('Saída e volta');
+  todas.forEach((s, i) => { pts.push([s.p.lat, s.p.lng]); const st = estParada(k, s.id), pv = RT.prev[s.id] || {};
+    const sim = st === 'feito' ? '✓' : st === 'ausente' ? '🚪' : i + 1, extra = s.p.precisa_dono !== false && (s.p.janela_dias?.length || s.p.janela_periodo) ? '<i>🔒</i>' : '';
+    L.marker([s.p.lat, s.p.lng], { icon: L.divIcon({ className: '', html: `<div class="rpin ${st ? 'ok' : ''}" style="background:${corPin(s, st)}">${sim}${extra}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] }) }).addTo(m)
+      .bindTooltip(`<b>${i + 1}. ${esc(s.p.nome)}</b><br>${s.tipo === 'rep' ? `${URG[pv.urg]?.i || ''} ${pv.dias <= 0 ? 'possível zerado' : `~${Math.round(pv.dias)} dias`}` : '🟣 prospecção'}${st ? ` · ${st === 'feito' ? '✅ feito' : '🚪 não estava'}` : ''}`); });
   pts.push([b.lat, b.lng]);
-  if (todas.length) L.polyline(pts, { color: '#2E1A12', weight: 2, opacity: .6, dashArray: '6 6' }).addTo(m);
+  const reta = todas.length ? L.polyline(pts, { color: '#2E1A12', weight: 2, opacity: .5, dashArray: '6 6' }).addTo(m) : null;
+  const leg = L.control({ position: 'bottomleft' }); leg.onAdd = () => { const d = L.DomUtil.create('div', 'rleg'); d.innerHTML = '<span><i style="background:#d03b3b"></i>Possível zerado</span><span><i style="background:#fab219"></i>Janela ideal</span><span><i style="background:#9A8F86"></i>Pode esperar</span><span><i style="background:#7B4FC0"></i>Prospecção</span><span><i style="background:#0ca30c"></i>✓ Feito</span><span>🚪 Não estava</span><span>🔒 Precisa do dono</span>'; return d; }; leg.addTo(m);
   setTimeout(() => { m.invalidateSize(); m.fitBounds(L.latLngBounds(pts).pad(0.1)); }, 50);
+  if (todas.length) caminhoRuas(pts).then(g => { if (!g || RT.mapa !== m) return; reta.remove(); L.polyline(g.coords, { color: '#2E1A12', weight: 4, opacity: .7 }).addTo(m); const e = $('#rKm'); if (e) e.textContent = `${Math.round(g.km)} km pelas ruas · ${Math.round(g.min / 60 * 10) / 10} h dirigindo`; });
 }
+const estParada = (k, id) => k.feitos.has(id) || k.st[id] === 'feito' ? 'feito' : k.st[id] === 'ausente' ? 'ausente' : null;
+const corPin = (s, st) => st === 'feito' ? '#0ca30c' : st === 'ausente' ? '#9A8F86' : s.tipo === 'prosp' ? '#7B4FC0' : (URG[RT.prev[s.id]?.urg] || URG.espera).c;
+const CAM = {};
+async function caminhoRuas(pts) {
+  const chave = pts.map(p => p.map(x => x.toFixed(5)).join(',')).join(';'); if (CAM[chave]) return CAM[chave];
+  try { const r = await (await fetch(`https://router.project-osrm.org/route/v1/driving/${pts.map(([la, ln]) => `${ln.toFixed(5)},${la.toFixed(5)}`).join(';')}?overview=full&geometries=geojson`)).json();
+    if (r.code !== 'Ok') return null; const rt = r.routes[0];
+    return CAM[chave] = { coords: rt.geometry.coordinates.map(([ln, la]) => [la, ln]), km: rt.distance / 1000, min: rt.duration / 60 };
+  } catch { return null; } }
 
 /* =================== reposição (contagem) =================== */
 function stepper(cls, v, peq, attrs = '') { return `<div class="stp ${peq ? 'sm' : ''}"><button type="button" data-d="-1" aria-label="menos">−</button><input type="number" min="0" inputmode="numeric" class="${cls}" value="${v}" ${attrs}><button type="button" data-d="1" aria-label="mais">+</button></div>`; }
@@ -1394,28 +1441,37 @@ function ligarSteppers(raiz) {
 }
 async function telaReposicao() {
   const p = S.pdvs.find(x => x.id === S.contando);
-  if (!p) { $('#main').innerHTML = '<section class="view on"><div class="empty">Escolha um PDV na <b>Rota de hoje</b> para começar.</div></section>'; return; }
+  if (!p) { $('#main').innerHTML = '<section class="view on"><div class="empty">Escolha um cliente no <b>Dia de rota</b> para começar.</div></section>'; return; }
   $('#main').innerHTML = '<section class="view on"><div class="loading">Carregando a última contagem…</div></section>';
-  let ant, dx; try { dx = await db.ultimoDeixado(p.id); ant = dx.por; } catch (e) { return erro(e); }
+  let ant, dx, precos = {}; try { [dx, precos] = await Promise.all([db.ultimoDeixado(p.id), db.precosCliente(p.id).catch(() => ({}))]); ant = dx.por; } catch (e) { return erro(e); }
+  // reabrindo uma reposição: volta com os números que foram lançados
+  const re = S.reabrir && S.reabrir.pdvId === p.id ? S.reabrir : null, reC = re ? Object.fromEntries(re.contagens.map(c => [c.produto_id, c])) : {};
+  if (re) ant = Object.fromEntries(re.contagens.map(c => [c.produto_id, c.deixado_anterior]));
   const ex = expo(p.expositor_id), cons = p.condicao === 'Consignado';
-  let h = `<section class="view on"><div class="count"><div class="toolbar"><h2 style="font-family:Fraunces,Georgia,serif;margin:0">${esc(p.nome)}</h2><span class="badge">Expositor ${esc(ex.nome)} · ${ex.capacidade} un.</span></div>
-  <p style="color:var(--soft);margin-top:0">Conte o que tem de cada sabor no expositor, inclusive o que vai ser trocado. O sistema sugere quanto repor e calcula o sell-out.<br><small>Deixado: ${dx.fonte === 'contagem' ? `contagem de ${dstr(dx.em)}` : dx.fonte === 'pedido' ? `o que foi entregue no último pedido (${dstr(dx.em)}), pelo histórico` : 'sem histórico deste cliente'}</small></p>
+  const preco = pr => Number(precos[pr.id] ?? pr.preco);
+  const formaIni = re?.condicao && FORMAS.includes(re.condicao) ? re.condicao : FORMAS.includes(p.condicao) ? p.condicao : 'Boleto';
+  let h = `<section class="view on"><div class="count"><div class="toolbar"><h2 style="font-family:Fraunces,Georgia,serif;margin:0">${esc(p.nome)}</h2><span class="badge">Expositor ${esc(ex.nome)} · ${ex.capacidade} un.</span>${re ? '<span class="badge" style="background:#FBEBD3">Reabrindo a reposição</span>' : ''}</div>
+  <p style="color:var(--soft);margin-top:0">Conte o que tem de cada sabor no expositor, inclusive o que vai ser trocado. O sistema sugere quanto repor e calcula o sell-out.<br><small>Deixado: ${re ? 'o mesmo da reposição reaberta' : dx.fonte === 'contagem' ? `contagem de ${dstr(dx.em)}` : dx.fonte === 'pedido' ? `o que foi entregue no último pedido (${dstr(dx.em)}), pelo histórico` : 'sem histórico deste cliente'}${Object.keys(precos).length ? ' · preços combinados com o cliente aplicados' : ''}</small></p>
   <div id="ct" class="contagem">`;
   let l = '';
   S.base.produtos.forEach(pr => { if (pr.linha !== l) { l = pr.linha; h += `<div class="lingrp">${esc(l)}</div>`; }
-    const a = ant[pr.id] ?? 0;
-    h += `<div class="lin" data-p="${pr.id}" data-ant="${a}" data-alvo="${alvo(ex.id, pr.id)}" data-pre="${pr.preco}">
-     <div class="sab"><b>${esc(pr.sabor)}</b><small>deixado: ${a}</small></div>
-     <div class="cel"><small>Encontrado</small>${stepper('enc', a)}</div>
-     <div class="cel"><small>Troca</small>${stepper('trc', 0, true)}</div>
-     <div class="cel"><small>Repor</small>${stepper('rep', 0)}</div>
+    const a = ant[pr.id] ?? 0, rc = reC[pr.id];
+    h += `<div class="lin" data-p="${pr.id}" data-ant="${a}" data-alvo="${alvo(ex.id, pr.id)}" data-pre="${preco(pr)}">
+     <div class="sab"><b>${esc(pr.sabor)}</b><small>deixado: ${a}${precos[pr.id] != null ? ` · ${brl(preco(pr))}` : ''}</small></div>
+     <div class="cel"><small>Encontrado</small>${stepper('enc', rc ? rc.encontrado : a)}</div>
+     <div class="cel"><small>Troca</small>${stepper('trc', rc ? rc.troca : 0, true)}</div>
+     <div class="cel"><small>Repor</small>${stepper('rep', rc ? rc.reposto : 0, false, rc ? 'data-mexeu="1"' : '')}</div>
      <div class="res"><small>sell-out</small><b class="so">0</b><small class="val">—</small></div></div>`; });
-  h += `</div><div class="panel totpanel"><div class="row" style="justify-content:space-between;flex-wrap:wrap"><div><b id="tUn">0 un.</b> a repor · sell-out <b id="tSo">0 un.</b> · trocas <b id="tTr">0</b></div><div style="font-family:Fraunces,Georgia,serif;font-size:24px" id="tVal">R$ 0,00</div></div>
+  h += `</div><div class="panel totpanel"><div class="kits"><b>Atalhos do pedido</b> <small style="color:var(--mute)">cada toque soma um kit em "Repor"</small><div class="row" style="flex-wrap:wrap;gap:6px;margin-top:6px">${KITS.map((k, i) => `<button class="btn" type="button" data-kit="${i}">+ ${k.n} <b class="kq" data-kq="${i}"></b></button>`).join('')}<button class="btn" type="button" id="kZerar">Zerar repor</button></div></div>
+  <div class="row" style="justify-content:space-between;flex-wrap:wrap;margin-top:12px"><div><b id="tUn">0 un.</b> a repor · sell-out <b id="tSo">0 un.</b> · trocas <b id="tTr">0</b></div><div style="font-family:Fraunces,Georgia,serif;font-size:24px" id="tVal">R$ 0,00</div></div>
   ${cons ? `<div class="esteira" style="margin-top:12px"><b>Cliente em consignado.</b><p>Cobra só o que foi vendido desde a última visita: <b id="tCons">R$ 0,00</b>.</p></div>` : ''}
-  <h3 style="margin:14px 0 6px">Pagamento <small style="font-weight:400;color:var(--mute)">· combinado: ${esc(p.condicao || '—')}</small></h3><div class="pay">${CONDICOES.slice(0, 5).map(c => `<label><input type="radio" name="pg" value="${c}" ${(p.condicao === c || (!CONDICOES.slice(0, 5).includes(p.condicao) && c === 'À vista · dinheiro')) ? 'checked' : ''}> ${c}</label>`).join('')}</div>
-  <div class="row"><button class="btn" id="bVoltar">Voltar</button><button class="btn pri" id="fechar">Fechar reposição</button></div></div></div></section>`;
+  <h3 style="margin:14px 0 6px">Pagamento</h3><div class="row" style="flex-wrap:wrap;gap:14px;align-items:flex-end"><div class="pay" style="margin:0">${FORMAS.map(c => `<label><input type="radio" name="pg" value="${c}" ${c === formaIni ? 'checked' : ''}> ${c}</label>`).join('')}</div>
+   <div><label class="lb">Vencimento</label><input id="rVenc" type="date" value="${re?.vencimento || isoDe(new Date(Date.now() + (formaIni === 'Dinheiro' ? 0 : 7) * DIA))}"></div></div>
+  <label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="rBling" checked> Criar o pedido de venda no Bling</label>
+  <div class="row" style="margin-top:12px"><button class="btn" id="bVoltar">Voltar</button><button class="btn pri" id="fechar">Fechar reposição</button></div></div></div></section>`;
   $('#main').innerHTML = h;
   const linhas = () => [...document.querySelectorAll('#ct .lin[data-p]')];
+  const kitsUsados = {};
   const calc = () => { let un = 0, so = 0, tr = 0, val = 0, vc = 0;
     linhas().forEach(r => { const a = +r.dataset.ant, enc = r.querySelector('.enc').value, t = +r.querySelector('.trc').value || 0, pre = +r.dataset.pre;
       if (enc !== '' && !r.querySelector('.rep').dataset.mexeu) r.querySelector('.rep').value = Math.max(0, +r.dataset.alvo - (+enc - t));
@@ -1427,23 +1483,32 @@ async function telaReposicao() {
     $('#tUn').textContent = un + ' un.'; $('#tSo').textContent = so + ' un.'; $('#tTr').textContent = tr; $('#tVal').textContent = brl(val); return { un, so, tr, val }; };
   $('#ct').addEventListener('input', e => { if (e.target.classList.contains('rep')) e.target.dataset.mexeu = 1; calc(); });
   ligarSteppers($('#ct')); calc();
-  $('#bVoltar').onclick = () => irPara('rota');
+  document.querySelectorAll('[data-kit]').forEach(b => b.onclick = () => { const i = +b.dataset.kit, k = KITS[i];
+    // primeiro toque num kit troca a sugestão daquela linha pelo kit; os próximos somam
+    Object.entries(k.q).forEach(([cod, q]) => { const pr = S.base.produtos.find(x => x.bling_codigo === cod), r = pr && linhas().find(x => +x.dataset.p === pr.id); if (!r) return;
+      const inp = r.querySelector('.rep'); inp.value = (kitsUsados[i] ? +inp.value || 0 : 0) + q; inp.dataset.mexeu = 1; });
+    kitsUsados[i] = (kitsUsados[i] || 0) + 1; document.querySelector(`[data-kq="${i}"]`).textContent = '×' + kitsUsados[i]; calc(); });
+  $('#kZerar').onclick = () => { linhas().forEach(r => { const i = r.querySelector('.rep'); i.value = 0; i.dataset.mexeu = 1; }); Object.keys(kitsUsados).forEach(k => { delete kitsUsados[k]; document.querySelector(`[data-kq="${k}"]`).textContent = ''; }); calc(); };
+  document.querySelectorAll('input[name=pg]').forEach(x => x.onchange = () => { $('#rVenc').value = isoDe(new Date(Date.now() + (x.value === 'Dinheiro' ? 0 : 7) * DIA)); });
+  $('#bVoltar').onclick = () => { S.reabrir = null; irPara('rota'); };
   $('#fechar').onclick = async () => {
-    const t = calc(), pg = document.querySelector('input[name=pg]:checked').value;
+    const t = calc(), pg = document.querySelector('input[name=pg]:checked').value, venc = $('#rVenc').value || null, mandar = $('#rBling').checked;
     const contagens = linhas().map(r => ({ produto_id: +r.dataset.p, deixado_anterior: +r.dataset.ant, encontrado: +r.querySelector('.enc').value, troca: +r.querySelector('.trc').value || 0, reposto: +r.querySelector('.rep').value || 0 }));
     const itens = cons ? linhas().map(r => ({ produto_id: +r.dataset.p, quantidade: Math.max(0, +r.dataset.ant - +r.querySelector('.enc').value), preco_unit: +r.dataset.pre, bonificado: 0 }))
                        : contagens.map(c => ({ produto_id: c.produto_id, quantidade: c.reposto, preco_unit: +linhas().find(r => +r.dataset.p === c.produto_id).dataset.pre, bonificado: 0 }));
     $('#fechar').disabled = true;
     try {
-      await db.registrarReposicao({ pdvId: p.id, usuarioId: S.eu.id, contagens, itens,
-        pedido: { tipo: cons ? 'reposicao_consignado' : 'reposicao', condicao: pg, unidades: cons ? t.so : t.un, valor: t.val, pago_na_hora: pg.startsWith('À vista'), vencimento: prazoDias(pg) ? new Date(Date.now() + prazoDias(pg) * DIA).toISOString().slice(0, 10) : null } });
+      const reg = await db.registrarReposicao({ pdvId: p.id, usuarioId: S.eu.id, contagens, itens,
+        pedido: { tipo: cons ? 'reposicao_consignado' : 'reposicao', condicao: pg, unidades: cons ? t.so : t.un, valor: t.val, pago_na_hora: pg === 'Dinheiro', vencimento: venc } });
       let n = await db.carregarPdv(p.id), extra = '';
       const r = regraAval();
       if (n.etapa === 'avaliacao' && (n.aval_reposicoes || 0) >= r.reposicoes) {
         const novo = Number(n.aval_media) >= r.meta_minima_sellout ? 'ativo' : 'revisao';
         await db.atualizarPdv(p.id, { etapa: novo }); extra = novo === 'ativo' ? ' Avaliação concluída: virou cliente ativo.' : ' Avaliação abaixo da meta: foi para revisão comercial.';
       } else if (n.etapa === 'avaliacao') extra = ` Avaliação: ${n.aval_reposicoes} de ${r.reposicoes}.`;
-      await recarregar(); await avaliarRisco(); toast('Reposição registrada.' + extra); S.contando = null; irPara('rota');
+      if (p.condicao !== pg && !cons) await db.atualizarPdv(p.id, { condicao: pg }).catch(() => { });
+      S.reabrir = null; await recarregar(); await avaliarRisco(); toast('Reposição registrada.' + extra); S.contando = null; irPara('rota');
+      if (mandar && reg.pedido && (cons ? t.so : t.un) > 0) enviarAoBling(reg.pedido.id, p.nome);
     } catch (e) { erro(e); $('#fechar').disabled = false; }
   };
 }
@@ -1610,10 +1675,12 @@ async function telaPerfil() {
     <div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">Próximas ações</h3><button class="btn pri" id="pNovaTar" style="padding:5px 10px">+ Nova</button></div><div style="margin-top:8px">${listaTarefas(tars.filter(t => !t.concluida), 'Nenhuma ação marcada.')}</div>${tars.some(t => t.concluida) ? `<details style="margin-top:6px"><summary style="cursor:pointer;color:var(--mute);font-size:12px">Concluídas (${tars.filter(t => t.concluida).length})</summary>${listaTarefas(tars.filter(t => t.concluida), '')}</details>` : ''}</div>
     <div class="panel"><h3>Resumo</h3><div class="kv" style="margin:0"><div><small>${h.pedidos.length ? 'Cliente desde' : 'Criado em'}</small><b>${dataLonga(h.pedidos.length ? h.pedidos[0].criado_em : p.criado_em)}</b>${h.pedidos.length ? '<small>1º pedido no Bling</small>' : ''}</div><div><small>Visitas</small><b>${h.visitas.length}</b></div><div><small>Pedidos</small><b>${h.pedidos.length}</b></div><div><small>Total pedido</small><b>${brl(h.pedidos.reduce((a, o) => a + Number(o.valor), 0))}</b></div></div></div>
     ${fluxoPedidos(h.pedidos)}
+    <div id="pProd"></div>
     ${(() => { const pend = h.pedidos.filter(o => o.bling_status === 'pendente' || o.bling_status === 'erro'); return pend.length ? `<div class="panel alertas"><h3>Pedidos do app ainda não criados no Bling (${pend.length})</h3>${pend.map(o => `<div class="trow" style="cursor:default"><div style="flex:1"><b>${dataLonga(o.criado_em)} · ${brl(o.valor)}</b> <small style="color:var(--mute)">${esc(o.condicao)}</small>${o.bling_erro ? `<br><small style="color:#7A2414">${esc(o.bling_erro.slice(0, 220))}</small>` : ''}</div><button class="mini" data-envbling="${o.id}">enviar ao Bling</button></div>`).join('')}</div>` : ''; })()}
     <div class="panel"><button class="btn" id="pExcluir" style="width:100%;color:#7A2414">Excluir negócio</button><small style="color:var(--mute);display:block;margin-top:6px">Use para apagar cadastro duplicado, errado ou de teste. Apaga também os pedidos dele.</small></div>
    </div></div></div></section>`;
   $('#pVoltar').onclick = () => irPara(S.voltar || 'carteira');
+  if (h.pedidos.length) db.itensDoCliente(p.id).then(it => { const el = $('#pProd'); if (el) el.outerHTML = maisSaem(it, h.pedidos); }).catch(() => { });
   $('#pNovaTar').onclick = $('#pTarTopo').onclick = () => modalTarefa({ data: hojeISO(), pdv_id: p.id, contato_id: p.contato_id });
   document.querySelectorAll('[data-tid]').forEach(el => el.onclick = () => modalTarefa(tars.find(t => t.id === el.dataset.tid)));
   if ($('#pComprar')) $('#pComprar').onclick = () => { S.abPdv = p.id; S.vendaVolta = { aba: 'perfil', id: p.id }; irPara('abertura'); };
@@ -2152,6 +2219,21 @@ async function limparPedidook() {
 }
 const dataLonga = d => new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 // pequena análise do fluxo de pedidos de um cliente
+// produtos que mais saem num cliente: soma os itens de todos os pedidos (app e Bling)
+function maisSaem(it, peds) {
+  const porCod = {}; S.base.produtos.forEach(p => { if (p.bling_codigo) porCod[p.bling_codigo] = p; });
+  const prodId = Object.fromEntries(S.base.produtos.map(p => [p.id, p])), comItensApp = new Set(it.pitens.map(i => i.pedido_id)), t = {};
+  const soma = (pr, nome, q, v) => { const k = pr ? pr.id : nome; t[k] = t[k] || { n: pr ? pr.sabor : nome, l: pr ? pr.linha : '', cod: pr?.bling_codigo || '', q: 0, v: 0 }; t[k].q += q; t[k].v += v; };
+  it.pitens.forEach(i => soma(prodId[i.produto_id], 'Produto ' + i.produto_id, +i.quantidade, +i.quantidade * +i.preco_unit));
+  it.bitens.filter(i => !comItensApp.has(i.pedido_id)).forEach(i => soma(porCod[i.codigo], i.codigo, +i.quantidade, +i.quantidade * +i.valor - (+i.desconto || 0)));
+  const l = Object.values(t).sort((a, b) => b.q - a.q); if (!l.length) return '';
+  const tot = l.reduce((a, x) => a + x.q, 0), mx = l[0].q, nPed = new Set([...it.pitens.map(i => i.pedido_id), ...it.bitens.map(i => i.pedido_id)]).size || peds.length;
+  const cor = c => c.startsWith('C') ? '#eb6834' : c.startsWith('P') ? '#1baf7a' : '#2a78d6';
+  const linhas = {}; l.forEach(x => { const k = (x.l || 'Outros').split(' ')[0]; linhas[k] = (linhas[k] || 0) + x.q; });
+  return `<div class="panel"><h3>Produtos que mais saem</h3><div class="mslinhas">${Object.entries(linhas).sort((a, b) => b[1] - a[1]).map(([k, q]) => `<span><b>${Math.round(q / tot * 100)}%</b> ${esc(k)}</span>`).join('')}</div>
+   <div class="bars">${l.map(x => `<div class="bar" style="grid-template-columns:minmax(0,1.4fr) 1fr 64px"><span>${esc(x.n)} <small style="color:var(--mute)">· ${esc((x.l || '').split(' ')[0])}</small></span><div class="tr"><div class="fl" style="width:${x.q / mx * 100}%;background:${cor(x.cod)}"></div></div><b style="text-align:right">${fmt(x.q)} <small style="font-weight:400;color:var(--mute)">${Math.round(x.q / tot * 100)}%</small></b></div>`).join('')}</div>
+   <small style="color:var(--mute);display:block;margin-top:8px">${fmt(tot)} unidades em ${nPed} pedidos · média de ${dec(tot / Math.max(1, nPed))} un. por pedido</small></div>`;
+}
 function fluxoPedidos(peds, lateral) {
   if (!peds.length) return '';
   const ds = peds.map(o => new Date(o.criado_em)).sort((a, b) => a - b), vals = peds.map(o => Number(o.valor) || 0);

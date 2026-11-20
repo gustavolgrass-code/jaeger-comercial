@@ -183,3 +183,18 @@ export async function dadosRota() {
   ]);
   return { pedidos, pitens, bitens, contagens };
 }
+// reabrir uma reposição: a contagem e o pedido daquela visita
+export async function dadosReabrir(visitaId) {
+  const [contagens, peds] = await Promise.all([
+    sb.from('contagens').select('produto_id, deixado_anterior, encontrado, troca, reposto').eq('visita_id', visitaId).then(ok),
+    sb.from('pedidos').select('id, condicao, vencimento, bling_id, bling_pedido_id').eq('visita_id', visitaId).then(ok),
+  ]);
+  return { contagens, pedido: peds[0] || null };
+}
+// itens de todos os pedidos de um cliente (do app e do Bling), para ver o que mais sai
+export async function itensDoCliente(pdvId) {
+  const peds = ok(await sb.from('pedidos').select('id').eq('pdv_id', pdvId)); const ids = peds.map(o => o.id); if (!ids.length) return { pitens: [], bitens: [] };
+  const [pitens, bitens] = await Promise.all([sb.from('pedido_itens').select('pedido_id, produto_id, quantidade, preco_unit').in('pedido_id', ids).then(ok),
+    sb.from('bling_itens').select('pedido_id, codigo, quantidade, valor, desconto').in('pedido_id', ids).then(ok).catch(() => [])]);
+  return { pitens, bitens };
+}

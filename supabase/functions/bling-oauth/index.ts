@@ -204,6 +204,17 @@ async function enviarPedido(pedidoId: string) {
   }
 }
 
+// exclui no Bling o pedido de venda gerado pelo app (usado ao reabrir uma reposição para corrigir)
+async function excluirPedido(pedidoId: string) {
+  const { data: ped } = await db.from('pedidos').select('id, bling_id').eq('id', pedidoId).maybeSingle();
+  if (!ped?.bling_id) return { ok: true, sem_bling: true };
+  const token = await tokenValido();
+  const r = await fetch(`${API}/pedidos/vendas/${ped.bling_id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'enable-jwt': '1' } });
+  if (!r.ok && r.status !== 404) { const res = await r.json().catch(() => ({})); throw new Error(`O Bling não excluiu o pedido (${r.status}): ${JSON.stringify(res?.error ?? res).slice(0, 400)}`); }
+  await db.from('pedidos').update({ bling_id: null, bling_pedido_id: null, bling_status: 'pendente', bling_situacao: null }).eq('id', pedidoId);
+  return { ok: true, excluido: ped.bling_id };
+}
+
 // itens dos pedidos do Bling que ainda não têm itens no app (de 25 em 25)
 async function puxarItens() {
   const token = await tokenValido();
@@ -263,6 +274,7 @@ Deno.serve(async (req) => {
     if (acao === 'ler') return json(await ler(String(caminho || '')));
     if (acao === 'itens') return json(await puxarItens());
     if (acao === 'enviar_pedido') return json(await enviarPedido(String(pedido_id || '')));
+    if (acao === 'excluir_pedido') return json(await excluirPedido(String(pedido_id || '')));
     return json({ erro: 'ação desconhecida' }, 400);
   } catch (e) {
     const msg = String((e as Error).message ?? e);
