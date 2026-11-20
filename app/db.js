@@ -208,7 +208,7 @@ export async function notasDoPdv(pdvId) { return ok(await sb.from('pdv_notas').s
 export async function criarNota(pdvId, texto, autor) { return ok(await sb.from('pdv_notas').insert({ pdv_id: pdvId, texto, autor }).select().single()); }
 export async function excluirNota(id) { return ok(await sb.from('pdv_notas').delete().eq('id', id)); }
 // todos os pedidos de um cliente, para a tela de detalhes de consumo
-export async function pedidosDoCliente(pdvId) { return ok(await sb.from('pedidos').select('id, numero, bling_pedido_id, tipo, valor, unidades, criado_em, condicao, vencimento, bling_situacao, bling_status').eq('pdv_id', pdvId).order('criado_em')); }
+export async function pedidosDoCliente(pdvId) { return ok(await sb.from('pedidos').select('*').eq('pdv_id', pdvId).order('criado_em')); }
 // itens do último pedido do cliente (app; se não tiver, os do Bling), para repetir na nova venda
 export async function ultimoPedidoItens(pdvId) {
   const o = ok(await sb.from('pedidos').select('id, criado_em, condicao, unidades, valor').eq('pdv_id', pdvId).order('criado_em', { ascending: false }).limit(1))[0];
@@ -221,3 +221,5 @@ export async function ultimoPedidoItens(pdvId) {
   }
   return { ...o, itens: its };
 }
+// junta pedidos do mesmo cliente (ainda fora do Bling) em um só; devolve o id do pedido que ficou
+export async function agruparPedidos(ids) { const { data, error } = await sb.rpc('agrupar_pedidos', { ids }); if (error) throw new Error(error.message); return data; }

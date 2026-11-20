@@ -28,7 +28,7 @@ const CANAIS = ['Minimercado', 'Padaria', 'Fruteira', 'Cantina', 'Conveniência'
 const CONDICOES = ['À vista · dinheiro', 'À vista · Pix', 'A prazo · 7 dias', 'A prazo · 14 dias', 'A prazo · 28 dias', 'Consignado', 'Bonificação na abertura'];
 const DIAS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 const ROTA_ETAPAS = ['ativo', 'avaliacao', 'risco', 'revisao'];
-const FORMAS = ['Boleto', 'Pix', 'Dinheiro'];
+const FORMAS = ['Boleto', 'Pix', 'Cartão', 'Dinheiro'];
 // kits mais pedidos (pelos pedidos do Bling): código do produto no Bling → quantidade
 const KITS = [{ n: 'Brownie 32', q: { B1: 8, B2: 8, B3: 8, B4: 8 } }, { n: 'Cookies 32', q: { C1: 8, C2: 8, C3: 8, C4: 8 } }, { n: 'Palha 45', q: { P1: 18, P2: 18, P3: 9 } }];
 const prazoDias = c => { const m = /(\d+) dias/.exec(c || ''); return m ? +m[1] : 0; };
@@ -782,6 +782,11 @@ function telaAbertura() {
    <div><label class="lb">Repor a cada</label><select id="oCad" style="width:100%"><option value="">${cadPadrao().avaliacao || 7} dias (padrão da avaliação)</option><option value="10">10 dias</option><option value="14">14 dias</option></select></div></div></div>
   <h3 style="margin:16px 0 6px">Pagamento</h3><div class="row" style="flex-wrap:wrap;gap:14px;align-items:flex-end"><div class="pay" style="margin:0">${FORMAS.map((c, i) => `<label><input type="radio" name="oc" value="${c}" ${i === 0 ? 'checked' : ''}> ${c}</label>`).join('')}</div>
    <div><label class="lb">Vencimento</label><input id="oVenc" type="date" value="${isoDe(new Date(Date.now() + 7 * DIA))}"></div></div>
+  <label class="chkcomp"><input type="checkbox" id="oDiv"> Dividir o pagamento em duas formas</label>
+  <div id="oDivBox" class="divpag" hidden>
+   <div class="row"><select id="oF1">${FORMAS.map(f => `<option ${f === 'Pix' ? 'selected' : ''}>${f}</option>`).join('')}</select><input id="oV1" type="number" step="0.01" min="0" inputmode="decimal" placeholder="Valor"></div>
+   <div class="row"><select id="oF2">${FORMAS.map(f => `<option ${f === 'Cartão' ? 'selected' : ''}>${f}</option>`).join('')}</select><b id="oV2">R$ 0,00</b><small>o restante</small></div>
+  </div>
   <div class="row" style="justify-content:space-between;flex-wrap:wrap;margin:16px 0 6px"><h3 style="margin:0">Itens do pedido</h3><div class="row" style="gap:6px;flex-wrap:wrap">${p ? '<button class="mini ultped" id="oUlt" title="Preenche as quantidades com o último pedido deste cliente">↻ Último pedido</button>' : ''}<span style="color:var(--mute);font-size:12px">Kits:</span>${KITS.map((k, i) => `<button class="mini" data-kit="${i}">+ ${k.n}</button>`).join('')}<button class="mini" id="oZera">zerar</button></div></div><div id="oItens" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:8px 18px"></div><small style="color:var(--mute)">O preço ao lado de cada linha vale para todos os sabores dela. Em laranja: diferente da tabela do Bling.</small>
   <div class="row" style="justify-content:space-between;margin-top:14px;flex-wrap:wrap"><div><b id="oUn">0</b> unidades · <span id="oInfo" style="color:var(--soft)"></span></div><div style="text-align:right"><small id="oDesc" style="display:block;color:var(--soft);font-size:12.5px"></small><div style="font-family:Fraunces,Georgia,serif;font-size:26px" id="oTot">R$ 0,00</div></div></div>
   <label class="lb">Observação</label><textarea id="oObs" rows="2" style="width:100%"></textarea>
@@ -798,7 +803,10 @@ function telaAbertura() {
     $('#oDesc').innerHTML = desc > 0.004 || acima > 0.004 ? `Tabela ${brl(tot + desc - acima)}${desc > 0.004 ? ` · <b style="color:#2F7D4E">desconto − ${brl(desc)}</b>` : ''}${acima > 0.004 ? ` · <b style="color:#8A4E17">acima da tabela + ${brl(acima)}</b>` : ''}` : '';
     document.querySelectorAll('.olp').forEach(i => i.parentElement.classList.toggle('custom', Math.abs((+i.value || 0) - +i.dataset.tab) > 0.001));
     $('#oUn').textContent = un; $('#oTot').textContent = brl(tot);
-    $('#oInfo').textContent = tot && tot < (+$('#oMin').value || 0) ? 'abaixo do pedido mínimo' : ''; return { un, tot, c }; };
+    $('#oInfo').textContent = tot && tot < (+$('#oMin').value || 0) ? 'abaixo do pedido mínimo' : '';
+    if ($('#oV2')) $('#oV2').textContent = brl(Math.max(0, tot - (+$('#oV1').value || 0))); return { un, tot, c }; };
+  $('#oDiv').onchange = () => { $('#oDivBox').hidden = !$('#oDiv').checked; document.querySelector('.pay').classList.toggle('apagado', $('#oDiv').checked); if ($('#oDiv').checked && !$('#oV1').value) { $('#oV1').value = (calc().tot / 2).toFixed(2); } calc(); };
+  $('#oV1').oninput = () => calc();
   document.querySelectorAll('input[name=oc]').forEach(x => x.onchange = () => { $('#oVenc').value = isoDe(new Date(Date.now() + (cond() === 'Dinheiro' ? 0 : 7) * DIA)); });
   document.querySelectorAll('[data-kit]').forEach(b => b.onclick = () => { const k = KITS[+b.dataset.kit]; Object.entries(k.q).forEach(([cod, q]) => { const pr = S.base.produtos.find(x => x.bling_codigo === cod), inp = pr && document.querySelector(`.oq[data-p="${pr.id}"]`); if (inp) inp.value = (+inp.value || 0) + q; }); calc(); });
   $('#oZera').onclick = () => { document.querySelectorAll('.oq').forEach(i => i.value = 0); calc(); };
@@ -821,19 +829,22 @@ function telaAbertura() {
   if (p) db.precosCliente(p.id).then(pc => { if (S.abPdv !== p.id || !Object.keys(pc || {}).length) return; S.precosCli = pc; const q = {}; document.querySelectorAll('.oq').forEach(i => q[i.dataset.p] = i.value); fill(); document.querySelectorAll('.oq').forEach(i => i.value = q[i.dataset.p] || 0); calc(); toast('Preços combinados com este cliente carregados'); });
   $('#oSave').onclick = async () => {
     const t = calc(); if (!t.un) return toast('Coloque os itens do pedido');
-    const c = t.c;
+    const div = $('#oDiv').checked, v1 = Math.round((+$('#oV1').value || 0) * 100) / 100, f1 = $('#oF1').value, f2 = $('#oF2').value;
+    if (div && (f1 === f2 || v1 <= 0 || v1 >= t.tot)) return toast(f1 === f2 ? 'Escolha duas formas diferentes' : 'O valor da primeira forma precisa ser maior que zero e menor que o total');
+    const c = div ? `${f1} + ${f2}` : t.c;
+    const pagExtra = div ? { pagamentos: [{ forma: f1, valor: v1, vencimento: $('#oVenc').value || null }, { forma: f2, valor: Math.round((t.tot - v1) * 100) / 100, vencimento: $('#oVenc').value || null }] } : {};
     const itens = [...document.querySelectorAll('.oq')].map(i => ({ produto_id: +i.dataset.p, quantidade: +i.value || 0, preco_unit: precoDe(i.dataset.p), bonificado: 0 }));
     const novosPrecos = {}; document.querySelectorAll('.opr').forEach(i => { if (Math.abs((+i.value || 0) - +i.dataset.tab) > 0.001) novosPrecos[i.dataset.p] = +(+i.value).toFixed(2); });
     const hoje = new Date(), venc = $('#oVenc').value || null, mandar = $('#oBling').checked, guardar = $('#oPadrao').checked;
     $('#oSave').disabled = true;
     try {
       const reg = jaCliente
-        ? await db.registrarVenda({ pdvId: p.id, usuarioId: S.eu.id, pedido: { tipo: 'reposicao', condicao: c, unidades: t.un, valor: t.tot, pago_na_hora: c === 'Dinheiro', vencimento: venc }, itens, patch: { condicao: c } })
+        ? await db.registrarVenda({ pdvId: p.id, usuarioId: S.eu.id, pedido: { tipo: 'reposicao', condicao: c, unidades: t.un, valor: t.tot, pago_na_hora: c === 'Dinheiro', vencimento: venc, ...pagExtra }, itens, patch: div ? null : { condicao: c } })
         : await db.registrarAbertura({ pdvId: p.id, usuarioId: S.eu.id, observacao: $('#oObs').value || null,
         contagens: itens.filter(i => i.quantidade).map(i => ({ produto_id: i.produto_id, deixado_anterior: 0, encontrado: 0, troca: 0, reposto: i.quantidade })),
-        pedido: { tipo: 'abertura', condicao: c, unidades: t.un, valor: t.tot, pago_na_hora: c === 'Dinheiro', vencimento: venc },
+        pedido: { tipo: 'abertura', condicao: c, unidades: t.un, valor: t.tot, pago_na_hora: c === 'Dinheiro', vencimento: venc, ...pagExtra },
         itens,
-        patch: { etapa: 'avaliacao', avaliacao_inicio: hoje.toISOString().slice(0, 10), expositor_id: +$('#oExp').value, condicao: c, pedido_minimo: +$('#oMin').value || 150, cadencia_dias: $('#oCad').value ? +$('#oCad').value : null } });
+        patch: { etapa: 'avaliacao', avaliacao_inicio: hoje.toISOString().slice(0, 10), expositor_id: +$('#oExp').value, condicao: div ? f1 : c, pedido_minimo: +$('#oMin').value || 150, cadencia_dias: $('#oCad').value ? +$('#oCad').value : null } });
       await atualizarUm(p.id); const n = S.pdvs.find(x => x.id === p.id);
       toast(jaCliente ? `Venda lançada para ${p.nome}.` : `Venda lançada para ${p.nome}. Primeira reposição em ${dstr(n.proxima_reposicao)}.`);
       if (guardar && JSON.stringify(novosPrecos) !== JSON.stringify(S.precosCli || {})) { try { await db.salvarPrecos(p.id, novosPrecos); } catch (e) { toast('Venda salva, mas os preços do cliente não foram guardados: rode o SQL 015'); } }
@@ -843,7 +854,7 @@ function telaAbertura() {
       else if (volta?.aba === 'perfil') abrirPerfil(p.id);
       else if (volta?.aba === 'mapa') { S.sel = p.id; irPara('mapa'); }
       else telaAbertura();
-    } catch (e) { erro(e); $('#oSave').disabled = false; }
+    } catch (e) { erro(/pagamentos/.test(e.message) ? new Error('Rode o 025_pagamento_dividido_agrupar.sql no Supabase para dividir o pagamento') : e); $('#oSave').disabled = false; }
   };
 }
 
@@ -1870,6 +1881,8 @@ async function telaPedidosCliente() {
   const linhasPreco = S.base.produtos.filter(pr => pp[pr.id] || precosC[pr.id] != null).map(pr => ({ pr, tab: Number(pr.preco), comb: precosC[pr.id] != null ? Number(precosC[pr.id]) : null, ...(pp[pr.id] || {}), med: pp[pr.id] ? pp[pr.id].v / pp[pr.id].q : null }));
   const difTab = (v, tab) => v == null || !tab ? '' : Math.abs(v - tab) < 0.005 ? '<small class="ptab">= tabela</small>' : `<small class="${v < tab ? 'pdn' : 'pup'}">${v < tab ? '▼' : '▲'} ${Math.abs(Math.round((v / tab - 1) * 100))}%</small>`;
   const xsP = ds.map(d => d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }));
+  const foraBling = peds.filter(o => !o.bling_id && o.bling_status !== 'importado');
+  const seloBling = o => o.bling_status === 'importado' ? '<span class="sbl imp">Veio do Bling</span>' : o.bling_id ? `<span class="sbl ok">✓ No Bling</span>` : o.bling_status === 'erro' ? `<span class="sbl err" title="${esc(o.bling_erro || '')}">Erro ao enviar</span>` : '<span class="sbl pend">Não enviado</span>';
   $('#main').innerHTML = `<section class="view on"><div class="dash pnl">${voltar}
   <div class="pfiltros"><div><h2>${esc(p.nome)}</h2><small>${peds.length} pedidos desde ${dataLonga(ds[0])} · ${etapa(p.etapa).n}</small></div></div>
   <div class="kpis">${kpi('Total comprado', brl(total), `${brl(porMes)} por mês em média`)}${kpi('Ticket médio', brl(total / peds.length), tend != null ? `${tend >= 0 ? '▲' : '▼'} ${Math.round(Math.abs(tend) * 100)}% nos 3 últimos` : '')}${kpi('Compra a cada', inter ? Math.round(inter) + ' dias' : '—', regular !== '—' ? regular : '')}${kpi('Consumo', `${dec(unSem)} un./semana`, `${fmt(unT)} unidades no total · ${dec(unT / peds.length)} por pedido`)}</div>
@@ -1888,13 +1901,26 @@ async function telaPedidosCliente() {
    ${linhasPreco.map(x => `<tr><td><span class="dchip" style="--c:${LINHAS_COR[(x.pr.linha || '').split(' ')[0]] || COR.neutro}">${esc((x.pr.linha || '').split(' ')[0])}</span> ${esc(x.pr.sabor)}</td><td>${brl(x.tab)}</td>
     <td>${x.comb != null ? `<b>${brl(x.comb)}</b> ${difTab(x.comb, x.tab)}` : '<small style="color:var(--mute)">tabela</small>'}</td>
     <td>${x.ult != null ? `${brl(x.ult)} ${difTab(x.ult, x.tab)}<br><small>${dstr(x.em)}</small>` : '—'}</td><td>${x.med != null ? `${brl(x.med)} ${difTab(x.med, x.tab)}` : '—'}</td><td>${x.q ? fmt(Math.round(x.q)) : '—'}</td></tr>`).join('')}</table></div>` : ''}
-  <div class="panel"><h3>Todos os pedidos</h3><table class="dped"><tr><th>Data</th><th>Nº</th><th>Itens</th><th>Un.</th><th>Pagamento</th><th style="text-align:right">Valor</th></tr>
-   ${peds.slice().reverse().map(o => { const its = itens[o.id] || []; return `<tr><td>${new Date(o.criado_em).toLocaleDateString('pt-BR')}<br><small>${DIAS[new Date(o.criado_em).getDay()].slice(0, 3)}</small></td><td>${esc(o.bling_pedido_id || o.numero || '—')}${o.tipo === 'abertura' ? '<br><small>abertura</small>' : ''}</td>
+  <div class="panel"><div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:8px"><h3 style="margin:0">Todos os pedidos</h3>
+    <div class="row" style="gap:8px;align-items:center"><small id="dSelN" style="color:var(--mute)">${foraBling.length ? `${foraBling.length} pedido${foraBling.length > 1 ? 's' : ''} fora do Bling · marque para enviar` : 'Todos os pedidos estão no Bling'}</small><button class="btn pri" id="dEnviar" hidden>Mandar ao Bling</button></div></div>
+   <table class="dped"><tr><th></th><th>Data</th><th>Nº</th><th>Bling</th><th>Itens</th><th>Un.</th><th>Pagamento</th><th style="text-align:right">Valor</th></tr>
+   ${peds.slice().reverse().map(o => { const its = itens[o.id] || [], fora = foraBling.includes(o); return `<tr class="${fora ? 'fora' : ''}"><td>${fora ? `<input type="checkbox" class="dsel" value="${o.id}">` : ''}</td><td>${new Date(o.criado_em).toLocaleDateString('pt-BR')}<br><small>${DIAS[new Date(o.criado_em).getDay()].slice(0, 3)}</small></td><td>${esc(o.bling_pedido_id || o.numero || '—')}${o.tipo === 'abertura' ? '<br><small>abertura</small>' : ''}</td><td>${seloBling(o)}</td>
     <td>${its.length ? its.sort((a, b) => b.q - a.q).map(x => `<span class="dchip" style="--c:${LINHAS_COR[linha(x)] || COR.neutro}">${esc(x.pr ? x.pr.sabor : x.cod)} <b>${x.q}</b></span>`).join('') : '<small style="color:var(--mute)">sem itens</small>'}</td>
-    <td>${fmt(un(o))}</td><td>${esc(formaDe(o) || '—')}</td><td style="text-align:right"><b>${brl(o.valor)}</b></td></tr>`; }).join('')}</table></div>
+    <td>${fmt(un(o))}</td><td>${esc(formaDe(o) || '—')}${Array.isArray(o.pagamentos) && o.pagamentos.length > 1 ? `<br><small>${o.pagamentos.map(x => `${esc(x.forma)} ${brl(x.valor)}`).join(' · ')}</small>` : ''}</td><td style="text-align:right"><b>${brl(o.valor)}</b></td></tr>`; }).join('')}</table></div>
   </div></section>`;
   $('#dVoltar').onclick = () => irPara('perfil');
   ligarGraficos($('#main section'));
+  const marcados = () => [...document.querySelectorAll('.dsel:checked')].map(i => i.value);
+  document.querySelectorAll('.dsel').forEach(i => i.onchange = () => { const n = marcados().length, b = $('#dEnviar'); b.hidden = !n;
+    b.textContent = n > 1 ? `Juntar ${n} pedidos e mandar como um só` : 'Mandar ao Bling'; $('#dSelN').textContent = n ? `${n} selecionado${n > 1 ? 's' : ''} · ${brl(peds.filter(o => marcados().includes(o.id)).reduce((a, o) => a + Number(o.valor || 0), 0))}` : `${foraBling.length} pedido${foraBling.length > 1 ? 's' : ''} fora do Bling · marque para enviar`; });
+  $('#dEnviar').onclick = async () => { const ids = marcados(); if (!ids.length) return;
+    if (ids.length === 1) { await enviarAoBling(ids[0], p.nome); return telaPedidosCliente(); }
+    const sel = peds.filter(o => ids.includes(o.id)), tot = sel.reduce((a, o) => a + Number(o.valor || 0), 0);
+    modal(`<h3>Juntar ${ids.length} pedidos em um só?</h3><p style="color:var(--soft)">Os pedidos de ${sel.map(o => dstr(o.criado_em)).join(', ')} viram <b>um pedido só</b> de ${brl(tot)}, com os itens somados por sabor, e esse pedido vai para o Bling. No app eles também passam a ser um pedido só, na data do mais antigo. Não dá para desfazer.</p>
+     <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="agOk">Juntar e mandar</button></div>`);
+    $('#agOk').onclick = async () => { $('#agOk').disabled = true; $('#agOk').textContent = 'Juntando…';
+      try { const id = await db.agruparPedidos(ids); fecharModal(); toast('Pedidos juntados'); await enviarAoBling(id, p.nome); telaPedidosCliente(); }
+      catch (e) { fecharModal(); erro(/agrupar_pedidos|function/.test(e.message) ? new Error('Rode o 025_pagamento_dividido_agrupar.sql no Supabase') : e); } }; };
 }
 
 /* =================== contatos =================== */

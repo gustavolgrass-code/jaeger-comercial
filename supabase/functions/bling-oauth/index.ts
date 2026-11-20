@@ -146,6 +146,16 @@ async function ler(caminho: string) {
 }
 
 // envia um pedido do app para o Bling (configuração em regras.chave = 'bling')
+// id da forma de pagamento no Bling: primeiro o que está nas regras; senão procura pelo nome (ex.: "Cartão" acha "Cartão de crédito")
+const semAc = (t: string) => String(t ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+async function idForma(nome: string, cfg: Record<string, any>, token: string): Promise<number | null> {
+  const f = (cfg.formas ?? {})[nome]; if (f) return Number(f);
+  const r = await chamar('/formas-pagamentos?limite=100', token), alvo = semAc(nome).split(' ')[0];
+  const ativas = (r?.data ?? []).filter((x: any) => x.situacao === 1);
+  const achou = ativas.find((x: any) => semAc(x.descricao).includes(alvo));
+  return achou ? Number(achou.id) : null;
+}
+
 async function enviarPedido(pedidoId: string) {
   const token = await tokenValido();
   const { data: ped, error } = await db.from('pedidos').select('*, pdvs(id, nome, razao_social, cnpj, bling_contato_id), pedido_itens(quantidade, bonificado, preco_unit, produtos(id, linha, sabor, preco, bling_produto_id, bling_codigo))').eq('id', pedidoId).single();
@@ -173,13 +183,27 @@ async function enviarPedido(pedidoId: string) {
   if (!itens.length) throw new Error('Pedido sem itens');
   descontoReais = Math.round(descontoReais * 100) / 100;
   const total = itens.reduce((a: number, i: any) => a + i.quantidade * i.valor, 0) - descontoReais;
-  const forma = (cfg.formas ?? {})[ped.condicao] ?? cfg.forma_padrao;
+  // parcelas: pagamento dividido (ex.: Pix + Cartão) ou uma forma só; a soma acompanha o total do pedido
+  let parcelas: any[] = [];
+  const lista = Array.isArray(ped.pagamentos) && ped.pagamentos.length ? ped.pagamentos : null;
+  if (lista) {
+    const soma = lista.reduce((a: number, x: any) => a + Number(x.valor || 0), 0) || 1, fator = total / soma;
+    for (const x of lista) {
+      const id = await idForma(x.forma, cfg, token);
+      if (!id) throw new Error(`Não existe a forma de pagamento "${x.forma}" no Bling. Crie em Cadastros → Formas de pagamento e tente de novo.`);
+      parcelas.push({ dataVencimento: x.vencimento ?? ped.vencimento ?? hoje, valor: Math.round(Number(x.valor) * fator * 100) / 100, formaPagamento: { id } });
+    }
+    const dif = Math.round((total - parcelas.reduce((a, x) => a + x.valor, 0)) * 100) / 100; parcelas[parcelas.length - 1].valor = Math.round((parcelas[parcelas.length - 1].valor + dif) * 100) / 100;
+  } else {
+    const forma = (await idForma(ped.condicao, cfg, token).catch(() => null)) ?? (cfg.forma_padrao ? Number(cfg.forma_padrao) : null);
+    if (forma) parcelas = [{ dataVencimento: ped.vencimento ?? hoje, valor: Math.round(total * 100) / 100, formaPagamento: { id: forma } }];
+  }
   const corpo: Record<string, unknown> = {
     data: hoje, dataSaida: hoje, dataPrevista: hoje,
     contato: { id: contatoId },
     itens,
     ...(descontoReais > 0 ? { desconto: { valor: descontoReais, unidade: 'REAL' } } : {}),
-    ...(forma ? { parcelas: [{ dataVencimento: ped.vencimento ?? hoje, valor: Math.round(total * 100) / 100, formaPagamento: { id: Number(forma) } }] } : {}),
+    ...(parcelas.length ? { parcelas } : {}),
     ...(cfg.loja_id ? { loja: { id: Number(cfg.loja_id) } } : {}),
     ...(cfg.vendedor_id ? { vendedor: { id: Number(cfg.vendedor_id) } } : {}),
     ...(cfg.situacao_id ? { situacao: { id: Number(cfg.situacao_id) } } : {}),

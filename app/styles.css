@@ -444,3 +444,15 @@ section:fullscreen #mapa{height:100vh}
 .dprec small.pdn{color:#0b7a32;font-weight:700}
 .dprec small.pup{color:#b8402a;font-weight:700}
 .dprec small.ptab{color:var(--mute)}
+.divpag{background:var(--sand);border-radius:10px;padding:10px 12px;margin-top:8px;display:flex;flex-direction:column;gap:8px;max-width:440px}
+.divpag .row{gap:10px;align-items:center}
+.divpag select{width:140px}
+.divpag input{width:130px}
+.pay.apagado{opacity:.4;pointer-events:none}
+.sbl{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.sbl.ok{background:#E3F2E8;color:#0b6b2c}
+.sbl.imp{background:#EEE8E1;color:#6B5E54}
+.sbl.pend{background:#FDF0D5;color:#8A5A00}
+.sbl.err{background:#F8DCD5;color:#9A2E1A;cursor:help}
+.dped tr.fora td{background:#FFFBF2}
+.dped .dsel{width:17px;height:17px;accent-color:var(--choc)}
