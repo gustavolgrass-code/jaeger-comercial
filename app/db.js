@@ -198,3 +198,8 @@ export async function itensDoCliente(pdvId) {
     sb.from('bling_itens').select('pedido_id, codigo, quantidade, valor, desconto').in('pedido_id', ids).then(ok).catch(() => [])]);
   return { pitens, bitens };
 }
+// contatos secundários de um negócio (o principal fica em pdvs.contato_id)
+export async function vinculosDoPdv(pdvId) { return ok(await sb.from('pdv_contatos').select('contato_id').eq('pdv_id', pdvId)).map(x => x.contato_id); }
+export async function vinculosDoContato(contatoId) { return ok(await sb.from('pdv_contatos').select('pdv_id').eq('contato_id', contatoId)).map(x => x.pdv_id); }
+export async function vincularContato(pdvId, contatoId) { return ok(await sb.from('pdv_contatos').upsert({ pdv_id: pdvId, contato_id: contatoId })); }
+export async function desvincularContato(pdvId, contatoId) { return ok(await sb.from('pdv_contatos').delete().eq('pdv_id', pdvId).eq('contato_id', contatoId)); }

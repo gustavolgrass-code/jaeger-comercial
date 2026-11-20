@@ -510,7 +510,8 @@ const CART = ['avaliacao', 'ativo', 'risco', 'revisao', 'inativo'];
 function faltaContato(p) {
   if (!CART.includes(p.etapa)) return [];
   const c = S.contatos.find(x => x.id === p.contato_id) || {};
-  return [(!c.nome || /sem pessoa de contato/.test(c.observacao || '')) && 'pessoa de contato', !c.cargo && 'cargo', !(c.telefone || c.whatsapp || p.telefone) && 'telefone', !c.email && 'e-mail'].filter(Boolean);
+  const semPessoa = !c.nome || (/sem pessoa de contato/.test(c.observacao || '') && [c.empresa, p.nome].some(e => e && norm(e) === norm(c.nome)));
+  return [semPessoa && 'pessoa de contato', !c.cargo && 'cargo', !(c.telefone || c.whatsapp || p.telefone) && 'telefone', !c.email && 'e-mail'].filter(Boolean);
 }
 const avisoContato = (p, curto) => { const f = faltaContato(p); return f.length ? `<span class="aviso-ct" title="Faltam dados do contato: ${f.join(', ')}">⚠️ ${curto ? 'Falta ' : 'Faltam dados: '}${f.join(', ')}</span>` : ''; };
 const MOTIVOS = ['Preço', 'Sem espaço', 'Concorrente', 'Dono não decide', 'Sem interesse', 'Outro'];
@@ -1684,7 +1685,8 @@ async function telaPerfil() {
   const p = S.pdvs.find(x => x.id === S.perfilId);
   if (!p) { $('#main').innerHTML = '<section class="view on"><div class="empty">Negócio não encontrado.</div></section>'; return; }
   $('#main').innerHTML = '<section class="view on"><div class="loading">Carregando o histórico…</div></section>';
-  let h, tars; try { [h, tars] = await Promise.all([db.historico(p.id), db.tarefasDoPdv(p.id)]); } catch (e) { return erro(e); }
+  let h, tars, secIds = [], semTabelaSec = false; try { [h, tars, secIds] = await Promise.all([db.historico(p.id), db.tarefasDoPdv(p.id), db.vinculosDoPdv(p.id).catch(() => { semTabelaSec = true; return []; })]); } catch (e) { return erro(e); }
+  const secs = secIds.map(id => S.contatos.find(x => x.id === id)).filter(x => x && x.id !== p.contato_id);
   const c = S.contatos.find(x => x.id === p.contato_id);
   const ev = [];
   h.etapas.forEach(e => ev.push({ em: e.em, cor: etapa(e.para).c, t: e.de ? `Passou de <b>${etapa(e.de).n}</b> para <b>${etapa(e.para).n}</b>` : `Negócio criado como <b>${etapa(e.para).n}</b>`, quem: e.perfis?.nome, obs: e.motivo }));
@@ -1719,10 +1721,14 @@ async function telaPerfil() {
     <div class="panel"><h3>Histórico</h3>${ev.map(e => `<div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--sand)"><i style="width:12px;height:12px;border-radius:50%;background:${e.cor};flex:none;margin-top:4px"></i><div style="flex:1"><div>${e.t}</div>${e.obs ? `<div style="color:var(--soft);margin-top:2px">“${esc(e.obs)}”</div>` : ''}<small style="color:var(--mute)">${quando(e.em)}${e.quem ? ' · ' + esc(e.quem) : ''}</small></div></div>`).join('') || '<p class="empty">Sem histórico ainda.</p>'}</div>
    </div>
    <div style="display:flex;flex-direction:column;gap:16px">
-    <div class="panel"><h3>Contato</h3>${c ? `<div style="font-size:18px;font-weight:700">${esc(c.nome)}</div><div style="color:var(--soft)">${esc([c.cargo, c.empresa].filter(Boolean).join(' · '))}</div>
+    <div class="panel"><h3>Contatos</h3>${c ? `<small class="ctpapel">Principal</small><div style="font-size:18px;font-weight:700">${esc(c.nome)}</div><div style="color:var(--soft)">${esc([c.cargo, c.empresa].filter(Boolean).join(' · '))}</div>
      <p style="margin:8px 0;line-height:1.7">${c.telefone ? `📞 ${esc(c.telefone)}<br>` : ''}${c.email ? `✉️ ${esc(c.email)}<br>` : ''}</p>
      <div class="row" style="flex-wrap:wrap">${linkWpp(c.whatsapp || c.telefone) ? `<a class="btn car" style="text-decoration:none" target="_blank" rel="noopener" href="${linkWpp(c.whatsapp || c.telefone)}">WhatsApp ↗</a>` : ''}<button class="btn" id="pVerContato">Abrir contato</button><button class="btn" id="pTrocarContato">Trocar</button></div>`
-      : `<p class="empty" style="padding:6px 0">Nenhum contato vinculado.</p><button class="btn pri" id="pTrocarContato">Vincular contato</button>`}</div>
+      : `<p class="empty" style="padding:6px 0">Nenhum contato vinculado.</p><button class="btn pri" id="pTrocarContato">Vincular contato</button>`}
+     ${secs.map(s => `<div class="ctsec"><small class="ctpapel">Secundário</small><div><b>${esc(s.nome)}</b> <span style="color:var(--soft)">${esc(s.cargo || '')}</span></div>
+       <div style="font-size:13px;color:var(--soft);line-height:1.6">${s.telefone ? `📞 ${esc(s.telefone)}<br>` : ''}${s.email ? `✉️ ${esc(s.email)}` : ''}</div>
+       <div class="row" style="flex-wrap:wrap;gap:6px;margin-top:4px">${linkWpp(s.whatsapp || s.telefone) ? `<a class="mini" style="text-decoration:none" target="_blank" rel="noopener" href="${linkWpp(s.whatsapp || s.telefone)}">WhatsApp ↗</a>` : ''}<button class="mini" data-ctabre="${s.id}">abrir</button><button class="mini" data-ctprin="${s.id}">tornar principal</button><button class="mini" data-ctrem="${s.id}">remover</button></div></div>`).join('')}
+     ${c ? `<button class="btn" id="pAddSec" style="margin-top:10px">+ Contato secundário</button>` : ''}${semTabelaSec ? '<small style="display:block;color:var(--mute);margin-top:6px">Rode o 020_contatos_secundarios.sql para usar contatos secundários.</small>' : ''}</div>
     <div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">Próximas ações</h3><button class="btn pri" id="pNovaTar" style="padding:5px 10px">+ Nova</button></div><div style="margin-top:8px">${listaTarefas(tars.filter(t => !t.concluida), 'Nenhuma ação marcada.')}</div>${tars.some(t => t.concluida) ? `<details style="margin-top:6px"><summary style="cursor:pointer;color:var(--mute);font-size:12px">Concluídas (${tars.filter(t => t.concluida).length})</summary>${listaTarefas(tars.filter(t => t.concluida), '')}</details>` : ''}</div>
     <div class="panel"><h3>Resumo</h3><div class="kv" style="margin:0"><div><small>${h.pedidos.length ? 'Cliente desde' : 'Criado em'}</small><b>${dataLonga(h.pedidos.length ? h.pedidos[0].criado_em : p.criado_em)}</b>${h.pedidos.length ? '<small>1º pedido no Bling</small>' : ''}</div><div><small>Visitas</small><b>${h.visitas.length}</b></div><div><small>Pedidos</small><b>${h.pedidos.length}</b></div><div><small>Total pedido</small><b>${brl(h.pedidos.reduce((a, o) => a + Number(o.valor), 0))}</b></div></div></div>
     ${fluxoPedidos(h.pedidos)}
@@ -1751,6 +1757,13 @@ async function telaPerfil() {
   $('#pTrocarContato').onclick = () => { modal(`<h3>Contato de ${esc(p.nome)}</h3>${campoContato()}<div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="kOk">Vincular</button></div>`); document.querySelector('#modalBox details').open = true;
     $('#kOk').onclick = async () => { try { const id = await contatoDoForm(p.nome); if (!id) return toast('Escolha um contato ou preencha o nome'); await db.atualizarPdv(p.id, { contato_id: id }); fecharModal(); await atualizarUm(p.id); toast('Contato vinculado'); telaPerfil(); } catch (e) { erro(e); } }; };
   $('#pExcluirTopo').onclick = () => $('#pExcluir').click();
+  if ($('#pAddSec')) $('#pAddSec').onclick = () => { modal(`<h3>Contato secundário de ${esc(p.nome)}</h3><p style="color:var(--soft);margin-top:0">Ex.: o gerente, quando o principal é o dono.</p>${campoContato()}<div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="kOk">Adicionar</button></div>`); document.querySelector('#modalBox details').open = true;
+    $('#kOk').onclick = async () => { try { const id = await contatoDoForm(p.nome); if (!id) return toast('Escolha um contato ou preencha o nome'); if (id === p.contato_id) return toast('Esse já é o contato principal');
+      await db.vincularContato(p.id, id); fecharModal(); toast('Contato secundário adicionado'); telaPerfil(); } catch (e) { erro(/pdv_contatos/.test(e.message) ? new Error('Rode o 020_contatos_secundarios.sql no Supabase') : e); } }; };
+  document.querySelectorAll('[data-ctabre]').forEach(b => b.onclick = () => abrirContato(b.dataset.ctabre));
+  document.querySelectorAll('[data-ctrem]').forEach(b => b.onclick = async () => { try { await db.desvincularContato(p.id, b.dataset.ctrem); toast('Contato removido deste negócio'); telaPerfil(); } catch (e) { erro(e); } });
+  document.querySelectorAll('[data-ctprin]').forEach(b => b.onclick = async () => { const novo = b.dataset.ctprin;
+    try { await db.atualizarPdv(p.id, { contato_id: novo }); await db.desvincularContato(p.id, novo); if (p.contato_id) await db.vincularContato(p.id, p.contato_id); await atualizarUm(p.id); toast('Contato principal trocado'); telaPerfil(); } catch (e) { erro(e); } });
   ligarJanela('pj');
   $('#pHorOk').onclick = async () => { const v = $('#pHor').value.trim() || null; try { await db.atualizarPdv(p.id, { melhor_horario: v, ...lerJanela('pj') }); p.melhor_horario = v; await atualizarUm(p.id); toast('Janela de atendimento salva'); } catch (e) { erro(/janela_|precisa_dono/.test(e.message) ? new Error('Rode o SQL 018 no Supabase para salvar a janela de atendimento') : e); } };
   document.querySelectorAll('[data-envbling]').forEach(b => b.onclick = async () => { b.disabled = true; await enviarAoBling(b.dataset.envbling, p.nome); telaPerfil(); });
@@ -1778,21 +1791,22 @@ function formContato(c) {
   <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="fOk">Salvar</button></div>`);
   $('#fOk').onclick = async () => { const o = { nome: $('#fNome').value.trim(), empresa: $('#fEmp').value.trim() || null, cargo: $('#fCargo').value || null, telefone: $('#fTel').value.trim() || null, whatsapp: $('#fWpp').value.trim() || null, email: $('#fEmail').value.trim() || null, observacao: $('#fObs').value.trim() || null };
     if (!o.nome) return toast('Coloque o nome');
+    if (o.observacao && /sem pessoa de contato/.test(o.observacao) && norm(o.nome) !== norm(o.empresa || '')) o.observacao = o.observacao.replace(/ ?· ?sem pessoa de contato/, '').trim() || null;
     const ja = acharContato(o, c?.id); if (ja) return toast(`Já existe o contato ${ja.nome} com esse nome, telefone ou e-mail.`);
     try { if (c) { const n = await db.atualizarContato(c.id, o); Object.assign(c, n); } else { S.contatos.push(await db.criarContato({ ...o, criado_por: S.eu.id })); }
       fecharModal(); toast('Contato salvo'); S.aba === 'contato' ? telaContato() : telaContatos(); } catch (e) { erro(e); } };
 }
 async function telaContato() {
   const c = S.contatos.find(x => x.id === S.contatoId); if (!c) return irPara('contatos');
-  let tars = []; try { tars = await db.tarefasDoContato(c.id); } catch (e) { }
-  const negs = S.pdvs.filter(p => p.contato_id === c.id), w = linkWpp(c.whatsapp || c.telefone);
+  let tars = [], secDe = []; try { [tars, secDe] = await Promise.all([db.tarefasDoContato(c.id), db.vinculosDoContato(c.id).catch(() => [])]); } catch (e) { }
+  const negs = S.pdvs.filter(p => p.contato_id === c.id || secDe.includes(p.id)), w = linkWpp(c.whatsapp || c.telefone);
   $('#main').innerHTML = `<section class="view on"><div class="dash" style="max-width:900px"><div class="row"><button class="btn" id="cVoltar">← Contatos</button></div>
   <div class="panel"><small style="color:var(--mute)">Contato</small><h2 style="font-family:Fraunces,Georgia,serif;margin:4px 0">${esc(c.nome)}</h2><div style="color:var(--soft)">${esc([c.cargo, c.empresa].filter(Boolean).join(' · '))}</div>
    <div class="kv"><div><small>Telefone</small><b>${esc(c.telefone || '—')}</b></div><div><small>WhatsApp</small><b>${esc(c.whatsapp || '—')}</b></div><div style="grid-column:1/-1"><small>E-mail</small><b style="font-size:14px">${esc(c.email || '—')}</b></div></div>
    ${c.observacao ? `<p style="color:var(--soft)">${esc(c.observacao)}</p>` : ''}
    <div class="row">${w ? `<a class="btn car" style="text-decoration:none" target="_blank" rel="noopener" href="${w}">WhatsApp ↗</a>` : ''}<button class="btn" id="cEditar">Editar</button><button class="btn" id="cExcluir" style="color:#7A2414">Excluir contato</button></div></div>
   <div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">Tarefas</h3><button class="btn pri" id="cNovaTar" style="padding:5px 10px">+ Nova</button></div><div style="margin-top:8px">${listaTarefas(tars, 'Nenhuma tarefa com este contato.')}</div></div>
-  <div class="panel"><h3>Negócios deste contato</h3>${negs.map(p => `<div class="stop" data-id="${p.id}" style="cursor:pointer"><div class="info"><b>${esc(p.nome)}</b><br><small style="color:var(--mute)">${esc(p.canal || '')} · ${esc(p.cidade || '')}</small></div><span class="badge st" style="background:${etapa(p.etapa).c}">${etapa(p.etapa).n}</span></div>`).join('') || '<p class="empty">Nenhum negócio vinculado.</p>'}</div></div></section>`;
+  <div class="panel"><h3>Negócios deste contato</h3>${negs.map(p => `<div class="stop" data-id="${p.id}" style="cursor:pointer"><div class="info"><b>${esc(p.nome)}</b>${p.contato_id === c.id ? '' : ' <span class="badge">secundário</span>'}<br><small style="color:var(--mute)">${esc(p.canal || '')} · ${esc(p.cidade || '')}</small></div><span class="badge st" style="background:${etapa(p.etapa).c}">${etapa(p.etapa).n}</span></div>`).join('') || '<p class="empty">Nenhum negócio vinculado.</p>'}</div></div></section>`;
   $('#cVoltar').onclick = () => irPara('contatos'); $('#cEditar').onclick = () => formContato(c);
   $('#cExcluir').onclick = () => { modal(`<h3>Excluir ${esc(c.nome)}?</h3><p style="color:var(--soft)">Apaga só o contato.${negs.length ? ` ${negs.length === 1 ? 'O negócio vinculado continua' : `Os ${negs.length} negócios vinculados continuam`} cadastrado${negs.length > 1 ? 's' : ''}, sem contato.` : ''}${tars.length ? ' As tarefas dele ficam sem contato.' : ''} Não dá para desfazer.</p><div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="cxOk" style="background:#7A2414;border-color:#7A2414">Excluir</button></div>`);
     $('#cxOk').onclick = async () => { try { await db.excluirContato(c.id); fecharModal(); S.contatos = S.contatos.filter(x => x.id !== c.id); S.pdvs.forEach(x => { if (x.contato_id === c.id) x.contato_id = null; }); toast('Contato excluído'); irPara('contatos'); } catch (e) { fecharModal(); erro(e); } }; };

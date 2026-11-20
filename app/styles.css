@@ -408,3 +408,5 @@ section:fullscreen #mapa{height:100vh}
 .dscores a.on{background:#fff!important}
 .dscores a.on i{box-shadow:0 0 0 2px #fff,0 0 0 4px var(--c)}
 .desenhando,.desenhando .leaflet-interactive{cursor:crosshair!important;touch-action:none}
+.ctpapel{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);margin-bottom:2px}
+.ctsec{margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
