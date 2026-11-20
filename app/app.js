@@ -37,9 +37,12 @@ const prazoDias = c => { const m = /(\d+) dias/.exec(c || ''); return m ? +m[1] 
 const S = { contatos: [], eu: null, base: null, pdvs: [], sellouts: {}, aba: null, sel: null, rotaReg: null, contando: null, abPdv: null, sugestoes: [], legOculta: true, etapasMapa: new Set(['ativo']) }; // legenda do mapa começa minimizada
 const regraAval = () => S.base.regras.avaliacao || { reposicoes: 13, meta_minima_sellout: 6 };
 const cadPadrao = () => S.base.regras.cadencia_padrao || {};
+// região de um ponto: caixa [lngMin, latMax, lngMax, latMin] ou centro do quadrante (o mais perto, até o raio)
 const regiaoDe = (lng, lat) => {
-  for (const r of S.base.regioes) { const b = r.limites; if (b && lng >= b[0] && lng < b[2] && lat <= b[1] && lat > b[3]) return r.codigo; }
-  return null;
+  for (const r of S.base.regioes) { const b = r.limites; if (Array.isArray(b) && lng >= b[0] && lng < b[2] && lat <= b[1] && lat > b[3]) return r.codigo; }
+  let best = null, bd = 1e9;
+  S.base.regioes.forEach(r => { const c = r.limites?.centro; if (!c) return; const dk = Math.hypot((lat - c[1]) * 111.2, (lng - c[0]) * 96.3); if (dk <= (r.limites.raio || 8) && dk < bd) { bd = dk; best = r.codigo; } });
+  return best;
 };
 const semAcento = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 const CORES = ['#3F6FA8', '#2F7D4E', '#C27A2C', '#B8402A', '#6B4FA0', '#8A4E17', '#2C7F8C', '#9A3B6E', '#5E6B2E'];
@@ -250,7 +253,7 @@ function pino(cor, k = 1, tracejado = false) {
 }
 function desenhar() {
   camada.clearLayers();
-  if (mostrarReg) S.base.regioes.forEach(r => { const b = r.limites; if (!b) return; L.rectangle([[b[1], b[0]], [b[3], b[2]]], { color: r.cor, weight: 2, dashArray: '8 6', fillOpacity: .04, interactive: false }).addTo(camada).bindTooltip(`${r.codigo} · ${r.nome}`, { permanent: false }); });
+  if (mostrarReg) S.base.regioes.forEach(r => { const b = r.limites; if (b?.centro) { const g = S.pdvs.filter(p => p.regiao === r.codigo && p.lat && p.etapa !== 'fechado'), h = casca(g); if (h.length >= 3) L.polygon(h.map(x => [x.lat, x.lng]), { color: r.cor, weight: 2, dashArray: '8 6', fillOpacity: .05, interactive: false }).addTo(camada); return; } if (!Array.isArray(b)) return; L.rectangle([[b[1], b[0]], [b[3], b[2]]], { color: r.cor, weight: 2, dashArray: '8 6', fillOpacity: .04, interactive: false }).addTo(camada).bindTooltip(`${r.codigo} · ${r.nome}`, { permanent: false }); });
   const fr = $('#fReg').value;
   const pend = repPendentes();
   $('#nPend').textContent = pend.length ? `(${pend.length})` : '';
@@ -1393,7 +1396,7 @@ async function garantirMatriz(pontos) {
     if (r.code !== 'Ok') return false;
     MZ.idx = Object.fromEntries(lista.map((p, i) => [chaveP(p), i])); MZ.dur = r.durations; MZ.dist = r.distances || []; return true;
   } catch { return false; } }
-const ehCanoas = p => ['C1', 'C2'].includes(p.regiao) || norm(p.cidade) === 'canoas';
+const ehCanoas = p => ['CAN', 'C1', 'C2'].includes(p.regiao) || norm(p.cidade) === 'canoas';
 const cfgRota = () => ({ tempo_rep: 20, tempo_prosp: 15, ...(S.base.regras.rota || {}) });
 const diaSemana = data => new Date(data + 'T12:00').getDay();
 function proximoDiaJanela(p, data) { const ds = p.janela_dias?.length ? p.janela_dias : [1, 2, 3, 4, 5, 6]; for (let i = 1; i <= 7; i++) { const d = new Date(new Date(data + 'T12:00').getTime() + i * DIA); if (ds.includes(d.getDay())) return `${DIAS_SEM[d.getDay()]} ${dstr(d)}`; } return '—'; }
