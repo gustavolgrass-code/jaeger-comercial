@@ -131,13 +131,24 @@ function montar() {
   trocarLado(lado);
 }
 function trocarLado(l) { lado = l; $('#rG').classList.toggle('on', l === 'comercial'); $('#rM').classList.toggle('on', l === 'operacao'); irPara(ABAS[l][0][0]); }
-function irPara(a) {
-  S.aba = a;
+// navegação com "voltar" de verdade: cada tela guarda de onde veio (aba + cliente/contato aberto)
+S.hist = []; S.fil = {};
+function irPara(a, semHist) {
+  const ctx = { perfilId: S.perfilId, contatoId: S.contatoId }, mesmo = S.aba === a && S.histEnt && S.histEnt.perfilId === ctx.perfilId && S.histEnt.contatoId === ctx.contatoId;
+  const topo = S.hist[S.hist.length - 1], ehTopo = topo && topo.aba === a && (!['perfil', 'contato', 'pedcli'].includes(a) || (topo.perfilId === ctx.perfilId && topo.contatoId === ctx.contatoId));
+  if (!semHist && ehTopo) S.hist.pop(); // voltando para a tela anterior (ex.: depois de salvar uma venda): não empilha de novo
+  else if (!semHist && S.aba && !mesmo) { S.hist.push({ aba: S.aba, ...(S.histEnt || {}) }); if (S.hist.length > 40) S.hist.shift(); }
+  S.aba = a; S.histEnt = ctx;
   $('#nav').innerHTML = ABAS[lado].map(([k, n]) => `<button data-a="${k}" class="${k === a ? 'on' : ''}">${n}</button>`).join('');
-  $('#nav').onclick = e => { const k = e.target.dataset.a; if (k) { S.vendaVolta = null; irPara(k); } };
+  $('#nav').onclick = e => { const k = e.target.dataset.a; if (k) { S.vendaVolta = null; S.hist = []; irPara(k, true); } };
   ({ agenda: telaAgenda, perfil: telaPerfil, contato: telaContato, contatos: telaContatos, uploads: telaUploads, mapa: telaMapa, funil: telaFunil, carteira: telaCarteira, abertura: telaAbertura, painel: telaPainel, regras: telaRegras, rota: telaRota, reposicao: telaReposicao, pedcli: telaPedidosCliente, resumo: telaResumo })[a]();
 }
 window.irPara = irPara;
+function voltar(padrao) { const h = S.hist.pop(); if (!h) return irPara(padrao, true); S.perfilId = h.perfilId; S.contatoId = h.contatoId; if (h.aba === 'perfil') S.sel = h.perfilId; irPara(h.aba, true); }
+// mantém os filtros de uma tela quando você sai e volta: restaura os valores e guarda a cada mudança
+function manter(tela, ids) { const f = S.fil[tela] = S.fil[tela] || {};
+  ids.forEach(id => { const el = document.getElementById(id); if (!el) return; if (f[id] != null) el.type === 'checkbox' ? (el.checked = f[id]) : (el.value = f[id]);
+    const salva = () => { f[id] = el.type === 'checkbox' ? el.checked : el.value; }; el.addEventListener('input', salva); el.addEventListener('change', salva); }); }
 
 /* =================== mapa =================== */
 // desenho livre no mapa: círculo, quadrado e pincel; fica salvo para todos (regra 'desenhos_mapa')
@@ -227,6 +238,7 @@ function telaMapa() {
   $('#bPend').onclick = () => { S.modoPend = !S.modoPend; S.sel = null; desenhar(); painel(); };
   $('#bLoc').onclick = () => alternarLocalizacao();
   if (S.rastreando) { mostrarEu(false); $('#bLoc').classList.add('pri'); }
+  manter('mapa', ['fReg']);
   $('#fReg').onchange = desenhar;
   // etapas no mapa: várias de uma vez (começa só com Ativo)
   const rotEt = () => { const n = S.etapasMapa.size, tot = ETAPAS.filter(NO_MAPA).length; $('#fEtBtn').textContent = n === 0 ? 'Nenhuma etapa' : n === tot ? 'Todas as etapas' : n === 1 ? etapa([...S.etapasMapa][0]).n : `${n} etapas`; };
@@ -844,6 +856,7 @@ function telaCarteira() {
     $('#tbl').querySelectorAll('th').forEach(th => th.onclick = () => { ord = { k: th.dataset.k, d: ord.k === th.dataset.k ? -ord.d : 1 }; desenhaT(); });
     $('#tbl').querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => abrirPerfil(tr.dataset.id));
   };
+  manter('carteira', ['q', 'tEt', 'tPr']);
   $('#q').oninput = $('#tEt').onchange = $('#tPr').onchange = desenhaT; desenhaT();
   db.resumoPedidos().then(ls => { ls.forEach(o => { const x = RP[o.pdv_id] = RP[o.pdv_id] || { n: 0, un: 0, ult: null }; x.n++; x.un += Number(o.unidades) > 0 ? Number(o.unidades) : Math.round((Number(o.valor) || 0) / 4.6); if (!x.ult || o.criado_em > x.ult) x.ult = o.criado_em; }); if ($('#tbl')) desenhaT(); }).catch(() => { });
 }
@@ -1959,7 +1972,7 @@ async function telaPerfil() {
     ${(() => { const pend = h.pedidos.filter(o => o.bling_status === 'pendente' || o.bling_status === 'erro'); return pend.length ? `<div class="panel alertas"><h3>Pedidos do app ainda não criados no Bling (${pend.length})</h3>${pend.map(o => `<div class="trow" style="cursor:default"><div style="flex:1"><b>${dataLonga(o.criado_em)} · ${brl(o.valor)}</b> <small style="color:var(--mute)">${esc(o.condicao)}</small>${o.bling_erro ? `<br><small style="color:#7A2414">${esc(o.bling_erro.slice(0, 220))}</small>` : ''}</div><button class="mini" data-envbling="${o.id}">enviar ao Bling</button></div>`).join('')}</div>` : ''; })()}
     <div class="panel"><button class="btn" id="pExcluir" style="width:100%;color:#7A2414">Excluir negócio</button><small style="color:var(--mute);display:block;margin-top:6px">Use para apagar cadastro duplicado, errado ou de teste. Apaga também os pedidos dele.</small></div>
    </div></div></div></section>`;
-  $('#pVoltar').onclick = () => irPara(S.voltar || 'carteira');
+  $('#pVoltar').onclick = () => voltar(S.voltar || 'carteira');
   if (h.pedidos.length) db.itensDoCliente(p.id).then(it => { const el = $('#pProd'); if (el) el.outerHTML = maisSaem(it, h.pedidos); }).catch(() => { });
   $('#pNovaTar').onclick = $('#pTarTopo').onclick = () => modalTarefa({ data: hojeISO(), pdv_id: p.id, contato_id: p.contato_id });
   document.querySelectorAll('[data-tid]').forEach(el => el.onclick = () => modalTarefa(tars.find(t => t.id === el.dataset.tid)));
@@ -2012,8 +2025,8 @@ async function telaPedidosCliente() {
   $('#main').innerHTML = '<section class="view on"><div class="loading">Lendo os pedidos…</div></section>';
   let peds, it, precosC = {}; try { [peds, it, precosC] = await Promise.all([db.pedidosDoCliente(p.id), db.itensDoCliente(p.id), db.precosCliente(p.id).catch(() => ({}))]); } catch (e) { return erro(e); }
   peds = peds.filter(o => !/cancel/i.test(o.bling_situacao || ''));
-  const voltar = `<div class="row" style="gap:8px"><button class="btn" id="dVoltar">← ${esc(p.nome)}</button><span style="color:var(--mute)">Detalhes dos pedidos</span></div>`;
-  if (!peds.length) { $('#main').innerHTML = `<section class="view on"><div class="dash pnl">${voltar}<p class="empty">Este cliente ainda não tem pedidos.</p></div></section>`; $('#dVoltar').onclick = () => irPara('perfil'); return; }
+  const voltarHtml = `<div class="row" style="gap:8px"><button class="btn" id="dVoltar">← ${esc(p.nome)}</button><span style="color:var(--mute)">Detalhes dos pedidos</span></div>`;
+  if (!peds.length) { $('#main').innerHTML = `<section class="view on"><div class="dash pnl">${voltarHtml}<p class="empty">Este cliente ainda não tem pedidos.</p></div></section>`; $('#dVoltar').onclick = () => voltar('perfil'); return; }
   // itens por pedido (app primeiro; se o pedido não tem itens no app, usa os do Bling)
   const prodId = Object.fromEntries(S.base.produtos.map(x => [x.id, x])), porCod = {}; S.base.produtos.forEach(x => { if (x.bling_codigo) porCod[x.bling_codigo] = x; });
   const itens = {}; it.pitens.forEach(i => (itens[i.pedido_id] = itens[i.pedido_id] || []).push({ pr: prodId[i.produto_id], q: +i.quantidade, v: +i.quantidade * +i.preco_unit }));
@@ -2056,7 +2069,7 @@ async function telaPedidosCliente() {
   const xsP = ds.map(d => d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }));
   const foraBling = peds.filter(o => !o.bling_id && o.bling_status !== 'importado');
   const seloBling = o => o.bling_status === 'importado' ? '<span class="sbl imp">Veio do Bling</span>' : o.bling_id ? `<span class="sbl ok">✓ No Bling</span>` : o.bling_status === 'erro' ? `<span class="sbl err" title="${esc(o.bling_erro || '')}">Erro ao enviar</span>` : '<span class="sbl pend">Não enviado</span>';
-  $('#main').innerHTML = `<section class="view on"><div class="dash pnl">${voltar}
+  $('#main').innerHTML = `<section class="view on"><div class="dash pnl">${voltarHtml}
   <div class="pfiltros"><div><h2>${esc(p.nome)}</h2><small>${peds.length} pedidos desde ${dataLonga(ds[0])} · ${etapa(p.etapa).n}</small></div></div>
   <div class="kpis">${kpi('Total comprado', brl(total), `${brl(porMes)} por mês em média`)}${kpi('Ticket médio', brl(total / peds.length), tend != null ? `${tend >= 0 ? '▲' : '▼'} ${Math.round(Math.abs(tend) * 100)}% nos 3 últimos` : '')}${kpi('Compra a cada', inter ? Math.round(inter) + ' dias' : '—', regular !== '—' ? regular : '')}${kpi('Consumo', `${dec(unSem)} un./semana`, `${fmt(unT)} unidades no total · ${dec(unT / peds.length)} por pedido`)}</div>
   <div class="panel pleit"><h3>Leitura do padrão</h3><ul>${leit.map(l => `<li>${l}</li>`).join('')}</ul></div>
@@ -2081,7 +2094,7 @@ async function telaPedidosCliente() {
     <td>${its.length ? its.sort((a, b) => b.q - a.q).map(x => `<span class="dchip" style="--c:${LINHAS_COR[linha(x)] || COR.neutro}">${esc(x.pr ? x.pr.sabor : x.cod)} <b>${x.q}</b></span>`).join('') : '<small style="color:var(--mute)">sem itens</small>'}</td>
     <td>${fmt(un(o))}</td><td>${esc(formaDe(o) || '—')}${Array.isArray(o.pagamentos) && o.pagamentos.length > 1 ? `<br><small>${o.pagamentos.map(x => `${esc(x.forma)} ${brl(x.valor)}`).join(' · ')}</small>` : ''}</td><td style="text-align:right"><b>${brl(o.valor)}</b></td></tr>`; }).join('')}</table></div>
   </div></section>`;
-  $('#dVoltar').onclick = () => irPara('perfil');
+  $('#dVoltar').onclick = () => voltar('perfil');
   ligarGraficos($('#main section'));
   const marcados = () => [...document.querySelectorAll('.dsel:checked')].map(i => i.value);
   document.querySelectorAll('.dsel').forEach(i => i.onchange = () => { const n = marcados().length, b = $('#dEnviar'); b.hidden = !n;
@@ -2104,6 +2117,7 @@ function telaContatos() {
     $('#kN').textContent = ds.length + ' contatos';
     $('#ktbl').innerHTML = `<tr><th>Nome</th><th>Empresa</th><th>Cargo</th><th>Telefone</th><th>E-mail</th><th>Negócios</th></tr>` + ds.map(c => `<tr data-id="${c.id}" style="cursor:pointer"><td><b>${esc(c.nome)}</b>${c.comprador ? ' 🛒' : ''}</td><td>${esc(c.empresa || '')}</td><td>${esc(c.cargo || '')}</td><td>${esc(c.telefone || '')}</td><td>${esc(c.email || '')}</td><td>${neg(c.id).map(p => esc(p.nome)).join(', ') || '—'}</td></tr>`).join('');
     $('#ktbl').querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => abrirContato(tr.dataset.id)); };
+  manter('contatos', ['kq']);
   $('#kq').oninput = draw; draw();
   $('#kNovo').onclick = () => formContato(null);
 }
@@ -2135,7 +2149,7 @@ async function telaContato() {
    <div class="row">${w ? `<a class="btn car" style="text-decoration:none" target="_blank" rel="noopener" href="${w}">WhatsApp ↗</a>` : ''}<button class="btn" id="cEditar">Editar</button><button class="btn" id="cExcluir" style="color:#7A2414">Excluir contato</button></div></div>
   <div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">Tarefas</h3><button class="btn pri" id="cNovaTar" style="padding:5px 10px">+ Nova</button></div><div style="margin-top:8px">${listaTarefas(tars, 'Nenhuma tarefa com este contato.')}</div></div>
   <div class="panel"><h3>Negócios deste contato</h3>${negs.map(p => `<div class="stop" data-id="${p.id}" style="cursor:pointer"><div class="info"><b>${esc(p.nome)}</b>${p.contato_id === c.id ? '' : ' <span class="badge">secundário</span>'}<br><small style="color:var(--mute)">${esc(p.canal || '')} · ${esc(p.cidade || '')}</small></div><span class="badge st" style="background:${etapa(p.etapa).c}">${etapa(p.etapa).n}</span></div>`).join('') || '<p class="empty">Nenhum negócio vinculado.</p>'}</div></div></section>`;
-  $('#cVoltar').onclick = () => irPara('contatos'); $('#cEditar').onclick = () => formContato(c);
+  $('#cVoltar').onclick = () => voltar('contatos'); $('#cEditar').onclick = () => formContato(c);
   $('#cExcluir').onclick = () => { modal(`<h3>Excluir ${esc(c.nome)}?</h3><p style="color:var(--soft)">Apaga só o contato.${negs.length ? ` ${negs.length === 1 ? 'O negócio vinculado continua' : `Os ${negs.length} negócios vinculados continuam`} cadastrado${negs.length > 1 ? 's' : ''}, sem contato.` : ''}${tars.length ? ' As tarefas dele ficam sem contato.' : ''} Não dá para desfazer.</p><div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="cxOk" style="background:#7A2414;border-color:#7A2414">Excluir</button></div>`);
     $('#cxOk').onclick = async () => { try { await db.excluirContato(c.id); fecharModal(); S.contatos = S.contatos.filter(x => x.id !== c.id); S.pdvs.forEach(x => { if (x.contato_id === c.id) x.contato_id = null; }); toast('Contato excluído'); irPara('contatos'); } catch (e) { fecharModal(); erro(e); } }; };
   $('#cNovaTar').onclick = () => modalTarefa({ data: hojeISO(), contato_id: c.id }, telaContato);
