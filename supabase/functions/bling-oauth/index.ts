@@ -182,7 +182,9 @@ async function enviarPedido(pedidoId: string) {
   });
   if (!itens.length) throw new Error('Pedido sem itens');
   descontoReais = Math.round(descontoReais * 100) / 100;
-  const total = itens.reduce((a: number, i: any) => a + i.quantidade * i.valor, 0) - descontoReais;
+  // entrega terceirizada: cobrada do cliente soma no total (frete por conta do destinatário); por nossa conta só fica registrada
+  const frete = Number(ped.frete) || 0, freteCobrado = frete > 0 && ped.frete_cobrado !== false;
+  const total = itens.reduce((a: number, i: any) => a + i.quantidade * i.valor, 0) - descontoReais + (freteCobrado ? frete : 0);
   // parcelas: pagamento dividido (ex.: Pix + Cartão) ou uma forma só; a soma acompanha o total do pedido
   let parcelas: any[] = [];
   const lista = Array.isArray(ped.pagamentos) && ped.pagamentos.length ? ped.pagamentos : null;
@@ -208,9 +210,9 @@ async function enviarPedido(pedidoId: string) {
     ...(cfg.vendedor_id ? { vendedor: { id: Number(cfg.vendedor_id) } } : {}),
     ...(cfg.situacao_id ? { situacao: { id: Number(cfg.situacao_id) } } : {}),
     ...(cfg.categoria_id ? { categoria: { id: Number(cfg.categoria_id) } } : {}),
-    transporte: { fretePorConta: Number(cfg.frete ?? 9) },
+    transporte: frete > 0 ? (freteCobrado ? { fretePorConta: 1, frete } : { fretePorConta: 0 }) : { fretePorConta: Number(cfg.frete ?? 9) },
     observacoes: cfg.observacoes ?? undefined,
-    observacoesInternas: `Lançado pelo app Jaeger Comercial · pedido ${ped.numero} · ${ped.condicao}`,
+    observacoesInternas: `Lançado pelo app Jaeger Comercial · pedido ${ped.numero} · ${ped.condicao}${frete > 0 ? ` · entrega terceirizada R$ ${frete.toFixed(2).replace('.', ',')} ${freteCobrado ? 'cobrada do cliente' : 'por nossa conta'}` : ''}`,
   };
   try {
     const r = await fetch(`${API}/pedidos/vendas`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json', 'enable-jwt': '1' }, body: JSON.stringify(corpo) });

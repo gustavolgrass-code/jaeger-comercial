@@ -784,6 +784,9 @@ function telaAbertura() {
    <div id="oVencBox"><label class="lb">Vencimento</label><input id="oVenc" type="date" value="${isoDe(new Date(Date.now() + 7 * DIA))}"></div>
    <div id="oNBol"><label class="lb">Boletos</label><div class="nbol">${[1, 2, 3, 4].map(n => `<button type="button" data-nbol="${n}" class="${n === 1 ? 'on' : ''}">${n}×</button>`).join('')}</div></div></div>
   <label class="chkcomp"><input type="checkbox" id="oDiv"> Dividir o pagamento (entrada, vários boletos, Pix + cartão…)</label>
+  <label class="chkcomp"><input type="checkbox" id="oFrete"> 🚚 Entrega terceirizada</label>
+  <div id="oFreteBox" class="divpag" hidden><div class="row"><label class="lb" style="margin:0">Custo da entrega</label><input id="oFreteV" type="number" step="0.01" min="0" inputmode="decimal" placeholder="R$" style="width:120px"></div>
+   <div class="row frq"><label><input type="radio" name="ofq" value="1" checked> Cobrar do cliente <small>(soma no pedido)</small></label><label><input type="radio" name="ofq" value="0"> Por nossa conta <small>(só registra o custo)</small></label></div></div>
   <div id="oDivBox" class="divpag" hidden><div id="oParc"></div>
    <div class="row" style="justify-content:space-between"><button type="button" class="mini" id="oAddParc">+ parcela</button><small id="oParcInfo" style="color:var(--mute)"></small></div></div>
   <div class="row" style="justify-content:space-between;flex-wrap:wrap;margin:16px 0 6px"><h3 style="margin:0">Itens do pedido</h3><div class="row" style="gap:6px;flex-wrap:wrap">${p ? '<button class="mini ultped" id="oUlt" title="Preenche as quantidades com o último pedido deste cliente">↻ Último pedido</button>' : ''}<span style="color:var(--mute);font-size:12px">Kits:</span>${KITS.map((k, i) => `<button class="mini" data-kit="${i}">+ ${k.n}</button>`).join('')}<button class="mini" id="oZera">zerar</button></div></div><div id="oItens" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:8px 18px"></div><small style="color:var(--mute)">O preço ao lado de cada linha vale para todos os sabores dela. Em laranja: diferente da tabela do Bling.</small>
@@ -795,13 +798,15 @@ function telaAbertura() {
     return h + `<div class="item-v"><span>${esc(pr.sabor)}</span><input type="hidden" class="opr" data-p="${pr.id}" data-linha="${esc(pr.linha)}" data-tab="${pr.preco}" value="${v.toFixed(2)}">${stepper('oq', 0, false, `data-p="${pr.id}"`)}</div>`; }).join('');
     document.querySelectorAll('.olp').forEach(i => i.oninput = () => { document.querySelectorAll('.opr').forEach(o => { if (o.dataset.linha === i.dataset.linha) o.value = i.value; }); calc(); }); ligarSteppers($('#oItens')); calc(); };
   const cond = () => document.querySelector('input[name=oc]:checked').value;
+  const freteAtual = () => { const on = $('#oFrete')?.checked, v = on ? Math.round((+$('#oFreteV').value || 0) * 100) / 100 : 0; return { v, cobrado: on && v > 0 && document.querySelector('input[name=ofq]:checked')?.value === '1' }; };
   const precoDe = pid => +(document.querySelector(`.opr[data-p="${pid}"]`)?.value) || 0;
   const tabDe = pid => +(document.querySelector(`.opr[data-p="${pid}"]`)?.dataset.tab) || 0;
-  const calc = () => { const qs = [...document.querySelectorAll('.oq')], un = qs.reduce((a, i) => a + (+i.value || 0), 0), tot = qs.reduce((a, i) => a + (+i.value || 0) * precoDe(i.dataset.p), 0), c = cond();
+  const calc = () => { const qs = [...document.querySelectorAll('.oq')], un = qs.reduce((a, i) => a + (+i.value || 0), 0); let tot = qs.reduce((a, i) => a + (+i.value || 0) * precoDe(i.dataset.p), 0), c = cond();
     const desc = qs.reduce((a, i) => a + (+i.value || 0) * Math.max(0, tabDe(i.dataset.p) - precoDe(i.dataset.p)), 0), acima = qs.reduce((a, i) => a + (+i.value || 0) * Math.max(0, precoDe(i.dataset.p) - tabDe(i.dataset.p)), 0);
     $('#oDesc').innerHTML = desc > 0.004 || acima > 0.004 ? `Tabela ${brl(tot + desc - acima)}${desc > 0.004 ? ` · <b style="color:#2F7D4E">desconto − ${brl(desc)}</b>` : ''}${acima > 0.004 ? ` · <b style="color:#8A4E17">acima da tabela + ${brl(acima)}</b>` : ''}` : '';
     document.querySelectorAll('.olp').forEach(i => i.parentElement.classList.toggle('custom', Math.abs((+i.value || 0) - +i.dataset.tab) > 0.001));
-    $('#oUn').textContent = un; $('#oTot').textContent = brl(tot);
+    const fr = freteAtual(); if (fr.cobrado) tot += fr.v;
+    $('#oUn').textContent = un; $('#oTot').textContent = brl(tot); if (fr.v) $('#oDesc').innerHTML += `${$('#oDesc').innerHTML ? ' · ' : ''}🚚 entrega ${brl(fr.v)}${fr.cobrado ? ' (no total)' : ' por nossa conta'}`;
     $('#oInfo').textContent = tot && tot < (+$('#oMin').value || 0) ? 'abaixo do pedido mínimo' : '';
     restoParc(tot); return { un, tot, c }; };
   // parcelas: cada linha com forma, valor e vencimento; a última fica com o restante
@@ -821,6 +826,7 @@ function telaAbertura() {
       return { forma: l.querySelector('.pf').value, valor: v, vencimento: l.querySelector('.pd').value || null }; }); };
   const abrirDiv = on => { $('#oDiv').checked = on; $('#oDivBox').hidden = !on; document.querySelector('.pay').classList.toggle('apagado', on); $('#oVencBox').classList.toggle('apagado', on); };
   $('#oDiv').onchange = () => { abrirDiv($('#oDiv').checked); if ($('#oDiv').checked && !document.querySelector('#oParc .parc')) montarParc([{ f: 'Pix', v: '' }, { f: cond() === 'Boleto' ? 'Boleto' : 'Cartão' }]); };
+  $('#oFrete').onchange = () => { $('#oFreteBox').hidden = !$('#oFrete').checked; calc(); }; $('#oFreteV').oninput = () => calc(); document.querySelectorAll('input[name=ofq]').forEach(x => x.onchange = () => calc());
   $('#oAddParc').onclick = () => { const ls = document.querySelectorAll('#oParc .parc'); if (ls.length >= 6) return toast('Até 6 parcelas');
     $('#oParc').insertAdjacentHTML('beforeend', linhaParc(ls[ls.length - 1]?.querySelector('.pf').value || 'Boleto', ls.length)); ligarParc(); calc(); };
   // atalho: número de boletos divide o total em parcelas iguais com vencimento a cada 7 dias
@@ -854,7 +860,7 @@ function telaAbertura() {
     if (div && parc.some(x => !(x.valor > 0))) return toast('Cada parcela precisa ter valor, e a soma não pode passar do total');
     const formasP = [...new Set(parc.map(x => x.forma))], f1 = formasP[0];
     const c = div ? (formasP.length === 1 ? `${parc.length}× ${f1}` : parc.map(x => x.forma).filter((f, i, a) => a.indexOf(f) === i).join(' + ')) : t.c;
-    const pagExtra = div ? { pagamentos: parc } : {};
+    const fr = freteAtual(), pagExtra = { ...(div ? { pagamentos: parc } : {}), ...(fr.v ? { frete: fr.v, frete_cobrado: fr.cobrado } : {}) };
     const itens = [...document.querySelectorAll('.oq')].map(i => ({ produto_id: +i.dataset.p, quantidade: +i.value || 0, preco_unit: precoDe(i.dataset.p), bonificado: 0 }));
     const novosPrecos = {}; document.querySelectorAll('.opr').forEach(i => { if (Math.abs((+i.value || 0) - +i.dataset.tab) > 0.001) novosPrecos[i.dataset.p] = +(+i.value).toFixed(2); });
     const hoje = new Date(), venc = div ? parc.map(x => x.vencimento).filter(Boolean).sort().pop() || null : ($('#oVenc').value || null), mandar = $('#oBling').checked, guardar = $('#oPadrao').checked;
@@ -876,7 +882,7 @@ function telaAbertura() {
       else if (volta?.aba === 'perfil') abrirPerfil(p.id);
       else if (volta?.aba === 'mapa') { S.sel = p.id; irPara('mapa'); }
       else telaAbertura();
-    } catch (e) { erro(/pagamentos/.test(e.message) ? new Error('Rode o 025_pagamento_dividido_agrupar.sql no Supabase para dividir o pagamento') : e); $('#oSave').disabled = false; }
+    } catch (e) { erro(/pagamentos/.test(e.message) ? new Error('Rode o 025_pagamento_dividido_agrupar.sql no Supabase para dividir o pagamento') : /frete/.test(e.message) ? new Error('Rode o 027_frete.sql no Supabase para lançar o custo da entrega') : e); $('#oSave').disabled = false; }
   };
 }
 

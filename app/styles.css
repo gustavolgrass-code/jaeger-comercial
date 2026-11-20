@@ -468,3 +468,8 @@ section:fullscreen #mapa{height:100vh}
 .nbol button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 10px;font-weight:700;cursor:pointer}
 .nbol button.on{background:var(--choc);color:#fff;border-color:var(--choc)}
 #oVencBox.apagado{opacity:.4;pointer-events:none}
+#oFreteBox[hidden]{display:none!important}
+.frq{flex-wrap:wrap;gap:14px}
+.frq label{display:flex;align-items:center;gap:6px;margin:0;font-weight:600}
+.frq label input{width:auto;margin:0}
+.frq small{font-weight:400;color:var(--mute)}
