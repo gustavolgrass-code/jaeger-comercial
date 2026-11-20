@@ -57,6 +57,45 @@ async function chamar(caminho: string, token: string) {
   throw new Error('Bling ocupado (limite de chamadas). Tente de novo em alguns minutos.');
 }
 
+// mão dupla dos contatos: traz do Bling a pessoa de contato e o cargo dos clientes alterados lá desde a última leitura.
+// vale a edição mais recente: se o contato foi editado no app depois da última leitura, o app ganha (e já mandou para o Bling ao salvar)
+const cargoDe = (t: string) => /dono|propriet|s[óo]ci/i.test(t) ? 'Dono' : /gerente|gestor|encarregad|respons/i.test(t) ? 'Gerente' : /funcion|atendente|caixa|balconista|colaborador/i.test(t) ? 'Funcionário' : null;
+async function contatosDoBling(token: string, ultimaSync: string | null) {
+  const { data: pdvs } = await db.from('pdvs').select('id, nome, contato_id, bling_contato_id').not('bling_contato_id', 'is', null);
+  const porBling = new Map((pdvs ?? []).map((p: any) => [String(p.bling_contato_id), p]));
+  if (!porBling.size) return { contatos_lidos: 0, contatos_atualizados: 0 };
+  let ids: string[] = [];
+  const dia = (d: Date) => d.toISOString().slice(0, 10);
+  if (ultimaSync) {
+    try {
+      const de = dia(new Date(new Date(ultimaSync).getTime() - 864e5)), ate = dia(new Date(Date.now() + 864e5));
+      for (let pagina = 1; pagina <= 20; pagina++) {
+        const r = await chamar(`/contatos?pagina=${pagina}&limite=100&dataAlteracaoInicial=${de}&dataAlteracaoFinal=${ate}`, token);
+        const itens = r?.data ?? []; itens.forEach((c: any) => { if (porBling.has(String(c.id))) ids.push(String(c.id)); });
+        if (itens.length < 100) break;
+      }
+    } catch { ids = [...porBling.keys()]; } // se o filtro por data falhar, confere todos os clientes ligados
+  } else ids = [...porBling.keys()];
+  let atualizados = 0; const novos: unknown[] = [];
+  for (const bid of [...new Set(ids)]) {
+    const p: any = porBling.get(bid); let c: any;
+    try { c = (await chamar(`/contatos/${bid}`, token))?.data; } catch { continue; }
+    const pessoa = String(c?.pessoasContato?.[0]?.descricao ?? '').trim(), info = String(c?.informacoesContato ?? '').trim();
+    if (!pessoa && !info) continue;
+    if (!p.contato_id) { novos.push({ pdv_id: p.id, bling_id: bid, pessoa: pessoa || null, info, telefone: c.telefone ?? null, celular: c.celular ?? null, email: c.email ?? null }); continue; }
+    const { data: ct } = await db.from('contatos').select('id, nome, cargo, observacao, atualizado_em').eq('id', p.contato_id).maybeSingle();
+    if (!ct) continue;
+    if (ultimaSync && new Date(ct.atualizado_em) > new Date(ultimaSync)) continue; // editado no app depois da última leitura: app ganha
+    const cargo = cargoDe(info), patch: Record<string, unknown> = {};
+    if (pessoa && pessoa !== ct.nome) patch.nome = pessoa;
+    if (cargo && cargo !== ct.cargo) patch.cargo = cargo;
+    if (patch.nome && /sem pessoa de contato/.test(ct.observacao ?? '')) patch.observacao = String(ct.observacao).replace(/ ?· ?sem pessoa de contato/, '').trim() || null;
+    if (Object.keys(patch).length) { await db.from('contatos').update({ ...patch, atualizado_em: new Date().toISOString() }).eq('id', ct.id); atualizados++; }
+  }
+  if (novos.length) { const { data: r } = await db.rpc('bling_contatos', { lista: novos }); atualizados += (r as any)?.criados ?? 0; }
+  return { contatos_lidos: ids.length, contatos_atualizados: atualizados };
+}
+
 async function sincronizar() {
   const token = await tokenValido();
   const { data: cx } = await db.from('bling_conexao').select('ultima_sync').eq('id', 1).maybeSingle();
@@ -107,7 +146,8 @@ async function sincronizar() {
   }
   let removidos = 0;
   if (idsBling.length) { const { data: rm, error: e3 } = await db.rpc('bling_remover_ausentes', { ids: idsBling, desde }); if (e3) throw e3; removidos = rm ?? 0; }
-  const resultado = { ...res, lidos: lista.length, removidos };
+  let ctt: Record<string, unknown> = {}; try { ctt = await contatosDoBling(token, cx?.ultima_sync ?? null); } catch (e) { ctt = { contatos_erro: (e as Error).message }; }
+  const resultado = { ...res, lidos: lista.length, removidos, ...ctt };
   await db.from('bling_conexao').update({ ultima_sync: new Date().toISOString(), ultimo_resultado: resultado, ultimo_erro: null }).eq('id', 1);
   return resultado;
 }

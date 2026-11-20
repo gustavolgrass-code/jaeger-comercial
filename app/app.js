@@ -2608,7 +2608,7 @@ function alertasProsp() {
 
 /* =================== integração Bling =================== */
 const quandoB = d => d ? new Date(d).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
-const resumoSync = r => r ? `${r.lidos ?? 0} pedidos lidos · ${r.novos ?? 0} novos · ${r.atualizados ?? 0} atualizados${r.cancelados ? ` · ${r.cancelados} cancelados removidos` : ''}${r.sem_cliente ? ` · ${r.sem_cliente} sem cliente no app` : ''}${r.status_mudou ? ` · ${r.status_mudou} mudaram de ativo/inativo` : ''}${r.removidos ? ` · ${r.removidos} excluídos no Bling removidos do app` : ''}` : '';
+const resumoSync = r => r ? `${r.lidos ?? 0} pedidos lidos · ${r.novos ?? 0} novos · ${r.atualizados ?? 0} atualizados${r.cancelados ? ` · ${r.cancelados} cancelados removidos` : ''}${r.sem_cliente ? ` · ${r.sem_cliente} sem cliente no app` : ''}${r.status_mudou ? ` · ${r.status_mudou} mudaram de ativo/inativo` : ''}${r.removidos ? ` · ${r.removidos} excluídos no Bling removidos do app` : ''}${r.contatos_atualizados ? ` · ${r.contatos_atualizados} contatos atualizados do Bling` : ''}${r.contatos_erro ? ` · contatos: ${r.contatos_erro}` : ''}` : '';
 async function painelBling() {
   const el = $('#blingPanel'); if (!el) return;
   let s; try { s = await db.bling('status'); } catch (e) { el.innerHTML = `<h3>Integração com o Bling</h3><p style="color:var(--soft)">A função do Bling ainda não está instalada no Supabase.</p><small style="color:var(--mute)">${esc(e.message)}</small>`; return; }
