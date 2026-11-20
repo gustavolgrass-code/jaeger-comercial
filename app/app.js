@@ -1292,8 +1292,10 @@ function calcularRota() {
     const s = { id: p.id, tipo: v.tipo === 'reposicao' ? 'rep' : 'prosp', p, urg: RT.prev[p.id]?.urg || 'espera', jan: jan(p), serv: v.tipo === 'reposicao' ? c.tempo_rep : c.tempo_prosp }; if (doTipo(s)) fixos.push(s); });
   // paradas que já estavam na rota salva continuam nela, mesmo que tenham deixado de ser urgentes
   ordemSalva.filter(s => !feito(s) && !tira.has(s.id) && doTipo(s)).forEach(s => { if (s.tipo === 'rep' && !reps.some(x => x.id === s.id)) reps.push(s); if (s.tipo === 'prosp' && !prosps.some(x => x.id === s.id)) prosps.push(s); });
+  [...reps, ...prosps].filter(s => feitos.has(s.id) && !fixos.some(f => f.id === s.id)).forEach(s => fixos.push(s));
   const ehHoje = R.data === hoje(), agoraMin = new Date().getHours() * 60 + new Date().getMinutes();
-  const t0 = fixos.length && ehHoje && agoraMin > ini && agoraMin < fim ? agoraMin : ini, pos0 = fixos.length ? fixos[fixos.length - 1].p : base;
+  const emAndamento = fixos.length && ehHoje && agoraMin > ini && agoraMin < fim; // fora do horário (ex.: testando à noite) a rota parte da casa
+  const t0 = emAndamento ? agoraMin : ini, pos0 = emAndamento ? fixos[fixos.length - 1].p : base;
   const pend = x => !fixos.some(f => f.id === x.id);
   const m = montarOrdem(reps.filter(pend), prosps.filter(pend), ini, fim, base, t0, pos0);
   const naoHoje = fila.filter(x => R.tipo !== 'prospeccao' && !tira.has(x.p.id) && x.urg !== 'espera' && !atendeHoje(x.p) && !incl.has(x.p.id));
