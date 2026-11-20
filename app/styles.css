@@ -456,3 +456,15 @@ section:fullscreen #mapa{height:100vh}
 .sbl.err{background:#F8DCD5;color:#9A2E1A;cursor:help}
 .dped tr.fora td{background:#FFFBF2}
 .dped .dsel{width:17px;height:17px;accent-color:var(--choc)}
+.divpag[hidden],#oNBol[hidden]{display:none!important}
+.divpag{max-width:620px}
+.divpag .parc{flex-wrap:wrap}
+.divpag .parc select{width:120px}
+.divpag .parc .pv{width:110px}
+.divpag .parc .pr{width:110px;display:inline-block}
+.divpag .parc .pr[hidden],.divpag .parc .pv[hidden],.divpag .parc .px[hidden]{display:none}
+.divpag .parc .pd{width:150px}
+.nbol{display:flex;gap:4px}
+.nbol button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 10px;font-weight:700;cursor:pointer}
+.nbol button.on{background:var(--choc);color:#fff;border-color:var(--choc)}
+#oVencBox.apagado{opacity:.4;pointer-events:none}

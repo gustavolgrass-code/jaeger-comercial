@@ -16,19 +16,19 @@ begin
     select produto_id, sum(quantidade)::int q, sum(bonificado)::int b, round(sum(quantidade * preco_unit) / nullif(sum(quantidade), 0), 2) p
     from pedido_itens where pedido_id = any(ids) group by produto_id;
   create temp table _pg on commit drop as
-    select forma, sum(valor) valor, max(venc) vencimento from (
+    select forma, sum(valor) valor, venc vencimento from (
       select coalesce(x->>'forma', o.condicao) forma, (x->>'valor')::numeric valor, (x->>'vencimento')::date venc
         from pedidos o cross join lateral jsonb_array_elements(o.pagamentos) x where o.id = any(ids) and o.pagamentos is not null
       union all
       select o.condicao, o.valor, o.vencimento from pedidos o where o.id = any(ids) and o.pagamentos is null
-    ) t group by forma;
+    ) t group by forma, venc;
 
   update pedidos o set
     unidades = (select sum(unidades) from pedidos where id = any(ids)),
     valor = (select sum(valor) from pedidos where id = any(ids)),
     vencimento = (select max(vencimento) from pedidos where id = any(ids)),
     pagamentos = case when (select count(*) from _pg) > 1 then (select jsonb_agg(jsonb_build_object('forma', forma, 'valor', valor, 'vencimento', vencimento)) from _pg) else null end,
-    condicao = (select string_agg(forma, ' + ' order by valor desc) from _pg),
+    condicao = (select string_agg(f, ' + ' order by f) from (select distinct forma f from _pg) d),
     pago_na_hora = false, bling_status = 'pendente', bling_erro = null
   where o.id = v_princ;
 

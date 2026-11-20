@@ -781,12 +781,11 @@ function telaAbertura() {
    <div><label class="lb">Pedido mínimo combinado (R$)</label><input id="oMin" type="number" step="10" value="150" style="width:100%"></div>
    <div><label class="lb">Repor a cada</label><select id="oCad" style="width:100%"><option value="">${cadPadrao().avaliacao || 7} dias (padrão da avaliação)</option><option value="10">10 dias</option><option value="14">14 dias</option></select></div></div></div>
   <h3 style="margin:16px 0 6px">Pagamento</h3><div class="row" style="flex-wrap:wrap;gap:14px;align-items:flex-end"><div class="pay" style="margin:0">${FORMAS.map((c, i) => `<label><input type="radio" name="oc" value="${c}" ${i === 0 ? 'checked' : ''}> ${c}</label>`).join('')}</div>
-   <div><label class="lb">Vencimento</label><input id="oVenc" type="date" value="${isoDe(new Date(Date.now() + 7 * DIA))}"></div></div>
-  <label class="chkcomp"><input type="checkbox" id="oDiv"> Dividir o pagamento em duas formas</label>
-  <div id="oDivBox" class="divpag" hidden>
-   <div class="row"><select id="oF1">${FORMAS.map(f => `<option ${f === 'Pix' ? 'selected' : ''}>${f}</option>`).join('')}</select><input id="oV1" type="number" step="0.01" min="0" inputmode="decimal" placeholder="Valor"></div>
-   <div class="row"><select id="oF2">${FORMAS.map(f => `<option ${f === 'Cartão' ? 'selected' : ''}>${f}</option>`).join('')}</select><b id="oV2">R$ 0,00</b><small>o restante</small></div>
-  </div>
+   <div id="oVencBox"><label class="lb">Vencimento</label><input id="oVenc" type="date" value="${isoDe(new Date(Date.now() + 7 * DIA))}"></div>
+   <div id="oNBol"><label class="lb">Boletos</label><div class="nbol">${[1, 2, 3, 4].map(n => `<button type="button" data-nbol="${n}" class="${n === 1 ? 'on' : ''}">${n}×</button>`).join('')}</div></div></div>
+  <label class="chkcomp"><input type="checkbox" id="oDiv"> Dividir o pagamento (entrada, vários boletos, Pix + cartão…)</label>
+  <div id="oDivBox" class="divpag" hidden><div id="oParc"></div>
+   <div class="row" style="justify-content:space-between"><button type="button" class="mini" id="oAddParc">+ parcela</button><small id="oParcInfo" style="color:var(--mute)"></small></div></div>
   <div class="row" style="justify-content:space-between;flex-wrap:wrap;margin:16px 0 6px"><h3 style="margin:0">Itens do pedido</h3><div class="row" style="gap:6px;flex-wrap:wrap">${p ? '<button class="mini ultped" id="oUlt" title="Preenche as quantidades com o último pedido deste cliente">↻ Último pedido</button>' : ''}<span style="color:var(--mute);font-size:12px">Kits:</span>${KITS.map((k, i) => `<button class="mini" data-kit="${i}">+ ${k.n}</button>`).join('')}<button class="mini" id="oZera">zerar</button></div></div><div id="oItens" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:8px 18px"></div><small style="color:var(--mute)">O preço ao lado de cada linha vale para todos os sabores dela. Em laranja: diferente da tabela do Bling.</small>
   <div class="row" style="justify-content:space-between;margin-top:14px;flex-wrap:wrap"><div><b id="oUn">0</b> unidades · <span id="oInfo" style="color:var(--soft)"></span></div><div style="text-align:right"><small id="oDesc" style="display:block;color:var(--soft);font-size:12.5px"></small><div style="font-family:Fraunces,Georgia,serif;font-size:26px" id="oTot">R$ 0,00</div></div></div>
   <label class="lb">Observação</label><textarea id="oObs" rows="2" style="width:100%"></textarea>
@@ -804,10 +803,32 @@ function telaAbertura() {
     document.querySelectorAll('.olp').forEach(i => i.parentElement.classList.toggle('custom', Math.abs((+i.value || 0) - +i.dataset.tab) > 0.001));
     $('#oUn').textContent = un; $('#oTot').textContent = brl(tot);
     $('#oInfo').textContent = tot && tot < (+$('#oMin').value || 0) ? 'abaixo do pedido mínimo' : '';
-    if ($('#oV2')) $('#oV2').textContent = brl(Math.max(0, tot - (+$('#oV1').value || 0))); return { un, tot, c }; };
-  $('#oDiv').onchange = () => { $('#oDivBox').hidden = !$('#oDiv').checked; document.querySelector('.pay').classList.toggle('apagado', $('#oDiv').checked); if ($('#oDiv').checked && !$('#oV1').value) { $('#oV1').value = (calc().tot / 2).toFixed(2); } calc(); };
-  $('#oV1').oninput = () => calc();
-  document.querySelectorAll('input[name=oc]').forEach(x => x.onchange = () => { $('#oVenc').value = isoDe(new Date(Date.now() + (cond() === 'Dinheiro' ? 0 : 7) * DIA)); });
+    restoParc(tot); return { un, tot, c }; };
+  // parcelas: cada linha com forma, valor e vencimento; a última fica com o restante
+  const vencDe = (f, i) => isoDe(new Date(Date.now() + (f === 'Boleto' ? 7 * (i + 1) : 0) * DIA));
+  const linhaParc = (f, i, v = '') => `<div class="row parc" data-i="${i}"><select class="pf">${FORMAS.map(x => `<option ${x === f ? 'selected' : ''}>${x}</option>`).join('')}</select>
+    <input class="pv" type="number" step="0.01" min="0" inputmode="decimal" placeholder="Valor" value="${v}"><b class="pr" hidden></b><input class="pd" type="date" value="${vencDe(f, i)}"><button type="button" class="mini px" title="Tirar parcela">✕</button></div>`;
+  function montarParc(lista) { $('#oParc').innerHTML = lista.map((x, i) => linhaParc(x.f, i, x.v ?? '')).join(''); ligarParc(); calc(); }
+  function ligarParc() { const ls = [...document.querySelectorAll('#oParc .parc')];
+    ls.forEach((l, i) => { const ult = i === ls.length - 1; l.querySelector('.pv').hidden = ult; l.querySelector('.pr').hidden = !ult; l.querySelector('.px').hidden = ls.length <= 2;
+      l.querySelector('.pv').oninput = () => calc(); l.querySelector('.pf').onchange = e => { const nBol = ls.slice(0, i).filter(x => x.querySelector('.pf').value === 'Boleto').length; l.querySelector('.pd').value = vencDe(e.target.value, nBol); }; // 1º boleto em 7 dias, 2º em 14…
+      l.querySelector('.px').onclick = () => { l.remove(); ligarParc(); calc(); }; }); }
+  function restoParc(tot) { const ls = [...document.querySelectorAll('#oParc .parc')]; if (!ls.length) return;
+    const pagos = ls.slice(0, -1).reduce((a, l) => a + (+l.querySelector('.pv').value || 0), 0), resto = Math.round((tot - pagos) * 100) / 100;
+    ls[ls.length - 1].querySelector('.pr').textContent = brl(Math.max(0, resto)); $('#oParcInfo').textContent = resto < 0 ? 'as parcelas passam do total' : `${ls.length} parcelas · total ${brl(tot)}`; }
+  const lerParc = tot => { const ls = [...document.querySelectorAll('#oParc .parc')]; let soma = 0;
+    return ls.map((l, i) => { const ult = i === ls.length - 1, v = ult ? Math.round((tot - soma) * 100) / 100 : Math.round((+l.querySelector('.pv').value || 0) * 100) / 100; soma += v;
+      return { forma: l.querySelector('.pf').value, valor: v, vencimento: l.querySelector('.pd').value || null }; }); };
+  const abrirDiv = on => { $('#oDiv').checked = on; $('#oDivBox').hidden = !on; document.querySelector('.pay').classList.toggle('apagado', on); $('#oVencBox').classList.toggle('apagado', on); };
+  $('#oDiv').onchange = () => { abrirDiv($('#oDiv').checked); if ($('#oDiv').checked && !document.querySelector('#oParc .parc')) montarParc([{ f: 'Pix', v: '' }, { f: cond() === 'Boleto' ? 'Boleto' : 'Cartão' }]); };
+  $('#oAddParc').onclick = () => { const ls = document.querySelectorAll('#oParc .parc'); if (ls.length >= 6) return toast('Até 6 parcelas');
+    $('#oParc').insertAdjacentHTML('beforeend', linhaParc(ls[ls.length - 1]?.querySelector('.pf').value || 'Boleto', ls.length)); ligarParc(); calc(); };
+  // atalho: número de boletos divide o total em parcelas iguais com vencimento a cada 7 dias
+  document.querySelectorAll('[data-nbol]').forEach(b => b.onclick = () => { const n = +b.dataset.nbol; document.querySelectorAll('[data-nbol]').forEach(x => x.classList.toggle('on', x === b));
+    if (n === 1) { abrirDiv(false); $('#oParc').innerHTML = ''; return; }
+    const tot = calc().tot, cada = tot ? Math.floor(tot / n * 100) / 100 : ''; abrirDiv(true); montarParc(Array.from({ length: n }, () => ({ f: 'Boleto', v: cada }))); });
+  const mostraNBol = () => { $('#oNBol').hidden = cond() !== 'Boleto'; }; mostraNBol();
+  document.querySelectorAll('input[name=oc]').forEach(x => x.onchange = () => { mostraNBol(); $('#oVenc').value = isoDe(new Date(Date.now() + (cond() === 'Dinheiro' ? 0 : 7) * DIA)); });
   document.querySelectorAll('[data-kit]').forEach(b => b.onclick = () => { const k = KITS[+b.dataset.kit]; Object.entries(k.q).forEach(([cod, q]) => { const pr = S.base.produtos.find(x => x.bling_codigo === cod), inp = pr && document.querySelector(`.oq[data-p="${pr.id}"]`); if (inp) inp.value = (+inp.value || 0) + q; }); calc(); });
   $('#oZera').onclick = () => { document.querySelectorAll('.oq').forEach(i => i.value = 0); calc(); };
   if ($('#oUlt')) $('#oUlt').onclick = async () => { const b = $('#oUlt'); b.disabled = true; b.textContent = 'Buscando…';
@@ -829,13 +850,14 @@ function telaAbertura() {
   if (p) db.precosCliente(p.id).then(pc => { if (S.abPdv !== p.id || !Object.keys(pc || {}).length) return; S.precosCli = pc; const q = {}; document.querySelectorAll('.oq').forEach(i => q[i.dataset.p] = i.value); fill(); document.querySelectorAll('.oq').forEach(i => i.value = q[i.dataset.p] || 0); calc(); toast('Preços combinados com este cliente carregados'); });
   $('#oSave').onclick = async () => {
     const t = calc(); if (!t.un) return toast('Coloque os itens do pedido');
-    const div = $('#oDiv').checked, v1 = Math.round((+$('#oV1').value || 0) * 100) / 100, f1 = $('#oF1').value, f2 = $('#oF2').value;
-    if (div && (f1 === f2 || v1 <= 0 || v1 >= t.tot)) return toast(f1 === f2 ? 'Escolha duas formas diferentes' : 'O valor da primeira forma precisa ser maior que zero e menor que o total');
-    const c = div ? `${f1} + ${f2}` : t.c;
-    const pagExtra = div ? { pagamentos: [{ forma: f1, valor: v1, vencimento: $('#oVenc').value || null }, { forma: f2, valor: Math.round((t.tot - v1) * 100) / 100, vencimento: $('#oVenc').value || null }] } : {};
+    const div = $('#oDiv').checked && document.querySelectorAll('#oParc .parc').length > 1, parc = div ? lerParc(t.tot) : [];
+    if (div && parc.some(x => !(x.valor > 0))) return toast('Cada parcela precisa ter valor, e a soma não pode passar do total');
+    const formasP = [...new Set(parc.map(x => x.forma))], f1 = formasP[0];
+    const c = div ? (formasP.length === 1 ? `${parc.length}× ${f1}` : parc.map(x => x.forma).filter((f, i, a) => a.indexOf(f) === i).join(' + ')) : t.c;
+    const pagExtra = div ? { pagamentos: parc } : {};
     const itens = [...document.querySelectorAll('.oq')].map(i => ({ produto_id: +i.dataset.p, quantidade: +i.value || 0, preco_unit: precoDe(i.dataset.p), bonificado: 0 }));
     const novosPrecos = {}; document.querySelectorAll('.opr').forEach(i => { if (Math.abs((+i.value || 0) - +i.dataset.tab) > 0.001) novosPrecos[i.dataset.p] = +(+i.value).toFixed(2); });
-    const hoje = new Date(), venc = $('#oVenc').value || null, mandar = $('#oBling').checked, guardar = $('#oPadrao').checked;
+    const hoje = new Date(), venc = div ? parc.map(x => x.vencimento).filter(Boolean).sort().pop() || null : ($('#oVenc').value || null), mandar = $('#oBling').checked, guardar = $('#oPadrao').checked;
     $('#oSave').disabled = true;
     try {
       const reg = jaCliente
