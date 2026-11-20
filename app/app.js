@@ -1908,11 +1908,18 @@ async function contatoDoForm(empresa) {
   if (!nome && !tel) return null;
   return obterContato({ nome, telefone: tel, whatsapp: tel, email: $('#kEmail')?.value.trim(), cargo: $('#kCargo')?.value || null, empresa, comprador: !!$('#kComp')?.checked });
 }
+// leva o nome (pessoa de contato) e o cargo (informações do contato) para o cadastro do cliente no Bling
+async function contatoParaBling(contatoId) {
+  if (!S.pdvs.some(p => p.contato_id === contatoId && p.bling_contato_id)) return;
+  try { const r = await db.bling('atualizar_contato', { contato_id: contatoId });
+    if (r?.atualizados) toast(`Bling atualizado: ${r.feitos.join(', ')}`); if (r?.erros?.length) toast('Bling não aceitou: ' + r.erros[0]);
+  } catch (e) { toast(/atualizar_contato|Ação|acao/i.test(e.message) ? 'Para levar ao Bling, atualize a função bling-oauth' : 'Bling: ' + e.message); } }
 // comprador vira o contato principal dos negócios em que aparece como secundário
 async function virarPrincipal(contatoId) {
   let ids = []; try { ids = await db.vinculosDoContato(contatoId); } catch (e) { return; }
   for (const pid of ids) { const p = S.pdvs.find(x => x.id === pid); if (!p || p.contato_id === contatoId) continue;
     await db.atualizarPdv(pid, { contato_id: contatoId }); await db.desvincularContato(pid, contatoId); if (p.contato_id) await db.vincularContato(pid, p.contato_id); await atualizarUm(pid); }
+  if (ids.length) contatoParaBling(contatoId);
   if (ids.length) toast('Comprador agora é o contato principal');
 }
 function abrirPerfil(id) { if (!['perfil', 'contato'].includes(S.aba)) S.voltar = S.aba; S.perfilId = id; S.sel = id; irPara('perfil'); }
@@ -2018,7 +2025,7 @@ async function telaPerfil() {
   document.querySelectorAll('[data-ctabre]').forEach(b => b.onclick = () => abrirContato(b.dataset.ctabre));
   document.querySelectorAll('[data-ctrem]').forEach(b => b.onclick = async () => { try { await db.desvincularContato(p.id, b.dataset.ctrem); toast('Contato removido deste negócio'); telaPerfil(); } catch (e) { erro(e); } });
   document.querySelectorAll('[data-ctprin]').forEach(b => b.onclick = async () => { const novo = b.dataset.ctprin;
-    try { await db.atualizarPdv(p.id, { contato_id: novo }); await db.desvincularContato(p.id, novo); if (p.contato_id) await db.vincularContato(p.id, p.contato_id); await atualizarUm(p.id); toast('Contato principal trocado'); telaPerfil(); } catch (e) { erro(e); } });
+    try { await db.atualizarPdv(p.id, { contato_id: novo }); await db.desvincularContato(p.id, novo); if (p.contato_id) await db.vincularContato(p.id, p.contato_id); await atualizarUm(p.id); toast('Contato principal trocado'); contatoParaBling(novo); telaPerfil(); } catch (e) { erro(e); } });
   ligarJanela('pj');
   $('#pHorOk').onclick = async () => { const v = $('#pHor').value.trim() || null; try { await db.atualizarPdv(p.id, { melhor_horario: v, ...lerJanela('pj') }); p.melhor_horario = v; await atualizarUm(p.id); toast('Janela de atendimento salva'); } catch (e) { erro(/janela_|precisa_dono/.test(e.message) ? new Error('Rode o SQL 018 no Supabase para salvar a janela de atendimento') : e); } };
   document.querySelectorAll('[data-envbling]').forEach(b => b.onclick = async () => { b.disabled = true; await enviarAoBling(b.dataset.envbling, p.nome); telaPerfil(); });
@@ -2143,6 +2150,7 @@ function formContato(c) {
     const ja = acharContato(o, c?.id); if (ja) return toast(`Já existe o contato ${ja.nome} com esse nome, telefone ou e-mail.`);
     try { let salvo; if (c) { salvo = await db.atualizarContato(c.id, o); Object.assign(c, salvo); } else { salvo = await db.criarContato({ ...o, criado_por: S.eu.id }); S.contatos.push(salvo); }
       if (o.comprador && c) await virarPrincipal(salvo.id);
+      if (c && (o.nome !== undefined || o.cargo !== undefined)) contatoParaBling(salvo.id);
       if (o.comprador === true && !c) { /* contato novo ainda não tem negócio */ }
       fecharModal(); toast('Contato salvo'); S.aba === 'contato' ? telaContato() : telaContatos(); } catch (e) { erro(/comprador/.test(e.message) ? new Error('Rode o 024_contato_comprador.sql no Supabase para marcar o comprador') : e); } };
 }

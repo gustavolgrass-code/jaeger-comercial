@@ -230,6 +230,35 @@ async function enviarPedido(pedidoId: string) {
   }
 }
 
+// atualiza no Bling o contato dos negócios em que esta pessoa é o contato principal:
+// nome no app → "Pessoa de contato" no Bling · cargo no app → "Informações do contato"
+async function atualizarContatoBling(contatoId: string) {
+  const { data: c } = await db.from('contatos').select('id, nome, cargo').eq('id', contatoId).maybeSingle();
+  if (!c) throw new Error('Contato não encontrado');
+  const { data: pdvs } = await db.from('pdvs').select('nome, bling_contato_id').eq('contato_id', contatoId).not('bling_contato_id', 'is', null);
+  if (!pdvs?.length) return { ok: true, atualizados: 0 };
+  const token = await tokenValido(), feitos: string[] = [], erros: string[] = [];
+  for (const p of pdvs) {
+    try {
+      const atual = (await chamar(`/contatos/${p.bling_contato_id}`, token))?.data;
+      if (!atual) throw new Error('não achei o contato no Bling');
+      const corpo: Record<string, any> = { ...atual }; delete corpo.id;
+      // campos que o Bling devolve vazios mas recusa de volta
+      if (!corpo.dadosAdicionais?.dataNascimento || /^0000/.test(corpo.dadosAdicionais.dataNascimento)) delete corpo.dadosAdicionais;
+      if (corpo.financeiro?.categoria && !corpo.financeiro.categoria.id) delete corpo.financeiro.categoria;
+      if (corpo.pais && !corpo.pais.nome) delete corpo.pais;
+      if (!corpo.orgaoPublico) delete corpo.orgaoPublico;
+      const pessoas = Array.isArray(atual.pessoasContato) ? atual.pessoasContato : [];
+      corpo.pessoasContato = [{ ...(pessoas[0]?.id ? { id: pessoas[0].id } : {}), descricao: c.nome }, ...pessoas.slice(1)];
+      if (c.cargo) corpo.informacoesContato = c.cargo;
+      const r = await fetch(`${API}/contatos/${p.bling_contato_id}`, { method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json', 'enable-jwt': '1' }, body: JSON.stringify(corpo) });
+      if (!r.ok) { const res = await r.json().catch(() => ({})); throw new Error(`(${r.status}) ${JSON.stringify(res?.error ?? res).slice(0, 300)}`); }
+      feitos.push(p.nome); await esperar(350);
+    } catch (e) { erros.push(`${p.nome}: ${(e as Error).message}`); }
+  }
+  return { ok: !erros.length, atualizados: feitos.length, feitos, erros };
+}
+
 // exclui no Bling o pedido de venda gerado pelo app (usado ao reabrir uma reposição para corrigir)
 async function excluirPedido(pedidoId: string) {
   const { data: ped } = await db.from('pedidos').select('id, bling_id').eq('id', pedidoId).maybeSingle();
@@ -281,7 +310,7 @@ Deno.serve(async (req) => {
   const jwt = (req.headers.get('Authorization') ?? '').replace('Bearer ', '');
   const { data: u } = await db.auth.getUser(jwt);
   if (!u?.user) return json({ erro: 'não autorizado' }, 401);
-  const { acao, inicio, caminho, pedido_id } = await req.json().catch(() => ({}));
+  const { acao, inicio, caminho, pedido_id, contato_id } = await req.json().catch(() => ({}));
   try {
     if (acao === 'status') {
       const { data } = await db.from('bling_conexao').select('conectado_em, ultima_sync, ultimo_resultado, ultimo_erro, refresh_token').eq('id', 1).maybeSingle();
@@ -301,6 +330,7 @@ Deno.serve(async (req) => {
     if (acao === 'itens') return json(await puxarItens());
     if (acao === 'enviar_pedido') return json(await enviarPedido(String(pedido_id || '')));
     if (acao === 'excluir_pedido') return json(await excluirPedido(String(pedido_id || '')));
+    if (acao === 'atualizar_contato') return json(await atualizarContatoBling(String(contato_id || '')));
     return json({ erro: 'ação desconhecida' }, 400);
   } catch (e) {
     const msg = String((e as Error).message ?? e);
