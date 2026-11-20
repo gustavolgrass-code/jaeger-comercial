@@ -397,3 +397,14 @@ section:fullscreen #mapa{height:100vh}
 .stop.done .racoes{opacity:1}
 .mslinhas{display:flex;gap:14px;flex-wrap:wrap;margin:-4px 0 10px;font-size:13px;color:var(--soft)}
 .mslinhas b{color:var(--choc);font-size:15px}
+/* desenho no mapa */
+.leaflet-bar.desenho{display:flex;align-items:flex-end;gap:0;background:#fff;border:2px solid rgba(0,0,0,.2)}
+.leaflet-bar.desenho a{width:26px;height:26px;line-height:26px;text-align:center;font-size:15px;color:var(--choc);background:#fff;text-decoration:none;display:inline-block;border:0;border-radius:0}
+.leaflet-bar.desenho a.on{background:var(--choc);color:var(--cream)}
+.dsbarra:not([hidden]){display:flex;align-items:center;border-right:1px solid #ccc}
+.dscores{display:flex;align-items:center;padding:0 3px}
+.dscores a{width:20px!important}
+.dscores a i{display:block;width:13px;height:13px;border-radius:50%;background:var(--c);margin:6px auto;box-shadow:0 0 0 1px #fff,0 0 0 2px transparent}
+.dscores a.on{background:#fff!important}
+.dscores a.on i{box-shadow:0 0 0 2px #fff,0 0 0 4px var(--c)}
+.desenhando,.desenhando .leaflet-interactive{cursor:crosshair!important;touch-action:none}

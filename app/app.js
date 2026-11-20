@@ -135,6 +135,54 @@ function irPara(a) {
 window.irPara = irPara;
 
 /* =================== mapa =================== */
+// desenho livre no mapa: círculo, quadrado e pincel; fica salvo para todos (regra 'desenhos_mapa')
+const CORES_DES = ['#d03b3b', '#2a78d6', '#1baf7a', '#fab219', '#2E1A12'];
+function ligarDesenho(m) {
+  const D = S.desenho = S.desenho || { modo: null, cor: CORES_DES[0], formas: null };
+  if (!D.formas) D.formas = (S.base.regras.desenhos_mapa || []).slice();
+  const camadaD = L.layerGroup().addTo(m);
+  const forma = f => f.t === 'c' ? L.circle([f.lat, f.lng], { radius: f.r, color: f.cor, weight: 3, fillOpacity: .12, interactive: false })
+    : f.t === 'r' ? L.rectangle(f.b, { color: f.cor, weight: 3, fillOpacity: .12, interactive: false })
+    : L.polyline(f.pts, { color: f.cor, weight: 5, opacity: .8, lineCap: 'round', lineJoin: 'round', interactive: false });
+  const redesenhar = () => { camadaD.clearLayers(); D.formas.forEach(f => forma(f).addTo(camadaD)); };
+  const salvar = async () => { try { await db.salvarRegra('desenhos_mapa', D.formas); S.base.regras.desenhos_mapa = D.formas.slice(); } catch (e) { erro(e); } };
+  redesenhar();
+  const Ctrl = L.Control.extend({ options: { position: 'bottomright' }, onAdd() {
+    const d = L.DomUtil.create('div', 'leaflet-bar desenho');
+    d.innerHTML = `<div class="dsbarra" hidden>
+      <a href="#" data-m="c" title="Círculo">◯</a><a href="#" data-m="r" title="Quadrado">▢</a><a href="#" data-m="p" title="Pincel">✎</a>
+      <span class="dscores">${CORES_DES.map(c => `<a href="#" data-cor="${c}" title="Cor" style="--c:${c}"><i></i></a>`).join('')}</span>
+      <a href="#" data-a="desfazer" title="Desfazer o último">↶</a><a href="#" data-a="limpar" title="Apagar todos os desenhos">🗑</a></div>
+      <a href="#" class="bt-cheia dsabre" title="Desenhar no mapa">🖌</a>`;
+    L.DomEvent.disableClickPropagation(d); L.DomEvent.disableScrollPropagation(d);
+    const barra = d.querySelector('.dsbarra');
+    const marcar = () => { d.querySelectorAll('[data-m]').forEach(a => a.classList.toggle('on', a.dataset.m === D.modo)); d.querySelectorAll('[data-cor]').forEach(a => a.classList.toggle('on', a.dataset.cor === D.cor));
+      d.querySelector('.dsabre').classList.toggle('on', !barra.hidden); m.getContainer().classList.toggle('desenhando', !!D.modo); D.modo ? m.dragging.disable() : m.dragging.enable(); };
+    d.querySelector('.dsabre').onclick = e => { e.preventDefault(); barra.hidden = !barra.hidden; if (barra.hidden) D.modo = null; marcar(); };
+    d.querySelectorAll('[data-m]').forEach(a => a.onclick = e => { e.preventDefault(); D.modo = D.modo === a.dataset.m ? null : a.dataset.m; marcar(); });
+    d.querySelectorAll('[data-cor]').forEach(a => a.onclick = e => { e.preventDefault(); D.cor = a.dataset.cor; marcar(); });
+    d.querySelector('[data-a=desfazer]').onclick = e => { e.preventDefault(); if (!D.formas.length) return; D.formas.pop(); redesenhar(); salvar(); };
+    d.querySelector('[data-a=limpar]').onclick = e => { e.preventDefault(); if (!D.formas.length) return; modal(`<h3>Apagar todos os desenhos do mapa?</h3><p style="color:var(--soft)">São ${D.formas.length} desenho(s). Some para todos que usam o app.</p><div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="dsOk">Apagar</button></div>`); $('#dsOk').onclick = () => { D.formas = []; redesenhar(); salvar(); fecharModal(); }; };
+    marcar(); return d; } });
+  new Ctrl().addTo(m);
+  // traço com o dedo ou o mouse (pointer events servem para os dois)
+  const el = m.getContainer(); let atual = null, ini = null, temp = null;
+  const ll = e => m.mouseEventToLatLng(e);
+  el.addEventListener('pointerdown', e => { if (!D.modo || e.target.closest('.leaflet-control')) return; e.preventDefault(); el.setPointerCapture(e.pointerId); ini = ll(e);
+    atual = D.modo === 'p' ? { t: 'p', cor: D.cor, pts: [[ini.lat, ini.lng]] } : D.modo === 'c' ? { t: 'c', cor: D.cor, lat: ini.lat, lng: ini.lng, r: 1 } : { t: 'r', cor: D.cor, b: [[ini.lat, ini.lng], [ini.lat, ini.lng]] };
+    temp = forma(atual).addTo(m); });
+  el.addEventListener('pointermove', e => { if (!atual) return; const p = ll(e);
+    if (atual.t === 'p') { atual.pts.push([p.lat, p.lng]); temp.addLatLng(p); }
+    else if (atual.t === 'c') { atual.r = ini.distanceTo(p); temp.setRadius(atual.r); }
+    else { atual.b = [[ini.lat, ini.lng], [p.lat, p.lng]]; temp.setBounds(atual.b); } });
+  const fim = () => { if (!atual) return; m.removeLayer(temp);
+    const ok = atual.t === 'p' ? atual.pts.length > 2 : atual.t === 'c' ? atual.r > 5 : Math.abs(atual.b[0][0] - atual.b[1][0]) + Math.abs(atual.b[0][1] - atual.b[1][1]) > 1e-5;
+    if (ok) { if (atual.t === 'p') atual.pts = atual.pts.filter((q, i) => i % 2 === 0 || i === atual.pts.length - 1).map(q => [+q[0].toFixed(6), +q[1].toFixed(6)]); D.formas.push(atual); redesenhar(); salvar(); }
+    atual = null; };
+  el.addEventListener('pointerup', fim); el.addEventListener('pointercancel', fim);
+  // enquanto desenha, o clique não seleciona nem marca ponto no mapa
+  el.addEventListener('click', e => { if (D.modo && !e.target.closest('.leaflet-control')) e.stopPropagation(); }, true);
+}
 let aoMarcar = null, mapa = null, camada = null, camadaSug = null, marcando = false, mostrarReg = true;
 function telaMapa() {
   if (S.prosp) return telaProspeccao();
@@ -150,6 +198,7 @@ function telaMapa() {
   const Cheia = L.Control.extend({ options: { position: 'bottomright' }, onAdd() { const d = L.DomUtil.create('div', 'leaflet-bar'); d.innerHTML = '<a href="#" class="bt-cheia" title="Tela cheia" role="button">⛶</a>'; L.DomEvent.disableClickPropagation(d); d.firstChild.onclick = e => { e.preventDefault(); const sec = $('#mapa').parentElement; if (document.fullscreenElement) document.exitFullscreen(); else (sec.requestFullscreen || sec.webkitRequestFullscreen)?.call(sec); }; return d; } });
   new Cheia().addTo(mapa);
   L.control.zoom({ position: 'bottomright' }).addTo(mapa);
+  ligarDesenho(mapa);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(mapa);
   camada = L.layerGroup().addTo(mapa); camadaSug = L.layerGroup().addTo(mapa);
   mapa.on('click', e => { if (!marcando) return; marcando = false; $('#hint').style.display = 'none'; const f = aoMarcar || (ll => abrirCadastro(ll)); aoMarcar = null; f([e.latlng.lng, e.latlng.lat]); });
