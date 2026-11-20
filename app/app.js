@@ -924,7 +924,7 @@ function grafLinhas(id, xs, series, u, { h = 230, marcas = true } = {}) {
   const X = i => L + (xs.length < 2 ? iw / 2 : i * iw / (xs.length - 1)), Y = v => T + ih - v / top * ih;
   let g = ''; for (let v = 0; v <= top + 1e-9; v += passo) g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="${COR.grid}" stroke-width="1"/><text x="${L - 8}" y="${Y(v) + 4}" text-anchor="end" class="ax">${curto(v, u)}</text>`;
   const rot = [];
-  const passoX = Math.ceil(xs.length / 8); xs.forEach((x, i) => { if (i % passoX === 0 || i === xs.length - 1) g += `<text x="${X(i)}" y="${H - 6}" text-anchor="middle" class="ax">${x}</text>`; });
+  const passoX = Math.ceil(xs.length / 8); xs.forEach((x, i) => { const ult = i === xs.length - 1; if ((i % passoX === 0 && (ult || xs.length - 1 - i >= passoX * 0.6)) || ult) g += `<text x="${X(i)}" y="${H - 6}" text-anchor="middle" class="ax">${x}</text>`; });
   series.forEach(s => {
     let d = '', on = false; s.vals.forEach((v, i) => { if (v == null) { on = false; return; } d += (on ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1); on = true; });
     g += `<path d="${d}" fill="none" stroke="${s.cor}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" ${s.tracejado ? 'stroke-dasharray="5 4"' : ''}/>`;
@@ -1829,7 +1829,8 @@ async function telaPedidosCliente() {
   const sab = {}; Object.values(itens).flat().forEach(x => { const k = x.pr ? x.pr.id : x.cod; sab[k] = sab[k] || { n: x.pr ? x.pr.sabor : x.cod, l: linha(x), q: 0 }; sab[k].q += x.q; });
   const sabL = Object.values(sab).sort((a, b) => b.q - a.q), sabT = sabL.reduce((a, x) => a + x.q, 0);
   const dow = [0, 0, 0, 0, 0, 0, 0]; ds.forEach(d => dow[d.getDay()]++);
-  const pag = {}; peds.forEach(o => { const k = o.condicao || 'Não informado'; pag[k] = (pag[k] || 0) + 1; });
+  const formaDe = o => !o.condicao || /importad/i.test(o.condicao) ? null : o.condicao; // pedidos do Bling vieram sem a forma
+  const pag = {}; peds.forEach(o => { const k = formaDe(o); if (k) pag[k] = (pag[k] || 0) + 1; }), nPag = Object.values(pag).reduce((a, b) => a + b, 0);
   // tendência: média dos 3 últimos pedidos contra a média dos anteriores
   const tick = peds.map(o => Number(o.valor || 0)), ult3 = tick.slice(-3), ant = tick.slice(0, -3);
   const tend = ant.length >= 2 ? (ult3.reduce((a, b) => a + b, 0) / ult3.length) / (ant.reduce((a, b) => a + b, 0) / ant.length) - 1 : null;
@@ -1852,12 +1853,12 @@ async function telaPedidosCliente() {
    <div class="panel"><h3>Intervalo entre pedidos</h3><p class="psub">Dias desde o pedido anterior · traço: intervalo médio</p>${gaps.length ? grafLinhas('dGap', xsP.slice(1), [{ nome: 'Dias', cor: COR.s2, vals: ds.slice(1).map((d, i) => Math.round((d - ds[i]) / DIA)) }, { nome: 'Média', cor: COR.neutro, vals: gaps.map(() => inter), tracejado: true }], 'un') : '<p class="empty">Precisa de 2 pedidos ou mais.</p>'}</div>
    <div class="panel"><h3>Sabores</h3><p class="psub">Unidades de cada sabor em todos os pedidos</p>${sabL.length ? ranking(sabL.map(x => ({ n: x.n + ' · ' + x.l, v: x.q, c: LINHAS_COR[x.l] || COR.neutro, tip: `${Math.round(x.q / sabT * 100)}% das unidades` })), 'un') : '<p class="empty">Sem itens detalhados.</p>'}</div>
    <div class="panel"><h3>Quando e como compra</h3><p class="psub">Pedidos por dia da semana</p>${ranking([1, 2, 3, 4, 5, 6, 0].map(i => ({ n: DIAS[i], v: dow[i], c: COR.s1 })), 'un')}
-    <p class="psub" style="margin-top:14px">Forma de pagamento</p>${ranking(Object.entries(pag).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ n: k, v, c: COR.s3, tip: `${Math.round(v / peds.length * 100)}% dos pedidos` })), 'un')}</div>
+    ${nPag ? `<p class="psub" style="margin-top:14px">Forma de pagamento <small>(${nPag} de ${peds.length} pedidos têm a forma registrada)</small></p>${ranking(Object.entries(pag).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ n: k, v, c: COR.s3, tip: `${Math.round(v / nPag * 100)}% dos pedidos com forma registrada` })), 'un')}` : ''}</div>
   </div>
   <div class="panel"><h3>Todos os pedidos</h3><table class="dped"><tr><th>Data</th><th>Nº</th><th>Itens</th><th>Un.</th><th>Pagamento</th><th style="text-align:right">Valor</th></tr>
    ${peds.slice().reverse().map(o => { const its = itens[o.id] || []; return `<tr><td>${new Date(o.criado_em).toLocaleDateString('pt-BR')}<br><small>${DIAS[new Date(o.criado_em).getDay()].slice(0, 3)}</small></td><td>${esc(o.bling_pedido_id || o.numero || '—')}${o.tipo === 'abertura' ? '<br><small>abertura</small>' : ''}</td>
     <td>${its.length ? its.sort((a, b) => b.q - a.q).map(x => `<span class="dchip" style="--c:${LINHAS_COR[linha(x)] || COR.neutro}">${esc(x.pr ? x.pr.sabor : x.cod)} <b>${x.q}</b></span>`).join('') : '<small style="color:var(--mute)">sem itens</small>'}</td>
-    <td>${fmt(un(o))}</td><td>${esc(o.condicao || '—')}</td><td style="text-align:right"><b>${brl(o.valor)}</b></td></tr>`; }).join('')}</table></div>
+    <td>${fmt(un(o))}</td><td>${esc(formaDe(o) || '—')}</td><td style="text-align:right"><b>${brl(o.valor)}</b></td></tr>`; }).join('')}</table></div>
   </div></section>`;
   $('#dVoltar').onclick = () => irPara('perfil');
   ligarGraficos($('#main section'));
