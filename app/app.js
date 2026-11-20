@@ -1995,7 +1995,8 @@ async function telaPerfil() {
   $('#pVisita').onclick = () => visitaRapida(p, telaPerfil);
   ligarComentario(telaPerfil);
   $('#pEtapa').onchange = e => mudarEtapa(p.id, e.target.value, telaPerfil);
-  $('#pMapa').onclick = () => { S.sel = p.id; irPara('mapa'); if (p.lat) mapa.setView([p.lat, p.lng], 16); };
+  $('#pMapa').onclick = () => { if (p.etapa === 'fechado') return toast('Estabelecimento fechado não aparece no mapa'); if (!p.lat) return toast('Este negócio ainda não tem localização: use Ajustar localização');
+    S.etapasMapa = new Set([p.etapa]); S.modoPend = false; S.sel = p.id; irPara('mapa'); mapa.setView([p.lat, p.lng], 16); }; // abre o mapa filtrado na etapa deste negócio
   $('#pAjustar').onclick = () => { irPara('mapa'); if (p.lat) mapa.setView([p.lat, p.lng], 17); marcando = true; $('#hint').textContent = 'Toque no lugar exato de ' + p.nome; $('#hint').style.display = 'block';
     aoMarcar = async ([lng, lat]) => { try { const g = await geoReverso(lat, lng); await db.atualizarPdv(p.id, { lat, lng, geo_precisao: 'manual', regiao: await garantirRegiao(lng, lat, g.cidade || p.cidade), endereco: g.rua || p.endereco, bairro: g.bairro || p.bairro, cidade: g.cidade || p.cidade }); $('#hint').textContent = 'Toque no mapa onde fica o ponto'; await atualizarUm(p.id); toast('Localização ajustada'); } catch (e) { erro(e); } }; };
   $('#pEditar').onclick = () => { modal(`<h3>Editar ${esc(p.nome)}</h3><label>Nome fantasia</label><input id="eNome" value="${esc(p.nome)}">${campoEmpresa('e', p)}<label>Canal</label>${campoCanal('eCanal', p.canal)}
