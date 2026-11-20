@@ -132,7 +132,7 @@ function irPara(a) {
   S.aba = a;
   $('#nav').innerHTML = ABAS[lado].map(([k, n]) => `<button data-a="${k}" class="${k === a ? 'on' : ''}">${n}</button>`).join('');
   $('#nav').onclick = e => { const k = e.target.dataset.a; if (k) { S.vendaVolta = null; irPara(k); } };
-  ({ agenda: telaAgenda, perfil: telaPerfil, contato: telaContato, contatos: telaContatos, uploads: telaUploads, mapa: telaMapa, funil: telaFunil, carteira: telaCarteira, abertura: telaAbertura, painel: telaPainel, regras: telaRegras, rota: telaRota, reposicao: telaReposicao, resumo: telaResumo })[a]();
+  ({ agenda: telaAgenda, perfil: telaPerfil, contato: telaContato, contatos: telaContatos, uploads: telaUploads, mapa: telaMapa, funil: telaFunil, carteira: telaCarteira, abertura: telaAbertura, painel: telaPainel, regras: telaRegras, rota: telaRota, reposicao: telaReposicao, pedcli: telaPedidosCliente, resumo: telaResumo })[a]();
 }
 window.irPara = irPara;
 
@@ -1777,6 +1777,7 @@ async function telaPerfil() {
   $('#pTrocarContato').onclick = () => { modal(`<h3>Contato de ${esc(p.nome)}</h3>${campoContato()}<div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="kOk">Vincular</button></div>`); document.querySelector('#modalBox details').open = true;
     $('#kOk').onclick = async () => { try { const id = await contatoDoForm(p.nome); if (!id) return toast('Escolha um contato ou preencha o nome'); await db.atualizarPdv(p.id, { contato_id: id }); fecharModal(); await atualizarUm(p.id); toast('Contato vinculado'); telaPerfil(); } catch (e) { erro(e); } }; };
   $('#pExcluirTopo').onclick = () => $('#pExcluir').click();
+  if ($('#pDetPed')) $('#pDetPed').onclick = () => irPara('pedcli');
   $('#pNota').onclick = () => { $('#pNotaBox').hidden = false; $('#pNotaTxt').focus(); };
   $('#pNotaX').onclick = () => { $('#pNotaBox').hidden = true; $('#pNotaTxt').value = ''; };
   $('#pNotaOk').onclick = async () => { const t = $('#pNotaTxt').value.trim(); if (!t) return toast('Escreva a observação');
@@ -1796,6 +1797,70 @@ async function telaPerfil() {
   document.querySelectorAll('[data-envbling]').forEach(b => b.onclick = async () => { b.disabled = true; await enviarAoBling(b.dataset.envbling, p.nome); telaPerfil(); });
   $('#pExcluir').onclick = () => { const np = h.pedidos.length; modal(`<h3>Excluir ${esc(p.nome)}?</h3><p style="color:var(--soft)">Apaga o negócio com as visitas, contagens e tarefas dele${np ? `, <b>e também os ${np} pedido${np > 1 ? 's' : ''} (${brl(h.pedidos.reduce((a, o) => a + Number(o.valor), 0))})</b>` : ''}. O contato vinculado continua cadastrado. Não dá para desfazer.</p>${np ? '<p style="color:var(--soft);font-size:13px">Se é um cliente real que parou de comprar, prefira mudar a etapa para Inativo e manter o histórico.</p>' : ''}<div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="xOk" style="background:#7A2414;border-color:#7A2414">Excluir</button></div>`);
     $('#xOk').onclick = async () => { try { await db.excluirPdv(p.id); fecharModal(); S.pdvs = S.pdvs.filter(x => x.id !== p.id); S.sel = null; toast('Negócio excluído'); irPara('carteira'); } catch (e) { fecharModal(); toast('Erro: ' + e.message); } }; };
+}
+
+/* =================== detalhes de pedidos do cliente =================== */
+const LINHAS_COR = { Brownie: COR.s1, Cookie: COR.s2, Palha: COR.s3 };
+async function telaPedidosCliente() {
+  const p = S.pdvs.find(x => x.id === S.perfilId); if (!p) return irPara('carteira');
+  $('#main').innerHTML = '<section class="view on"><div class="loading">Lendo os pedidos…</div></section>';
+  let peds, it; try { [peds, it] = await Promise.all([db.pedidosDoCliente(p.id), db.itensDoCliente(p.id)]); } catch (e) { return erro(e); }
+  peds = peds.filter(o => !/cancel/i.test(o.bling_situacao || ''));
+  const voltar = `<div class="row" style="gap:8px"><button class="btn" id="dVoltar">← ${esc(p.nome)}</button><span style="color:var(--mute)">Detalhes dos pedidos</span></div>`;
+  if (!peds.length) { $('#main').innerHTML = `<section class="view on"><div class="dash pnl">${voltar}<p class="empty">Este cliente ainda não tem pedidos.</p></div></section>`; $('#dVoltar').onclick = () => irPara('perfil'); return; }
+  // itens por pedido (app primeiro; se o pedido não tem itens no app, usa os do Bling)
+  const prodId = Object.fromEntries(S.base.produtos.map(x => [x.id, x])), porCod = {}; S.base.produtos.forEach(x => { if (x.bling_codigo) porCod[x.bling_codigo] = x; });
+  const itens = {}; it.pitens.forEach(i => (itens[i.pedido_id] = itens[i.pedido_id] || []).push({ pr: prodId[i.produto_id], q: +i.quantidade, v: +i.quantidade * +i.preco_unit }));
+  it.bitens.forEach(i => { if (it.pitens.some(x => x.pedido_id === i.pedido_id)) return; (itens[i.pedido_id] = itens[i.pedido_id] || []).push({ pr: porCod[i.codigo], cod: i.codigo, q: +i.quantidade, v: +i.quantidade * +i.valor - (+i.desconto || 0) }); });
+  const linha = x => (x.pr?.linha || '').split(' ')[0] || 'Outros', un = o => (itens[o.id] || []).reduce((a, x) => a + x.q, 0) || Number(o.unidades) || 0;
+  // números
+  const ds = peds.map(o => new Date(o.criado_em)), total = peds.reduce((a, o) => a + Number(o.valor || 0), 0), unT = peds.reduce((a, o) => a + un(o), 0);
+  const gaps = ds.slice(1).map((d, i) => (d - ds[i]) / DIA).filter(g => g > 0.5), inter = gaps.length ? gaps.reduce((a, b) => a + b, 0) / gaps.length : null;
+  const dp = gaps.length > 1 ? Math.sqrt(gaps.reduce((a, g) => a + (g - inter) ** 2, 0) / gaps.length) : null, cv = dp != null ? dp / inter : null;
+  const regular = cv == null ? '—' : cv < .35 ? 'Regular' : cv < .7 ? 'Oscila' : 'Irregular';
+  const semPed = Math.floor((Date.now() - ds[ds.length - 1]) / DIA), spanD = Math.max(7, (ds[ds.length - 1] - ds[0]) / DIA + (inter || 14));
+  const unSem = unT / spanD * 7, porMes = total / spanD * 30.4;
+  // meses (últimos 12)
+  const hojeD = new Date(), meses = []; for (let i = 11; i >= 0; i--) { const m = new Date(hojeD.getFullYear(), hojeD.getMonth() - i, 1); meses.push({ k: m.getFullYear() + '-' + m.getMonth(), n: m.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', ''), v: 0, q: 0, l: {} }); }
+  peds.forEach(o => { const d = new Date(o.criado_em), m = meses.find(x => x.k === d.getFullYear() + '-' + d.getMonth()); if (!m) return; m.v += Number(o.valor || 0); m.q++;
+    (itens[o.id] || []).forEach(x => { const l = linha(x); m.l[l] = (m.l[l] || 0) + x.q; }); });
+  const linhasUs = [...new Set(Object.values(itens).flat().map(linha))].sort((a, b) => Object.keys(LINHAS_COR).indexOf(a) - Object.keys(LINHAS_COR).indexOf(b));
+  // sabores, dia da semana, pagamento
+  const sab = {}; Object.values(itens).flat().forEach(x => { const k = x.pr ? x.pr.id : x.cod; sab[k] = sab[k] || { n: x.pr ? x.pr.sabor : x.cod, l: linha(x), q: 0 }; sab[k].q += x.q; });
+  const sabL = Object.values(sab).sort((a, b) => b.q - a.q), sabT = sabL.reduce((a, x) => a + x.q, 0);
+  const dow = [0, 0, 0, 0, 0, 0, 0]; ds.forEach(d => dow[d.getDay()]++);
+  const pag = {}; peds.forEach(o => { const k = o.condicao || 'Não informado'; pag[k] = (pag[k] || 0) + 1; });
+  // tendência: média dos 3 últimos pedidos contra a média dos anteriores
+  const tick = peds.map(o => Number(o.valor || 0)), ult3 = tick.slice(-3), ant = tick.slice(0, -3);
+  const tend = ant.length >= 2 ? (ult3.reduce((a, b) => a + b, 0) / ult3.length) / (ant.reduce((a, b) => a + b, 0) / ant.length) - 1 : null;
+  const kpi = (n, v, sub) => `<div class="kpi"><small>${n}</small><b>${v}</b>${sub ? `<small class="sub">${sub}</small>` : ''}</div>`;
+  const leit = [];
+  if (inter) leit.push(`Compra a cada <b>${Math.round(inter)} dias</b> em média (${regular.toLowerCase()}${cv != null ? `, varia ±${Math.round(dp)} dias` : ''}).`);
+  leit.push(semPed > (inter || 30) * 1.5 ? `Está há <b>${semPed} dias</b> sem pedido, ${inter ? `${(semPed / inter).toFixed(1).replace('.', ',')}× o intervalo normal` : 'acima do esperado'}.` : `Último pedido há <b>${semPed} dias</b>, dentro do ritmo.`);
+  if (sabL.length) leit.push(`O sabor que mais sai é <b>${esc(sabL[0].n)}</b> (${Math.round(sabL[0].q / sabT * 100)}% das unidades).`);
+  if (tend != null && Math.abs(tend) >= .1) leit.push(`Os 3 últimos pedidos foram <b>${Math.round(Math.abs(tend) * 100)}% ${tend > 0 ? 'maiores' : 'menores'}</b> que a média anterior.`);
+  const dowMax = Math.max(...dow); if (peds.length >= 4 && dowMax / peds.length >= .4) leit.push(`Costuma comprar na <b>${DIAS[dow.indexOf(dowMax)].toLowerCase()}</b> (${Math.round(dowMax / peds.length * 100)}% dos pedidos).`);
+  const xsP = ds.map(d => d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }));
+  $('#main').innerHTML = `<section class="view on"><div class="dash pnl">${voltar}
+  <div class="pfiltros"><div><h2>${esc(p.nome)}</h2><small>${peds.length} pedidos desde ${dataLonga(ds[0])} · ${etapa(p.etapa).n}</small></div></div>
+  <div class="kpis">${kpi('Total comprado', brl(total), `${brl(porMes)} por mês em média`)}${kpi('Ticket médio', brl(total / peds.length), tend != null ? `${tend >= 0 ? '▲' : '▼'} ${Math.round(Math.abs(tend) * 100)}% nos 3 últimos` : '')}${kpi('Compra a cada', inter ? Math.round(inter) + ' dias' : '—', regular !== '—' ? regular : '')}${kpi('Consumo', `${dec(unSem)} un./semana`, `${fmt(unT)} unidades no total · ${dec(unT / peds.length)} por pedido`)}</div>
+  <div class="panel pleit"><h3>Leitura do padrão</h3><ul>${leit.map(l => `<li>${l}</li>`).join('')}</ul></div>
+  <div class="pgrid">
+   <div class="panel"><h3>Compras por mês</h3><p class="psub">Valor comprado nos últimos 12 meses</p>${grafBarras('dMes', meses.map(m => m.n), [{ nome: 'Valor', cor: COR.s1, vals: meses.map(m => m.v) }], 'R$')}</div>
+   <div class="panel"><h3>Unidades por linha</h3><p class="psub">Unidades por mês, separadas por linha de produto</p>${linhasUs.length ? grafBarras('dLin', meses.map(m => m.n), linhasUs.map(l => ({ nome: l, cor: LINHAS_COR[l] || COR.neutro, vals: meses.map(m => m.l[l] || 0) })), 'un') + legenda(linhasUs.map(l => ({ nome: l, cor: LINHAS_COR[l] || COR.neutro }))) : '<p class="empty">Os pedidos deste cliente não têm itens detalhados.</p>'}</div>
+   <div class="panel"><h3>Valor de cada pedido</h3><p class="psub">Linha: valor do pedido · traço: ticket médio</p>${grafLinhas('dTick', xsP, [{ nome: 'Pedido', cor: COR.s1, vals: tick }, { nome: 'Média', cor: COR.neutro, vals: tick.map(() => total / peds.length), tracejado: true }], 'R$')}</div>
+   <div class="panel"><h3>Intervalo entre pedidos</h3><p class="psub">Dias desde o pedido anterior · traço: intervalo médio</p>${gaps.length ? grafLinhas('dGap', xsP.slice(1), [{ nome: 'Dias', cor: COR.s2, vals: ds.slice(1).map((d, i) => Math.round((d - ds[i]) / DIA)) }, { nome: 'Média', cor: COR.neutro, vals: gaps.map(() => inter), tracejado: true }], 'un') : '<p class="empty">Precisa de 2 pedidos ou mais.</p>'}</div>
+   <div class="panel"><h3>Sabores</h3><p class="psub">Unidades de cada sabor em todos os pedidos</p>${sabL.length ? ranking(sabL.map(x => ({ n: x.n + ' · ' + x.l, v: x.q, c: LINHAS_COR[x.l] || COR.neutro, tip: `${Math.round(x.q / sabT * 100)}% das unidades` })), 'un') : '<p class="empty">Sem itens detalhados.</p>'}</div>
+   <div class="panel"><h3>Quando e como compra</h3><p class="psub">Pedidos por dia da semana</p>${ranking([1, 2, 3, 4, 5, 6, 0].map(i => ({ n: DIAS[i], v: dow[i], c: COR.s1 })), 'un')}
+    <p class="psub" style="margin-top:14px">Forma de pagamento</p>${ranking(Object.entries(pag).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ n: k, v, c: COR.s3, tip: `${Math.round(v / peds.length * 100)}% dos pedidos` })), 'un')}</div>
+  </div>
+  <div class="panel"><h3>Todos os pedidos</h3><table class="dped"><tr><th>Data</th><th>Nº</th><th>Itens</th><th>Un.</th><th>Pagamento</th><th style="text-align:right">Valor</th></tr>
+   ${peds.slice().reverse().map(o => { const its = itens[o.id] || []; return `<tr><td>${new Date(o.criado_em).toLocaleDateString('pt-BR')}<br><small>${DIAS[new Date(o.criado_em).getDay()].slice(0, 3)}</small></td><td>${esc(o.bling_pedido_id || o.numero || '—')}${o.tipo === 'abertura' ? '<br><small>abertura</small>' : ''}</td>
+    <td>${its.length ? its.sort((a, b) => b.q - a.q).map(x => `<span class="dchip" style="--c:${LINHAS_COR[linha(x)] || COR.neutro}">${esc(x.pr ? x.pr.sabor : x.cod)} <b>${x.q}</b></span>`).join('') : '<small style="color:var(--mute)">sem itens</small>'}</td>
+    <td>${fmt(un(o))}</td><td>${esc(o.condicao || '—')}</td><td style="text-align:right"><b>${brl(o.valor)}</b></td></tr>`; }).join('')}</table></div>
+  </div></section>`;
+  $('#dVoltar').onclick = () => irPara('perfil');
+  ligarGraficos($('#main section'));
 }
 
 /* =================== contatos =================== */
@@ -2350,7 +2415,7 @@ function fluxoPedidos(peds, lateral) {
     if (a1.length >= 2 && a2.length >= 2) { const m1 = a1.reduce((a, b) => a + b, 0) / a1.length, m2 = a2.reduce((a, b) => a + b, 0) / a2.length, var_ = (m2 - m1) / m1;
       if (Math.abs(var_) >= .15) leitura += ` O valor por pedido ${var_ > 0 ? 'subiu' : 'caiu'} ${Math.round(Math.abs(var_) * 100)}% na segunda metade do histórico.`; }
   }
-  return `<div class="${lateral ? 'sect' : 'panel'}"><h3>${lateral ? 'Métricas' : 'Fluxo de pedidos'}</h3>
+  return `<div class="${lateral ? 'sect' : 'panel'}">${lateral ? '<h3>Métricas</h3>' : '<div class="row" style="justify-content:space-between;margin-bottom:10px"><h3 style="margin:0">Fluxo de pedidos</h3><button class="btn" id="pDetPed">Detalhes →</button></div>'}
    <div class="kv" style="margin:0 0 10px">${lateral ? `<div><small>Total comprado</small><b>${brl(total)}</b><small>${peds.length} pedido${peds.length === 1 ? '' : 's'} desde ${dataLonga(ds[0])}</small></div>` : ''}<div><small>Ticket médio</small><b>${brl(ticket)}</b></div><div><small>Compra a cada</small><b>${inter ? Math.round(inter) + ' dias' : '—'}</b></div><div><small>Último pedido</small><b>${dataLonga(ult)}</b><small>há ${semPedido} dias</small></div><div><small>Próximo esperado</small><b>${inter ? dataLonga(new Date(+ult + inter * DIA)) : '—'}</b></div></div>
    <div class="fluxo">${meses.map(m => `<div title="${m.n}: ${m.q} pedido${m.q === 1 ? '' : 's'} · ${brl(m.v)}"><i style="height:${Math.round(m.v / max * 100)}%"></i><small>${m.n}</small></div>`).join('')}</div>
    <p style="margin:10px 0 0;font-size:13px;border-left:3px solid ${cor};padding-left:8px">${leitura}</p>${lateral ? checarRegras(peds, inter, semPedido) : ''}</div>`;

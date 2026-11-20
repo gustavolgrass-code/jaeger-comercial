@@ -207,3 +207,5 @@ export async function desvincularContato(pdvId, contatoId) { return ok(await sb.
 export async function notasDoPdv(pdvId) { return ok(await sb.from('pdv_notas').select('id, texto, em, autor, perfis(nome)').eq('pdv_id', pdvId).order('em', { ascending: false })); }
 export async function criarNota(pdvId, texto, autor) { return ok(await sb.from('pdv_notas').insert({ pdv_id: pdvId, texto, autor }).select().single()); }
 export async function excluirNota(id) { return ok(await sb.from('pdv_notas').delete().eq('id', id)); }
+// todos os pedidos de um cliente, para a tela de detalhes de consumo
+export async function pedidosDoCliente(pdvId) { return ok(await sb.from('pedidos').select('id, numero, bling_pedido_id, tipo, valor, unidades, criado_em, condicao, vencimento, bling_situacao, bling_status').eq('pdv_id', pdvId).order('criado_em')); }
