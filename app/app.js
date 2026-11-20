@@ -20,7 +20,9 @@ const ETAPAS = [
   { k: 'mapeado', n: 'Mapeado', c: '#8C7E74' }, { k: 'visitado', n: 'Visitado', c: '#3F6FA8' },
   { k: 'negociacao', n: 'Em negociação', c: '#D08A3C' }, { k: 'perdido', n: 'Perdido', c: '#9A8F86' }, { k: 'avaliacao', n: 'Em avaliação', c: '#6B4FA0' },
   { k: 'revisao', n: 'Revisão comercial', c: '#A23B72' }, { k: 'ativo', n: 'Ativo', c: '#2F7D4E' },
-  { k: 'risco', n: 'Em risco', c: '#B8402A' }, { k: 'inativo', n: 'Inativo', c: '#4A3A31' }];
+  { k: 'risco', n: 'Em risco', c: '#B8402A' }, { k: 'inativo', n: 'Inativo', c: '#4A3A31' },
+  { k: 'fechado', n: 'Estabelecimento fechado', c: '#6E6E6E' }];
+const NO_MAPA = e => e.k !== 'fechado'; // estabelecimento fechado não aparece no mapa
 const etapa = k => ETAPAS.find(e => e.k === k) || ETAPAS[0];
 const CANAIS = ['Minimercado', 'Padaria', 'Fruteira', 'Cantina', 'Conveniência', 'Cafeteria', 'Restaurante', 'Lancheria', 'Outro'];
 const CONDICOES = ['À vista · dinheiro', 'À vista · Pix', 'A prazo · 7 dias', 'A prazo · 14 dias', 'A prazo · 28 dias', 'Consignado', 'Bonificação na abertura'];
@@ -192,7 +194,7 @@ function telaMapa() {
   if (S.prosp) return telaProspeccao();
   $('#main').innerHTML = `<section class="view on" style="display:flex;height:100%"><div id="mapa"><div id="lmap"></div>
    <div class="maptools"><div class="mbusca"><input id="bBusca" autocomplete="off" placeholder="🔍 Buscar cliente…"><div id="bSug" class="sugs"></div></div><button class="btn pri" id="bAdd">+ Cadastrar ponto</button><button class="btn" id="bPend">Reposições pendentes <b id="nPend"></b></button><button class="btn" id="bLoc">📍 Minha localização</button>
-   <select id="fEt"><option value="">Todas as etapas</option>${ETAPAS.map(e => `<option value="${e.k}">${e.n}</option>`).join('')}</select>
+   <select id="fEt"><option value="">Todas as etapas</option>${ETAPAS.filter(NO_MAPA).map(e => `<option value="${e.k}">${e.n}</option>`).join('')}</select>
    <select id="fReg"><option value="">Todas as regiões</option>${S.base.regioes.map(r => `<option value="${r.codigo}">${r.codigo} · ${esc(r.nome)}</option>`).join('')}</select>
    <label class="regchk"><input type="checkbox" id="tReg" ${mostrarReg ? 'checked' : ''}> Regiões</label><button class="btn ${S.nuvens ? 'car' : ''}" id="bNuvem">☁️ Nuvens de potencial</button></div>
    <div class="hint" id="hint">Toque no mapa onde fica o ponto</div>
@@ -208,7 +210,7 @@ function telaMapa() {
   mapa.on('click', e => { if (!marcando) return; marcando = false; $('#hint').style.display = 'none'; const f = aoMarcar || (ll => abrirCadastro(ll)); aoMarcar = null; f([e.latlng.lng, e.latlng.lat]); });
   { const bu = $('#bBusca'), sug = $('#bSug');
     const listar = () => { const q = norm(bu.value).trim(); if (!q) { sug.style.display = 'none'; return; }
-      const ls = S.pdvs.filter(x => norm([x.nome, x.razao_social, x.bairro, x.cidade].filter(Boolean).join(' ')).includes(q)).slice(0, 12);
+      const ls = S.pdvs.filter(x => x.etapa !== 'fechado' && norm([x.nome, x.razao_social, x.bairro, x.cidade].filter(Boolean).join(' ')).includes(q)).slice(0, 12);
       sug.innerHTML = ls.map(x => `<div data-pick="${x.id}"><b>${esc(x.nome)}</b> <small style="color:${etapa(x.etapa).c};font-weight:700">${etapa(x.etapa).n}</small><br><small style="color:var(--mute)">${esc([x.bairro, x.cidade].filter(Boolean).join(' · '))}${x.lat ? '' : ' · sem localização'}</small></div>`).join('') || '<div style="color:var(--mute)">Nenhum cliente encontrado</div>';
       sug.style.display = 'block';
       sug.querySelectorAll('[data-pick]').forEach(d => d.onmousedown = e => { e.preventDefault(); const x = S.pdvs.find(y => y.id === d.dataset.pick); bu.value = ''; sug.style.display = 'none'; bu.blur();
@@ -239,12 +241,12 @@ function desenhar() {
   const pend = repPendentes();
   $('#nPend').textContent = pend.length ? `(${pend.length})` : '';
   $('#bPend').classList.toggle('car', !!S.modoPend);
-  (S.modoPend ? pend : S.pdvs).filter(p => p.lat && (!fe || p.etapa === fe) && (!fr || p.regiao === fr)).forEach(p => {
+  (S.modoPend ? pend : S.pdvs).filter(p => p.lat && p.etapa !== 'fechado' && (!fe || p.etapa === fe) && (!fr || p.regiao === fr)).forEach(p => {
     const m = L.marker([p.lat, p.lng], { icon: pino(etapa(p.etapa).c, S.sel === p.id ? 1.35 : p.classe === 'A' ? 1.15 : 1), zIndexOffset: S.sel === p.id ? 1000 : 0 });
     m.on('click', () => { S.sel = p.id; desenhar(); painel(); });
     m.bindTooltip(esc(p.nome)); m.addTo(camada);
   });
-  $('#legend').innerHTML = ETAPAS.map(e => `<span><i class="dot" style="background:${e.c}"></i>${e.n} (${S.pdvs.filter(p => p.etapa === e.k).length})</span>`).join('');
+  $('#legend').innerHTML = ETAPAS.filter(NO_MAPA).map(e => `<span><i class="dot" style="background:${e.c}"></i>${e.n} (${S.pdvs.filter(p => p.etapa === e.k).length})</span>`).join('');
 }
 function ultimos6(p) {
   const so = (S.sellouts[p.id] || []).slice(-6);
@@ -557,7 +559,7 @@ async function mudarEtapa(id, nova, depois) {
         fecharModal(); await atualizarUm(id); toast(`${p.nome} marcado como perdido (${mot})`); depois && depois(); } catch (e) { erro(e); } };
     return;
   }
-  try { await db.atualizarPdv(id, { etapa: nova, ...(p.etapa === 'perdido' ? { motivo_perda: null, retomar_em: null } : {}) }); await atualizarUm(id); toast('Etapa: ' + etapa(nova).n); depois && depois(); } catch (e) { erro(e); }
+  try { await db.atualizarPdv(id, { etapa: nova, ...(p.etapa === 'perdido' ? { motivo_perda: null, retomar_em: null } : {}) }); await atualizarUm(id); toast('Etapa: ' + etapa(nova).n + (nova === 'fechado' ? ' · saiu do mapa' : '')); if (nova === 'fechado' && S.sel === id) S.sel = null; depois && depois(); } catch (e) { erro(/fechado/.test(e.message) ? new Error('Rode o 023_fechado_classe_d.sql no Supabase') : e); }
 }
 window.mudarEtapa = mudarEtapa;
 
@@ -602,7 +604,7 @@ async function telaFunil() {
   let vis = [], aber = [];
   try { [vis, aber] = await Promise.all([db.visitasEntre(de, ate, 'prospeccao'), db.pedidosEntre(de, ate, 'abertura')]); } catch (e) { console.warn(e); }
   const noPer = x => { const d = ymd(isoDe(new Date(x))); return d >= per.de && d <= per.ate; }, ehHoje = x => isoDe(new Date(x)) === h;
-  const cols = funilVisao === 'prospeccao' ? PROSP : CART, M = metas();
+  const cols = [...(funilVisao === 'prospeccao' ? PROSP : CART), 'fechado'], M = metas(); // fechado: coluna própria nos dois funis
   const filtra = p => p && (!funilFiltro.reg || p.regiao === funilFiltro.reg) && (!funilFiltro.canal || p.canal === funilFiltro.canal) && (!funilFiltro.hoje || (p.acao_data && ymd(p.acao_data) <= h));
   const pdv = id => S.pdvs.find(p => p.id === id);
   const visPer = vis.filter(v => noPer(v.em) && filtra(pdv(v.pdv_id))), visHoje = vis.filter(v => ehHoje(v.em)).length;
@@ -761,7 +763,7 @@ function telaCarteira() {
 
 /* =================== abertura de cliente =================== */
 function telaAbertura() {
-  const elig = S.pdvs.filter(p => p.etapa !== 'perdido').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+  const elig = S.pdvs.filter(p => p.etapa !== 'perdido' && p.etapa !== 'fechado').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
   if (!S.abPdv || !elig.some(p => p.id === S.abPdv)) S.abPdv = (elig.find(p => p.id === S.sel) || elig.find(p => p.etapa === 'negociacao') || elig[0] || {}).id;
   const p = S.pdvs.find(x => x.id === S.abPdv);
   const jaCliente = p && ['avaliacao', 'ativo', 'risco', 'revisao'].includes(p.etapa);
@@ -1767,7 +1769,7 @@ async function telaPerfil() {
     aoMarcar = async ([lng, lat]) => { try { const g = await geoReverso(lat, lng); await db.atualizarPdv(p.id, { lat, lng, geo_precisao: 'manual', regiao: await garantirRegiao(lng, lat, g.cidade || p.cidade), endereco: g.rua || p.endereco, bairro: g.bairro || p.bairro, cidade: g.cidade || p.cidade }); $('#hint').textContent = 'Toque no mapa onde fica o ponto'; await atualizarUm(p.id); toast('Localização ajustada'); } catch (e) { erro(e); } }; };
   $('#pEditar').onclick = () => { modal(`<h3>Editar ${esc(p.nome)}</h3><label>Nome fantasia</label><input id="eNome" value="${esc(p.nome)}">${campoEmpresa('e', p)}<label>Canal</label>${campoCanal('eCanal', p.canal)}
     <label>Endereço</label><input id="eEnd" value="${esc(p.endereco || '')}"><div class="row"><div style="flex:1"><label>Bairro</label><input id="eBai" value="${esc(p.bairro || '')}"></div><div style="flex:1"><label>Cidade</label><input id="eCid" value="${esc(p.cidade || '')}"></div></div>
-    <div class="row"><div style="flex:1"><label>Classe</label><select id="eCla"><option value="">—</option>${['A', 'B', 'C'].map(x => `<option ${x === p.classe ? 'selected' : ''}>${x}</option>`).join('')}</select></div><div style="flex:1"><label>Potencial</label>${campoPot('ePot', p.potencial)}</div></div>
+    <div class="row"><div style="flex:1"><label>Classe</label><select id="eCla"><option value="">—</option>${['A', 'B', 'C', 'D'].map(x => `<option ${x === p.classe ? 'selected' : ''}>${x}</option>`).join('')}</select></div><div style="flex:1"><label>Potencial</label>${campoPot('ePot', p.potencial)}</div></div>
     <label>Observação</label><textarea id="eObs" rows="3">${esc(p.observacao || '')}</textarea><div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="eOk">Salvar</button></div>`);
     ligarCanal('eCanal'); ligarEmpresa('e', 'eNome');
     $('#eOk').onclick = async () => { try { await db.atualizarPdv(p.id, { nome: $('#eNome').value.trim() || p.nome, ...lerEmpresa('e'), canal: lerCanal('eCanal'), endereco: $('#eEnd').value.trim() || null, bairro: $('#eBai').value.trim() || null, cidade: $('#eCid').value.trim() || null, classe: $('#eCla').value || null, potencial: +$('#ePot').value, observacao: $('#eObs').value.trim() || null }); fecharModal(); await atualizarUm(p.id); toast('Dados salvos'); telaPerfil(); } catch (e) { erro(e); } }; };
@@ -2060,7 +2062,7 @@ async function importar(k, linhas, el) {
 }
 async function gravarImportado(k, l, g, base) {
   const contato_id = (l.contato_nome || l.contato_telefone) ? await obterContato({ nome: l.contato_nome, cargo: cargoDe(l.contato_cargo), telefone: l.contato_telefone, whatsapp: l.contato_telefone, empresa: l.nome }) : null;
-  const extra = k === 'negocios' ? { etapa: etapaDe(l.etapa) || 'mapeado', classe: ['A', 'B', 'C'].includes((l.classe || '').toUpperCase()) ? l.classe.toUpperCase() : null, expositor_id: expoDe(l.expositor), condicao: l.condicao || null, origem: 'importacao' } : { etapa: 'mapeado', origem: 'importacao' };
+  const extra = k === 'negocios' ? { etapa: etapaDe(l.etapa) || 'mapeado', classe: ['A', 'B', 'C', 'D'].includes((l.classe || '').toUpperCase()) ? l.classe.toUpperCase() : null, expositor_id: expoDe(l.expositor), condicao: l.condicao || null, origem: 'importacao' } : { etapa: 'mapeado', origem: 'importacao' };
   const n = await db.criarPdv({ ...base, ...extra, contato_id, regiao: await garantirRegiao(g.lng, g.lat, g.cidade) });
   S.pdvs.push({ ...n }); return n;
 }
