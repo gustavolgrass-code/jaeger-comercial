@@ -494,3 +494,5 @@ section:fullscreen #mapa{height:100vh}
 .msmenu input{width:16px;height:16px;margin:0;accent-color:var(--choc)}
 .msatalhos{display:flex;gap:4px;flex-wrap:wrap;padding:2px 2px 8px;border-bottom:1px solid var(--line);margin-bottom:4px}
 .msatalhos button{border:1px solid var(--line);background:#FBF7F0;border-radius:999px;padding:3px 9px;font-size:12px;cursor:pointer}
+.dped tr.lnk{cursor:pointer}
+.dped tr.lnk:hover td{background:var(--sand)}

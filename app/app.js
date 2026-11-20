@@ -1050,6 +1050,51 @@ function ligarGraficos(raiz) {
 }
 const legenda = ss => `<div class="leg">${ss.map(s => `<span><i style="background:${s.cor};${s.tracejado ? 'height:2px;border-top:2px dashed ' + s.cor + ';background:none' : ''}"></i>${esc(s.nome)}</span>`).join('')}</div>`;
 
+/* ---- painel de um dia ---- */
+function painelDia(D, vends) {
+  const hojeI = hojeISO(); if (!PV.dia) PV.dia = hojeI; if (!PV.cmpDia) PV.cmpDia = 'sem';
+  const ini = new Date(PV.dia + 'T00:00'), fim = new Date(+ini + DIA), dC = new Date(+ini - (PV.cmpDia === 'sem' ? 7 : 1) * DIA), fimC = new Date(+dC + DIA);
+  const peds = pedidosDe(D, ini, fim), N = numeros(peds), NC = numeros(pedidosDe(D, dC, fimC));
+  const rotC = PV.cmpDia === 'sem' ? `${DIAS[dC.getDay()].toLowerCase()} passada (${dstr(dC)})` : `dia anterior (${dstr(dC)})`;
+  const dvar = (v, c) => c ? (v - c) / c : null;
+  const card = (n, v, c, u, sub = '') => { const d = dvar(v, c); return `<div class="kpi"><small>${n}</small><b>${fmtV(v, u)}</b><div class="kmeta"><span>vs ${rotC}</span>${d == null ? `<span>${c === 0 && v ? 'novo' : '—'}</span>` : `<span class="${d >= 0 ? 'up' : 'dn'}">${d >= 0 ? '▲' : '▼'} ${Math.abs(Math.round(d * 100))}%</span>`}</div>${sub}</div>`; };
+  // últimos 30 dias até o dia escolhido
+  const dias30 = Array.from({ length: 30 }, (_, i) => new Date(+ini - (29 - i) * DIA)), fat30 = dias30.map(d => numeros(pedidosDe(D, d, new Date(+d + DIA))).fat);
+  const sab = {}; peds.forEach(o => o.itens.forEach(i => { const k = i.l + '|' + i.sabor; sab[k] = sab[k] || { n: i.sabor, l: i.l, q: 0 }; sab[k].q += i.q; }));
+  const sabL = Object.values(sab).sort((a, b) => b.q - a.q), corL = k => (LINHAS.find(l => l.k === k) || {}).c || COR.neutro, nomeL = k => (LINHAS.find(l => l.k === k) || {}).n || '';
+  const vis = D.visitas.filter(v => new Date(v.em) >= ini && new Date(v.em) < fim && (PV.vend === 'todos' || v.usuario_id === PV.vend));
+  const cads = S.pdvs.filter(p => new Date(p.criado_em) >= ini && new Date(p.criado_em) < fim && !['carteira_atual', 'google_maps'].includes(p.origem));
+  const nomeP = id => S.pdvs.find(p => p.id === id)?.nome || 'Cliente';
+  const fds = ini.getDay() === 0 || ini.getDay() === 6;
+  $('#main').innerHTML = `<section class="view on"><div class="dash pnl">
+  <div class="pfiltros"><div><h2>Painel</h2><small>${DIAS[ini.getDay()]}, ${dataLonga(ini)}${PV.dia === hojeI ? ' · hoje, até agora' : ''} · ${PV.vend === 'todos' ? 'todos os vendedores' : esc(nomeVend(PV.vend))}</small></div>
+   <div class="row" style="gap:8px;flex-wrap:wrap"><select id="pvPer"><option value="dia" selected>Por dia</option><option value="mes">Por mês</option><option value="ano">Por ano</option></select>
+   <button class="btn" id="pvDiaAnt" title="Dia anterior">◀</button><input type="date" id="pvDia" value="${PV.dia}" max="${hojeI}"><button class="btn" id="pvDiaProx" title="Próximo dia" ${PV.dia >= hojeI ? 'disabled' : ''}>▶</button>
+   <select id="pvCmpDia"><option value="sem" ${PV.cmpDia === 'sem' ? 'selected' : ''}>vs mesmo dia da semana passada</option><option value="ant" ${PV.cmpDia === 'ant' ? 'selected' : ''}>vs dia anterior</option></select>
+   <select id="pvVend"><option value="todos">Todos os vendedores</option>${vends.map(v => `<option value="${v}" ${PV.vend === v ? 'selected' : ''}>${esc(nomeVend(v))}</option>`).join('')}</select>
+   <button class="btn" id="pvAtual" title="Recarregar os dados">↻</button></div></div>
+  <div class="kpis">${card('Faturamento', N.fat, NC.fat, 'R$')}${card('Margem', N.margem, NC.margem, 'R$', `<small class="sub">${N.margemP != null ? Math.round(N.margemP * 100) + '% de margem' : ''}</small>`)}${card('Pedidos', peds.length, pedidosDe(D, dC, fimC).length, 'un', `<small class="sub">${N.compradores} cliente${N.compradores === 1 ? '' : 's'}</small>`)}${card('Unidades', N.un, NC.un, 'un', `<small class="sub">ticket ${fmtV(N.ticket, 'R$')}</small>`)}</div>
+  <div class="pgrid">
+   <div class="panel"><h3>Últimos 30 dias</h3><p class="psub">Faturamento por dia até ${dstr(ini)}</p>${grafBarras('gDia30', dias30.map(d => String(d.getDate())), [{ nome: 'Faturamento', cor: COR.s1, vals: fat30 }], 'R$')}</div>
+   <div class="panel"><h3>Saída de produtos no dia</h3><p class="psub">Unidades por sabor</p>${sabL.length ? ranking(sabL.map(x => ({ n: `${x.n} · ${nomeL(x.l)}`, v: x.q, c: corL(x.l) })), 'un') : `<p class="empty">${peds.length ? 'Os pedidos do dia não têm itens detalhados.' : 'Nenhum pedido neste dia.'}</p>`}</div>
+  </div>
+  <div class="panel"><h3>Pedidos do dia</h3>${peds.length ? `<table class="dped"><tr><th>Cliente</th><th>Tipo</th><th>Un.</th><th>Vendedor</th><th style="text-align:right">Valor</th></tr>${peds.slice().sort((a, b) => b.valor - a.valor).map(o => `<tr class="lnk" data-pdv="${o.pdv_id}"><td><b>${esc(nomeP(o.pdv_id))}</b></td><td>${o.tipo === 'abertura' ? 'Abertura' : 'Reposição'}</td><td>${fmt(o.un)}</td><td>${esc(nomeVend(o.vend))}</td><td style="text-align:right"><b>${brl(o.valor)}</b></td></tr>`).join('')}</table>` : `<p class="empty">Nenhum pedido em ${dstr(ini)}${fds ? ' (fim de semana)' : ''}.</p>`}</div>
+  <div class="pgrid">
+   <div class="panel"><h3>Atividade do dia</h3><div class="kv" style="margin:0"><div><small>Visitas de prospecção</small><b>${vis.filter(v => v.tipo === 'prospeccao').length}</b></div><div><small>Reposições</small><b>${vis.filter(v => v.tipo === 'reposicao').length}</b></div><div><small>Aberturas</small><b>${vis.filter(v => v.tipo === 'abertura').length}</b></div><div><small>Pontos cadastrados</small><b>${cads.length}</b></div></div></div>
+   <div class="panel"><h3>Faturamento por linha</h3>${ranking(LINHAS.map(l => ({ n: l.n, v: peds.reduce((a, o) => a + o.itens.filter(i => i.l === l.k).reduce((b, i) => b + i.rec, 0), 0), c: l.c })), 'R$')}</div>
+  </div></div></section>`;
+  const vai = d => { PV.dia = d > hojeI ? hojeI : d; telaPainel(); };
+  $('#pvPer').onchange = e => { PV.per = e.target.value; telaPainel(); };
+  $('#pvDia').onchange = e => e.target.value && vai(e.target.value);
+  $('#pvDiaAnt').onclick = () => vai(isoDe(new Date(+ini - DIA)));
+  $('#pvDiaProx').onclick = () => vai(isoDe(new Date(+ini + DIA)));
+  $('#pvCmpDia').onchange = e => { PV.cmpDia = e.target.value; telaPainel(); };
+  $('#pvVend').onchange = e => { PV.vend = e.target.value; telaPainel(); };
+  $('#pvAtual').onclick = () => telaPainel(true);
+  document.querySelectorAll('tr[data-pdv]').forEach(tr => tr.onclick = () => abrirPerfil(tr.dataset.pdv));
+  ligarGraficos($('#main section'));
+}
+
 /* ---- a tela ---- */
 async function telaPainel(recarregarDados) {
   $('#main').innerHTML = '<section class="view on"><div class="loading">Montando o painel…</div></section>';
@@ -1058,6 +1103,7 @@ async function telaPainel(recarregarDados) {
   if (!PV.mes) PV.mes = mesKey(hoje); if (!PV.per) PV.per = 'mes'; if (!PV.ano) PV.ano = String(hoje.getFullYear());
   const meses = [...new Set([mesKey(hoje), ...D.pedidos.map(o => o.mes)])].sort().reverse(), anos = [...new Set(meses.map(m => m.slice(0, 4)))];
   const vends = [...new Set(D.pedidos.map(o => o.vend))];
+  if (PV.per === 'dia') return painelDia(D, vends);
   const porAno = PV.per === 'ano', mes = porAno ? PV.ano + '-12' : PV.mes, mesC = PV.cmp === 'ano' ? mesSoma(mes, -12) : mesSoma(mes, -1);
   const mesesPer = porAno ? Array.from({ length: 12 }, (_, i) => PV.ano + '-' + String(i + 1).padStart(2, '0')) : [mes];
   const ini = porAno ? new Date(+PV.ano, 0, 1) : mesIni(mes), fim = porAno ? new Date(+PV.ano + 1, 0, 1) : mesFim(mes), atual = hoje >= ini && hoje < fim, corte = atual ? hoje : fim;
@@ -1121,7 +1167,7 @@ async function telaPainel(recarregarDados) {
 
   $('#main').innerHTML = `<section class="view on"><div class="dash pnl">
   <div class="pfiltros"><div><h2>Painel</h2><small>${rot}${atual ? ` · ${duPass} de ${duTot.length} dias úteis` : ''} · ${PV.vend === 'todos' ? 'todos os vendedores' : esc(nomeVend(PV.vend))}</small></div>
-   <div class="row" style="gap:8px;flex-wrap:wrap"><select id="pvPer"><option value="mes" ${!porAno ? 'selected' : ''}>Por mês</option><option value="ano" ${porAno ? 'selected' : ''}>Por ano</option></select>
+   <div class="row" style="gap:8px;flex-wrap:wrap"><select id="pvPer"><option value="dia">Por dia</option><option value="mes" ${!porAno ? 'selected' : ''}>Por mês</option><option value="ano" ${porAno ? 'selected' : ''}>Por ano</option></select>
    ${porAno ? `<select id="pvAno">${anos.map(a => `<option ${a === PV.ano ? 'selected' : ''}>${a}</option>`).join('')}</select>` : `<select id="pvMes">${meses.map(k => `<option value="${k}" ${k === mes ? 'selected' : ''}>${mesNome(k)}</option>`).join('')}</select>`}
    ${porAno ? '<span class="pcmp">vs ano anterior</span>' : `<select id="pvCmp"><option value="ant" ${PV.cmp === 'ant' ? 'selected' : ''}>vs mês anterior</option><option value="ano" ${PV.cmp === 'ano' ? 'selected' : ''}>vs mesmo mês do ano passado</option></select>`}
    <select id="pvVend"><option value="todos">Todos os vendedores</option>${vends.map(v => `<option value="${v}" ${PV.vend === v ? 'selected' : ''}>${esc(nomeVend(v))}</option>`).join('')}</select>
