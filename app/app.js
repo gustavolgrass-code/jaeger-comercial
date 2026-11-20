@@ -1699,7 +1699,7 @@ async function telaPerfil() {
   const p = S.pdvs.find(x => x.id === S.perfilId);
   if (!p) { $('#main').innerHTML = '<section class="view on"><div class="empty">Negócio não encontrado.</div></section>'; return; }
   $('#main').innerHTML = '<section class="view on"><div class="loading">Carregando o histórico…</div></section>';
-  let h, tars, secIds = [], semTabelaSec = false; try { [h, tars, secIds] = await Promise.all([db.historico(p.id), db.tarefasDoPdv(p.id), db.vinculosDoPdv(p.id).catch(() => { semTabelaSec = true; return []; })]); } catch (e) { return erro(e); }
+  let h, tars, secIds = [], semTabelaSec = false, notas = [], semNotas = false; try { [h, tars, secIds] = await Promise.all([db.historico(p.id), db.tarefasDoPdv(p.id), db.vinculosDoPdv(p.id).catch(() => { semTabelaSec = true; return []; })]); notas = await db.notasDoPdv(p.id).catch(() => { semNotas = true; return []; }); } catch (e) { return erro(e); }
   const secs = secIds.map(id => S.contatos.find(x => x.id === id)).filter(x => x && x.id !== p.contato_id);
   const c = S.contatos.find(x => x.id === p.contato_id);
   const ev = [];
@@ -1710,6 +1710,7 @@ async function telaPerfil() {
     const t = v.tipo === 'prospeccao' ? 'Visita de prospecção' : v.tipo === 'abertura' ? `Abertura: pedido #${o?.numero ?? '—'} · ${o?.unidades ?? 0} un. · ${brl(o?.valor)} · ${esc(o?.condicao || '')}`
       : `Reposição: sell-out <b>${s?.sellout ?? 0} un.</b> (${brl(s?.valor_sellout)})${s?.trocas ? ` · ${s.trocas} trocas` : ''} · pedido #${o?.numero ?? '—'} ${brl(o?.valor)} · ${esc(o?.condicao || '')}`;
     ev.push({ em: v.em, cor: v.tipo === 'prospeccao' ? '#3F6FA8' : '#D08A3C', t, quem: v.perfis?.nome, obs: v.observacao }); });
+  notas.forEach(n => ev.push({ em: n.em, cor: '#7B4FC0', t: `📝 <b>Observação</b>`, quem: n.perfis?.nome, obs: n.texto, nota: n.id }));
   ev.sort((a, b) => new Date(b.em) - new Date(a.em));
   const podeComprar = p.etapa !== 'perdido';
   $('#main').innerHTML = `<section class="view on"><div class="dash" style="max-width:1100px">
@@ -1732,7 +1733,9 @@ async function telaPerfil() {
     <div class="panel" style="padding:12px 14px"><label style="margin:0 0 8px;display:block;font-weight:700">🕘 Melhor horário para visita</label>${campoJanela('pj', p)}<div class="row" style="gap:8px;margin-top:8px"><input id="pHor" value="${esc(p.melhor_horario || '')}" placeholder="Observação (opcional): ex. depois das 10h, falar com a Carla" style="flex:1"><button class="btn" id="pHorOk">Salvar</button></div></div>
     ${caixaEsteira(p) ? `<div class="panel" style="padding:4px 14px 14px">${caixaEsteira(p)}</div>` : ''}
     ${ultimos6(p) ? `<div class="panel">${ultimos6(p)}</div>` : ''}
-    <div class="panel"><h3>Histórico</h3>${ev.map(e => `<div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--sand)"><i style="width:12px;height:12px;border-radius:50%;background:${e.cor};flex:none;margin-top:4px"></i><div style="flex:1"><div>${e.t}</div>${e.obs ? `<div style="color:var(--soft);margin-top:2px">“${esc(e.obs)}”</div>` : ''}<small style="color:var(--mute)">${quando(e.em)}${e.quem ? ' · ' + esc(e.quem) : ''}</small></div></div>`).join('') || '<p class="empty">Sem histórico ainda.</p>'}</div>
+    <div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">Histórico</h3><button class="btn pri" id="pNota" style="padding:5px 10px">+ Observação</button></div>
+     <div id="pNotaBox" hidden style="margin-top:10px"><textarea id="pNotaTxt" rows="3" style="width:100%" placeholder="Ex.: dono pediu para voltar depois do dia 10; reclamou da validade do palha…"></textarea><div class="row" style="justify-content:flex-end;margin-top:6px"><button class="btn" id="pNotaX">Cancelar</button><button class="btn pri" id="pNotaOk">Salvar no histórico</button></div></div>
+     ${semNotas ? '<small style="display:block;color:var(--mute);margin-top:6px">Rode o 022_observacoes.sql para guardar observações no histórico.</small>' : ''}<div style="margin-top:6px"></div>${ev.map(e => `<div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--sand)"><i style="width:12px;height:12px;border-radius:50%;background:${e.cor};flex:none;margin-top:4px"></i><div style="flex:1"><div>${e.t}</div>${e.obs ? `<div style="color:var(--soft);margin-top:2px">“${esc(e.obs)}”</div>` : ''}<small style="color:var(--mute)">${quando(e.em)}${e.quem ? ' · ' + esc(e.quem) : ''}${e.nota ? ` · <a href="#" data-delnota="${e.nota}" style="color:var(--mute)">excluir</a>` : ''}</small></div></div>`).join('') || '<p class="empty">Sem histórico ainda.</p>'}</div>
    </div>
    <div style="display:flex;flex-direction:column;gap:16px">
     ${campoPrior(p) ? `<div class="panel">${campoPrior(p)}</div>` : ''}
@@ -1772,6 +1775,12 @@ async function telaPerfil() {
   $('#pTrocarContato').onclick = () => { modal(`<h3>Contato de ${esc(p.nome)}</h3>${campoContato()}<div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="kOk">Vincular</button></div>`); document.querySelector('#modalBox details').open = true;
     $('#kOk').onclick = async () => { try { const id = await contatoDoForm(p.nome); if (!id) return toast('Escolha um contato ou preencha o nome'); await db.atualizarPdv(p.id, { contato_id: id }); fecharModal(); await atualizarUm(p.id); toast('Contato vinculado'); telaPerfil(); } catch (e) { erro(e); } }; };
   $('#pExcluirTopo').onclick = () => $('#pExcluir').click();
+  $('#pNota').onclick = () => { $('#pNotaBox').hidden = false; $('#pNotaTxt').focus(); };
+  $('#pNotaX').onclick = () => { $('#pNotaBox').hidden = true; $('#pNotaTxt').value = ''; };
+  $('#pNotaOk').onclick = async () => { const t = $('#pNotaTxt').value.trim(); if (!t) return toast('Escreva a observação');
+    $('#pNotaOk').disabled = true; try { await db.criarNota(p.id, t, S.eu.id); toast('Observação salva no histórico'); telaPerfil(); } catch (e) { $('#pNotaOk').disabled = false; erro(/pdv_notas/.test(e.message) ? new Error('Rode o 022_observacoes.sql no Supabase') : e); } };
+  document.querySelectorAll('[data-delnota]').forEach(a => a.onclick = async e => { e.preventDefault(); modal(`<h3>Excluir esta observação?</h3><div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="nxOk">Excluir</button></div>`);
+    $('#nxOk').onclick = async () => { try { await db.excluirNota(a.dataset.delnota); fecharModal(); toast('Observação excluída'); telaPerfil(); } catch (er) { fecharModal(); erro(er); } }; });
   ligarPrior(p, () => telaPerfil());
   if ($('#pAddSec')) $('#pAddSec').onclick = () => { modal(`<h3>Contato secundário de ${esc(p.nome)}</h3><p style="color:var(--soft);margin-top:0">Ex.: o gerente, quando o principal é o dono.</p>${campoContato()}<div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="kOk">Adicionar</button></div>`); document.querySelector('#modalBox details').open = true;
     $('#kOk').onclick = async () => { try { const id = await contatoDoForm(p.nome); if (!id) return toast('Escolha um contato ou preencha o nome'); if (id === p.contato_id) return toast('Esse já é o contato principal');

@@ -203,3 +203,7 @@ export async function vinculosDoPdv(pdvId) { return ok(await sb.from('pdv_contat
 export async function vinculosDoContato(contatoId) { return ok(await sb.from('pdv_contatos').select('pdv_id').eq('contato_id', contatoId)).map(x => x.pdv_id); }
 export async function vincularContato(pdvId, contatoId) { return ok(await sb.from('pdv_contatos').upsert({ pdv_id: pdvId, contato_id: contatoId })); }
 export async function desvincularContato(pdvId, contatoId) { return ok(await sb.from('pdv_contatos').delete().eq('pdv_id', pdvId).eq('contato_id', contatoId)); }
+// observações livres no histórico do cliente
+export async function notasDoPdv(pdvId) { return ok(await sb.from('pdv_notas').select('id, texto, em, autor, perfis(nome)').eq('pdv_id', pdvId).order('em', { ascending: false })); }
+export async function criarNota(pdvId, texto, autor) { return ok(await sb.from('pdv_notas').insert({ pdv_id: pdvId, texto, autor }).select().single()); }
+export async function excluirNota(id) { return ok(await sb.from('pdv_notas').delete().eq('id', id)); }
