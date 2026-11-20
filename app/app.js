@@ -1267,7 +1267,7 @@ function baseRota() { const c = cfgRota(); return c.lat ? { lat: c.lat, lng: c.l
 function calcularRota() {
   const R = RT.salvo, c = cfgRota(), base = baseRota(), dow = diaSemana(R.data), ini = minDe(R.inicio), fim = minDe(R.fim);
   const mot = RT.perfis.find(x => x.id === R.motorista) || S.eu, moises = /mois/i.test(semAcento(mot.nome || ''));
-  const feitos = new Set(RT.visitas.map(v => v.pdv_id)), incl = new Set(R.incluir), tira = new Set(R.tirar);
+  const feitos = new Set(RT.visitas.filter(v => { const p = S.pdvs.find(q => q.id === v.pdv_id); return ROTA_ETAPAS.includes(p?.etapa) ? v.tipo === 'reposicao' : v.tipo === 'prospeccao'; }).map(v => v.pdv_id)) // cliente só conta como atendido com reposição; prospect, com visita de prospecção, incl = new Set(R.incluir), tira = new Set(R.tirar);
   const jan = p => { const j = JANELAS[p.janela_periodo] || [ini, fim]; return [Math.max(j[0], 0), Math.min(j[1], 24 * 60)]; };
   const atendeHoje = p => !p.janela_dias?.length || p.janela_dias.includes(dow);
   // fila de reposição
@@ -1288,7 +1288,7 @@ function calcularRota() {
   const doTipo = s => R.tipo === 'misto' || (R.tipo === 'reposicao' ? s.tipo === 'rep' : s.tipo === 'prosp');
   const fixos = ordemSalva.filter(s => feito(s) && doTipo(s));
   // quem já foi atendido hoje (mesmo fora da rota salva) entra como feito
-  RT.visitas.filter(v => v.tipo === 'reposicao' || v.tipo === 'prospeccao').forEach(v => { if (fixos.some(f => f.id === v.pdv_id)) return; const p = S.pdvs.find(q => q.id === v.pdv_id); if (!p || !p.lat) return;
+  RT.visitas.filter(v => feitos.has(v.pdv_id)).forEach(v => { if (fixos.some(f => f.id === v.pdv_id)) return; const p = S.pdvs.find(q => q.id === v.pdv_id); if (!p || !p.lat) return;
     const s = { id: p.id, tipo: v.tipo === 'reposicao' ? 'rep' : 'prosp', p, urg: RT.prev[p.id]?.urg || 'espera', jan: jan(p), serv: v.tipo === 'reposicao' ? c.tempo_rep : c.tempo_prosp }; if (doTipo(s)) fixos.push(s); });
   // paradas que já estavam na rota salva continuam nela, mesmo que tenham deixado de ser urgentes
   ordemSalva.filter(s => !feito(s) && !tira.has(s.id) && doTipo(s)).forEach(s => { if (s.tipo === 'rep' && !reps.some(x => x.id === s.id)) reps.push(s); if (s.tipo === 'prosp' && !prosps.some(x => x.id === s.id)) prosps.push(s); });
