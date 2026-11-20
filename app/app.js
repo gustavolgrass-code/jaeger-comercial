@@ -1267,7 +1267,7 @@ function baseRota() { const c = cfgRota(); return c.lat ? { lat: c.lat, lng: c.l
 function calcularRota() {
   const R = RT.salvo, c = cfgRota(), base = baseRota(), dow = diaSemana(R.data), ini = minDe(R.inicio), fim = minDe(R.fim);
   const mot = RT.perfis.find(x => x.id === R.motorista) || S.eu, moises = /mois/i.test(semAcento(mot.nome || ''));
-  const feitos = new Set(RT.visitas.filter(v => { const p = S.pdvs.find(q => q.id === v.pdv_id); return ROTA_ETAPAS.includes(p?.etapa) ? v.tipo === 'reposicao' : v.tipo === 'prospeccao'; }).map(v => v.pdv_id)) // cliente só conta como atendido com reposição; prospect, com visita de prospecção, incl = new Set(R.incluir), tira = new Set(R.tirar);
+  const feitos = new Set(RT.visitas.filter(v => { const p = S.pdvs.find(q => q.id === v.pdv_id); return ROTA_ETAPAS.includes(p?.etapa) ? v.tipo === 'reposicao' : v.tipo === 'prospeccao'; }).map(v => v.pdv_id)), incl = new Set(R.incluir), tira = new Set(R.tirar); // cliente só conta como atendido com reposição; prospect, com visita de prospecção
   const jan = p => { const j = JANELAS[p.janela_periodo] || [ini, fim]; return [Math.max(j[0], 0), Math.min(j[1], 24 * 60)]; };
   const atendeHoje = p => !p.janela_dias?.length || p.janela_dias.includes(dow);
   // fila de reposição
