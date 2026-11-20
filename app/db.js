@@ -209,3 +209,15 @@ export async function criarNota(pdvId, texto, autor) { return ok(await sb.from('
 export async function excluirNota(id) { return ok(await sb.from('pdv_notas').delete().eq('id', id)); }
 // todos os pedidos de um cliente, para a tela de detalhes de consumo
 export async function pedidosDoCliente(pdvId) { return ok(await sb.from('pedidos').select('id, numero, bling_pedido_id, tipo, valor, unidades, criado_em, condicao, vencimento, bling_situacao, bling_status').eq('pdv_id', pdvId).order('criado_em')); }
+// itens do último pedido do cliente (app; se não tiver, os do Bling), para repetir na nova venda
+export async function ultimoPedidoItens(pdvId) {
+  const o = ok(await sb.from('pedidos').select('id, criado_em, condicao, unidades, valor').eq('pdv_id', pdvId).order('criado_em', { ascending: false }).limit(1))[0];
+  if (!o) return null;
+  let its = ok(await sb.from('pedido_itens').select('produto_id, quantidade').eq('pedido_id', o.id));
+  if (!its.length) {
+    const [bi, prods] = await Promise.all([sb.from('bling_itens').select('codigo, quantidade').eq('pedido_id', o.id).then(ok).catch(() => []), sb.from('produtos').select('id, bling_codigo').then(ok)]);
+    const porCod = Object.fromEntries(prods.filter(p => p.bling_codigo).map(p => [p.bling_codigo, p.id]));
+    its = bi.filter(i => porCod[i.codigo]).map(i => ({ produto_id: porCod[i.codigo], quantidade: i.quantidade }));
+  }
+  return { ...o, itens: its };
+}

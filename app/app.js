@@ -779,7 +779,7 @@ function telaAbertura() {
    <div><label class="lb">Repor a cada</label><select id="oCad" style="width:100%"><option value="">${cadPadrao().avaliacao || 7} dias (padrão da avaliação)</option><option value="10">10 dias</option><option value="14">14 dias</option></select></div></div></div>
   <h3 style="margin:16px 0 6px">Pagamento</h3><div class="row" style="flex-wrap:wrap;gap:14px;align-items:flex-end"><div class="pay" style="margin:0">${FORMAS.map((c, i) => `<label><input type="radio" name="oc" value="${c}" ${i === 0 ? 'checked' : ''}> ${c}</label>`).join('')}</div>
    <div><label class="lb">Vencimento</label><input id="oVenc" type="date" value="${isoDe(new Date(Date.now() + 7 * DIA))}"></div></div>
-  <div class="row" style="justify-content:space-between;flex-wrap:wrap;margin:16px 0 6px"><h3 style="margin:0">Itens do pedido</h3><div class="row" style="gap:6px;flex-wrap:wrap"><span style="color:var(--mute);font-size:12px">Kits:</span>${KITS.map((k, i) => `<button class="mini" data-kit="${i}">+ ${k.n}</button>`).join('')}<button class="mini" id="oZera">zerar</button></div></div><div id="oItens" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:8px 18px"></div><small style="color:var(--mute)">O preço ao lado de cada linha vale para todos os sabores dela. Em laranja: diferente da tabela do Bling.</small>
+  <div class="row" style="justify-content:space-between;flex-wrap:wrap;margin:16px 0 6px"><h3 style="margin:0">Itens do pedido</h3><div class="row" style="gap:6px;flex-wrap:wrap">${p ? '<button class="mini ultped" id="oUlt" title="Preenche as quantidades com o último pedido deste cliente">↻ Último pedido</button>' : ''}<span style="color:var(--mute);font-size:12px">Kits:</span>${KITS.map((k, i) => `<button class="mini" data-kit="${i}">+ ${k.n}</button>`).join('')}<button class="mini" id="oZera">zerar</button></div></div><div id="oItens" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:8px 18px"></div><small style="color:var(--mute)">O preço ao lado de cada linha vale para todos os sabores dela. Em laranja: diferente da tabela do Bling.</small>
   <div class="row" style="justify-content:space-between;margin-top:14px;flex-wrap:wrap"><div><b id="oUn">0</b> unidades · <span id="oInfo" style="color:var(--soft)"></span></div><div style="text-align:right"><small id="oDesc" style="display:block;color:var(--soft);font-size:12.5px"></small><div style="font-family:Fraunces,Georgia,serif;font-size:26px" id="oTot">R$ 0,00</div></div></div>
   <label class="lb">Observação</label><textarea id="oObs" rows="2" style="width:100%"></textarea>
   <div class="row" style="margin-top:12px;justify-content:flex-end;gap:14px;flex-wrap:wrap"><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="oPadrao" checked style="width:auto"> Guardar os preços como padrão deste cliente</label><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="oBling" checked style="width:auto"> Criar o pedido no Bling</label><button class="btn pri" id="oSave" ${p ? '' : 'disabled'}>Lançar venda</button></div></div></div></section>`;
@@ -799,6 +799,14 @@ function telaAbertura() {
   document.querySelectorAll('input[name=oc]').forEach(x => x.onchange = () => { $('#oVenc').value = isoDe(new Date(Date.now() + (cond() === 'Dinheiro' ? 0 : 7) * DIA)); });
   document.querySelectorAll('[data-kit]').forEach(b => b.onclick = () => { const k = KITS[+b.dataset.kit]; Object.entries(k.q).forEach(([cod, q]) => { const pr = S.base.produtos.find(x => x.bling_codigo === cod), inp = pr && document.querySelector(`.oq[data-p="${pr.id}"]`); if (inp) inp.value = (+inp.value || 0) + q; }); calc(); });
   $('#oZera').onclick = () => { document.querySelectorAll('.oq').forEach(i => i.value = 0); calc(); };
+  if ($('#oUlt')) $('#oUlt').onclick = async () => { const b = $('#oUlt'); b.disabled = true; b.textContent = 'Buscando…';
+    try { const u = await db.ultimoPedidoItens(p.id); b.disabled = false; b.textContent = '↻ Último pedido';
+      if (!u) return toast('Este cliente ainda não tem pedidos');
+      if (!u.itens.length) return toast(`O último pedido (${dstr(u.criado_em)}) não tem itens detalhados`);
+      document.querySelectorAll('.oq').forEach(i => i.value = 0);
+      let n = 0; u.itens.forEach(i => { const inp = document.querySelector(`.oq[data-p="${i.produto_id}"]`); if (inp) { inp.value = (+inp.value || 0) + Math.round(+i.quantidade); n += Math.round(+i.quantidade); } });
+      calc(); toast(`Copiado o pedido de ${dstr(u.criado_em)}: ${n} un. Ajuste o que precisar.`);
+    } catch (e) { b.disabled = false; b.textContent = '↻ Último pedido'; erro(e); } };
   const bu = $('#oBusca'), sug = $('#oSug');
   const listar = () => { const q = norm(bu.value).trim(), ls = elig.filter(x => !q || norm([x.nome, x.razao_social, x.bairro, x.cidade].filter(Boolean).join(' ')).includes(q)).slice(0, 12);
     sug.innerHTML = ls.map(x => `<div data-pick="${x.id}"><b>${esc(x.nome)}</b> <small style="color:${etapa(x.etapa).c};font-weight:700">${etapa(x.etapa).n}</small><br><small style="color:var(--mute)">${esc([x.bairro, x.cidade].filter(Boolean).join(' · '))}</small></div>`).join('') || '<div style="color:var(--mute)">Nenhum cliente encontrado</div>';
@@ -1676,20 +1684,28 @@ function acharContato({ nome, telefone, whatsapp, email }, ignorar) {
 async function obterContato(dados) {
   if (!dados.nome && !dados.telefone) return null;
   const achado = acharContato(dados); if (achado) { toast(`Contato ${achado.nome} já existia e foi vinculado`); return achado.id; }
-  const c = await db.criarContato({ nome: dados.nome || dados.telefone, empresa: dados.empresa || null, cargo: dados.cargo || null, telefone: dados.telefone || null, whatsapp: dados.whatsapp || null, email: dados.email || null, cnpj: dados.cnpj || null, observacao: dados.observacao || null, criado_por: S.eu.id });
+  const c = await db.criarContato({ ...(dados.comprador ? { comprador: true } : {}), nome: dados.nome || dados.telefone, empresa: dados.empresa || null, cargo: dados.cargo || null, telefone: dados.telefone || null, whatsapp: dados.whatsapp || null, email: dados.email || null, cnpj: dados.cnpj || null, observacao: dados.observacao || null, criado_por: S.eu.id });
   S.contatos.push(c); return c.id;
 }
 function campoContato() {
   return `<details style="margin-top:10px;background:var(--sand);border-radius:10px;padding:8px 10px"><summary style="cursor:pointer;font-weight:700;font-size:13px">Contato (responsável)</summary>
   <label>Contato já cadastrado</label><select id="kSel"><option value="">— novo contato —</option>${S.contatos.map(c => `<option value="${c.id}">${esc(c.nome)}${c.empresa ? ' · ' + esc(c.empresa) : ''}</option>`).join('')}</select>
   <div class="row"><div style="flex:1"><label>Nome</label><input id="kNome"></div><div style="flex:1"><label>Cargo</label><select id="kCargo"><option value="">—</option>${CARGOS.map(c => `<option>${c}</option>`).join('')}</select></div></div>
-  <div class="row"><div style="flex:1"><label>Telefone / WhatsApp</label><input id="kTel" inputmode="tel"></div><div style="flex:1"><label>E-mail</label><input id="kEmail" type="email"></div></div></details>`;
+  <div class="row"><div style="flex:1"><label>Telefone / WhatsApp</label><input id="kTel" inputmode="tel"></div><div style="flex:1"><label>E-mail</label><input id="kEmail" type="email"></div></div>
+  <label class="chkcomp"><input type="checkbox" id="kComp"> 🛒 É o comprador</label></details>`;
 }
 async function contatoDoForm(empresa) {
   if ($('#kSel') && $('#kSel').value) return $('#kSel').value;
   const nome = $('#kNome')?.value.trim(), tel = $('#kTel')?.value.trim();
   if (!nome && !tel) return null;
-  return obterContato({ nome, telefone: tel, whatsapp: tel, email: $('#kEmail')?.value.trim(), cargo: $('#kCargo')?.value || null, empresa });
+  return obterContato({ nome, telefone: tel, whatsapp: tel, email: $('#kEmail')?.value.trim(), cargo: $('#kCargo')?.value || null, empresa, comprador: !!$('#kComp')?.checked });
+}
+// comprador vira o contato principal dos negócios em que aparece como secundário
+async function virarPrincipal(contatoId) {
+  let ids = []; try { ids = await db.vinculosDoContato(contatoId); } catch (e) { return; }
+  for (const pid of ids) { const p = S.pdvs.find(x => x.id === pid); if (!p || p.contato_id === contatoId) continue;
+    await db.atualizarPdv(pid, { contato_id: contatoId }); await db.desvincularContato(pid, contatoId); if (p.contato_id) await db.vincularContato(pid, p.contato_id); await atualizarUm(pid); }
+  if (ids.length) toast('Comprador agora é o contato principal');
 }
 function abrirPerfil(id) { if (!['perfil', 'contato'].includes(S.aba)) S.voltar = S.aba; S.perfilId = id; S.sel = id; irPara('perfil'); }
 function abrirContato(id) { S.contatoId = id; irPara('contato'); }
@@ -1741,11 +1757,11 @@ async function telaPerfil() {
    </div>
    <div style="display:flex;flex-direction:column;gap:16px">
     ${campoPrior(p) ? `<div class="panel">${campoPrior(p)}</div>` : ''}
-    <div class="panel"><h3>Contatos</h3>${faltaContato(p).length ? `<div style="margin:-4px 0 10px">${avisoContato(p)}</div>` : ''}${c ? `<small class="ctpapel">Principal</small><div style="font-size:18px;font-weight:700">${esc(c.nome)}</div><div style="color:var(--soft)">${esc([c.cargo, c.empresa].filter(Boolean).join(' · '))}</div>
+    <div class="panel"><h3>Contatos</h3>${faltaContato(p).length ? `<div style="margin:-4px 0 10px">${avisoContato(p)}</div>` : ''}${c ? `<small class="ctpapel">Principal</small><div style="font-size:18px;font-weight:700">${esc(c.nome)} ${c.comprador ? '<span class="badge comp">🛒 Comprador</span>' : ''}</div><div style="color:var(--soft)">${esc([c.cargo, c.empresa].filter(Boolean).join(' · '))}</div>
      <p style="margin:8px 0;line-height:1.7">${c.telefone ? `📞 ${esc(c.telefone)}<br>` : ''}${c.email ? `✉️ ${esc(c.email)}<br>` : ''}</p>
      <div class="row" style="flex-wrap:wrap">${linkWpp(c.whatsapp || c.telefone) ? `<a class="btn car" style="text-decoration:none" target="_blank" rel="noopener" href="${linkWpp(c.whatsapp || c.telefone)}">WhatsApp ↗</a>` : ''}<button class="btn" id="pVerContato">Abrir contato</button><button class="btn" id="pTrocarContato">Trocar</button></div>`
       : `<p class="empty" style="padding:6px 0">Nenhum contato vinculado.</p><button class="btn pri" id="pTrocarContato">Vincular contato</button>`}
-     ${secs.map(s => `<div class="ctsec"><small class="ctpapel">Secundário</small><div><b>${esc(s.nome)}</b> <span style="color:var(--soft)">${esc(s.cargo || '')}</span></div>
+     ${secs.map(s => `<div class="ctsec"><small class="ctpapel">Secundário</small><div><b>${esc(s.nome)}</b> <span style="color:var(--soft)">${esc(s.cargo || '')}</span>${s.comprador ? ' <span class="badge comp">🛒 Comprador</span>' : ''}</div>
        <div style="font-size:13px;color:var(--soft);line-height:1.6">${s.telefone ? `📞 ${esc(s.telefone)}<br>` : ''}${s.email ? `✉️ ${esc(s.email)}` : ''}</div>
        <div class="row" style="flex-wrap:wrap;gap:6px;margin-top:4px">${linkWpp(s.whatsapp || s.telefone) ? `<a class="mini" style="text-decoration:none" target="_blank" rel="noopener" href="${linkWpp(s.whatsapp || s.telefone)}">WhatsApp ↗</a>` : ''}<button class="mini" data-ctabre="${s.id}">abrir</button><button class="mini" data-ctprin="${s.id}">tornar principal</button><button class="mini" data-ctrem="${s.id}">remover</button></div></div>`).join('')}
      ${c ? `<button class="btn" id="pAddSec" style="margin-top:10px">+ Contato secundário</button>` : ''}${semTabelaSec ? '<small style="display:block;color:var(--mute);margin-top:6px">Rode o 020_contatos_secundarios.sql para usar contatos secundários.</small>' : ''}</div>
@@ -1787,6 +1803,9 @@ async function telaPerfil() {
   ligarPrior(p, () => telaPerfil());
   if ($('#pAddSec')) $('#pAddSec').onclick = () => { modal(`<h3>Contato secundário de ${esc(p.nome)}</h3><p style="color:var(--soft);margin-top:0">Ex.: o gerente, quando o principal é o dono.</p>${campoContato()}<div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="kOk">Adicionar</button></div>`); document.querySelector('#modalBox details').open = true;
     $('#kOk').onclick = async () => { try { const id = await contatoDoForm(p.nome); if (!id) return toast('Escolha um contato ou preencha o nome'); if (id === p.contato_id) return toast('Esse já é o contato principal');
+      const comp = $('#kComp')?.checked;
+      if (comp) { if ($('#kSel').value) await db.atualizarContato(id, { comprador: true }).then(n => Object.assign(S.contatos.find(x => x.id === id) || {}, n)).catch(() => { });
+        await db.atualizarPdv(p.id, { contato_id: id }); if (p.contato_id) await db.vincularContato(p.id, p.contato_id); await atualizarUm(p.id); fecharModal(); toast('Comprador adicionado como contato principal'); return telaPerfil(); }
       await db.vincularContato(p.id, id); fecharModal(); toast('Contato secundário adicionado'); telaPerfil(); } catch (e) { erro(/pdv_contatos/.test(e.message) ? new Error('Rode o 020_contatos_secundarios.sql no Supabase') : e); } }; };
   document.querySelectorAll('[data-ctabre]').forEach(b => b.onclick = () => abrirContato(b.dataset.ctabre));
   document.querySelectorAll('[data-ctrem]').forEach(b => b.onclick = async () => { try { await db.desvincularContato(p.id, b.dataset.ctrem); toast('Contato removido deste negócio'); telaPerfil(); } catch (e) { erro(e); } });
@@ -1871,7 +1890,7 @@ function telaContatos() {
   const neg = id => S.pdvs.filter(p => p.contato_id === id);
   const draw = () => { const q = norm($('#kq').value); const ds = S.contatos.filter(c => !q || norm(c.nome + ' ' + (c.empresa || '') + ' ' + (c.telefone || '')).includes(q));
     $('#kN').textContent = ds.length + ' contatos';
-    $('#ktbl').innerHTML = `<tr><th>Nome</th><th>Empresa</th><th>Cargo</th><th>Telefone</th><th>E-mail</th><th>Negócios</th></tr>` + ds.map(c => `<tr data-id="${c.id}" style="cursor:pointer"><td><b>${esc(c.nome)}</b></td><td>${esc(c.empresa || '')}</td><td>${esc(c.cargo || '')}</td><td>${esc(c.telefone || '')}</td><td>${esc(c.email || '')}</td><td>${neg(c.id).map(p => esc(p.nome)).join(', ') || '—'}</td></tr>`).join('');
+    $('#ktbl').innerHTML = `<tr><th>Nome</th><th>Empresa</th><th>Cargo</th><th>Telefone</th><th>E-mail</th><th>Negócios</th></tr>` + ds.map(c => `<tr data-id="${c.id}" style="cursor:pointer"><td><b>${esc(c.nome)}</b>${c.comprador ? ' 🛒' : ''}</td><td>${esc(c.empresa || '')}</td><td>${esc(c.cargo || '')}</td><td>${esc(c.telefone || '')}</td><td>${esc(c.email || '')}</td><td>${neg(c.id).map(p => esc(p.nome)).join(', ') || '—'}</td></tr>`).join('');
     $('#ktbl').querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => abrirContato(tr.dataset.id)); };
   $('#kq').oninput = draw; draw();
   $('#kNovo').onclick = () => formContato(null);
@@ -1881,21 +1900,24 @@ function formContato(c) {
   <div class="row"><div style="flex:1"><label>Empresa</label><input id="fEmp" value="${esc(c?.empresa || '')}"></div><div style="flex:1"><label>Cargo</label><select id="fCargo"><option value="">—</option>${CARGOS.map(x => `<option ${x === c?.cargo ? 'selected' : ''}>${x}</option>`).join('')}</select></div></div>
   <div class="row"><div style="flex:1"><label>Telefone</label><input id="fTel" value="${esc(c?.telefone || '')}"></div><div style="flex:1"><label>WhatsApp</label><input id="fWpp" value="${esc(c?.whatsapp || '')}"></div></div>
   <label>E-mail</label><input id="fEmail" value="${esc(c?.email || '')}">
+  <label class="chkcomp"><input type="checkbox" id="fComp" ${c?.comprador ? 'checked' : ''}> 🛒 É o comprador <small>(vira o contato principal dos negócios dele)</small></label>
   <label>Observação</label><textarea id="fObs" rows="2">${esc(c?.observacao || '')}</textarea>
   <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="fOk">Salvar</button></div>`);
-  $('#fOk').onclick = async () => { const o = { nome: $('#fNome').value.trim(), empresa: $('#fEmp').value.trim() || null, cargo: $('#fCargo').value || null, telefone: $('#fTel').value.trim() || null, whatsapp: $('#fWpp').value.trim() || null, email: $('#fEmail').value.trim() || null, observacao: $('#fObs').value.trim() || null };
+  $('#fOk').onclick = async () => { const o = { nome: $('#fNome').value.trim(), empresa: $('#fEmp').value.trim() || null, cargo: $('#fCargo').value || null, telefone: $('#fTel').value.trim() || null, whatsapp: $('#fWpp').value.trim() || null, email: $('#fEmail').value.trim() || null, observacao: $('#fObs').value.trim() || null, ...($('#fComp').checked !== !!c?.comprador ? { comprador: $('#fComp').checked } : {}) }; // só manda o campo quando muda (funciona mesmo antes do SQL 024)
     if (!o.nome) return toast('Coloque o nome');
     if (o.observacao && /sem pessoa de contato/.test(o.observacao) && norm(o.nome) !== norm(o.empresa || '')) o.observacao = o.observacao.replace(/ ?· ?sem pessoa de contato/, '').trim() || null;
     const ja = acharContato(o, c?.id); if (ja) return toast(`Já existe o contato ${ja.nome} com esse nome, telefone ou e-mail.`);
-    try { if (c) { const n = await db.atualizarContato(c.id, o); Object.assign(c, n); } else { S.contatos.push(await db.criarContato({ ...o, criado_por: S.eu.id })); }
-      fecharModal(); toast('Contato salvo'); S.aba === 'contato' ? telaContato() : telaContatos(); } catch (e) { erro(e); } };
+    try { let salvo; if (c) { salvo = await db.atualizarContato(c.id, o); Object.assign(c, salvo); } else { salvo = await db.criarContato({ ...o, criado_por: S.eu.id }); S.contatos.push(salvo); }
+      if (o.comprador && c) await virarPrincipal(salvo.id);
+      if (o.comprador === true && !c) { /* contato novo ainda não tem negócio */ }
+      fecharModal(); toast('Contato salvo'); S.aba === 'contato' ? telaContato() : telaContatos(); } catch (e) { erro(/comprador/.test(e.message) ? new Error('Rode o 024_contato_comprador.sql no Supabase para marcar o comprador') : e); } };
 }
 async function telaContato() {
   const c = S.contatos.find(x => x.id === S.contatoId); if (!c) return irPara('contatos');
   let tars = [], secDe = []; try { [tars, secDe] = await Promise.all([db.tarefasDoContato(c.id), db.vinculosDoContato(c.id).catch(() => [])]); } catch (e) { }
   const negs = S.pdvs.filter(p => p.contato_id === c.id || secDe.includes(p.id)), w = linkWpp(c.whatsapp || c.telefone);
   $('#main').innerHTML = `<section class="view on"><div class="dash" style="max-width:900px"><div class="row"><button class="btn" id="cVoltar">← Contatos</button></div>
-  <div class="panel"><small style="color:var(--mute)">Contato</small><h2 style="font-family:Fraunces,Georgia,serif;margin:4px 0">${esc(c.nome)}</h2><div style="color:var(--soft)">${esc([c.cargo, c.empresa].filter(Boolean).join(' · '))}</div>
+  <div class="panel"><small style="color:var(--mute)">Contato</small><h2 style="font-family:Fraunces,Georgia,serif;margin:4px 0">${esc(c.nome)} ${c.comprador ? '<span class="badge comp" style="font-family:inherit;font-size:13px;vertical-align:middle">🛒 Comprador</span>' : ''}</h2><div style="color:var(--soft)">${esc([c.cargo, c.empresa].filter(Boolean).join(' · '))}</div>
    <div class="kv"><div><small>Telefone</small><b>${esc(c.telefone || '—')}</b></div><div><small>WhatsApp</small><b>${esc(c.whatsapp || '—')}</b></div><div style="grid-column:1/-1"><small>E-mail</small><b style="font-size:14px">${esc(c.email || '—')}</b></div></div>
    ${c.observacao ? `<p style="color:var(--soft)">${esc(c.observacao)}</p>` : ''}
    <div class="row">${w ? `<a class="btn car" style="text-decoration:none" target="_blank" rel="noopener" href="${w}">WhatsApp ↗</a>` : ''}<button class="btn" id="cEditar">Editar</button><button class="btn" id="cExcluir" style="color:#7A2414">Excluir contato</button></div></div>
