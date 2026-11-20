@@ -439,3 +439,8 @@ section:fullscreen #mapa{height:100vh}
 #modalBox label.chkbox{background:var(--sand);border-radius:10px;padding:10px 12px}
 #modalBox label.chkbox span{display:flex;flex-direction:column;line-height:1.3}
 #modalBox label.chkbox small{font-weight:400;color:var(--mute);font-size:12px}
+.dprec td{white-space:nowrap}
+.dprec td:first-child{white-space:normal}
+.dprec small.pdn{color:#0b7a32;font-weight:700}
+.dprec small.pup{color:#b8402a;font-weight:700}
+.dprec small.ptab{color:var(--mute)}

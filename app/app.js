@@ -1826,7 +1826,7 @@ const LINHAS_COR = { Brownie: COR.s1, Cookie: COR.s2, Palha: COR.s3 };
 async function telaPedidosCliente() {
   const p = S.pdvs.find(x => x.id === S.perfilId); if (!p) return irPara('carteira');
   $('#main').innerHTML = '<section class="view on"><div class="loading">Lendo os pedidos…</div></section>';
-  let peds, it; try { [peds, it] = await Promise.all([db.pedidosDoCliente(p.id), db.itensDoCliente(p.id)]); } catch (e) { return erro(e); }
+  let peds, it, precosC = {}; try { [peds, it, precosC] = await Promise.all([db.pedidosDoCliente(p.id), db.itensDoCliente(p.id), db.precosCliente(p.id).catch(() => ({}))]); } catch (e) { return erro(e); }
   peds = peds.filter(o => !/cancel/i.test(o.bling_situacao || ''));
   const voltar = `<div class="row" style="gap:8px"><button class="btn" id="dVoltar">← ${esc(p.nome)}</button><span style="color:var(--mute)">Detalhes dos pedidos</span></div>`;
   if (!peds.length) { $('#main').innerHTML = `<section class="view on"><div class="dash pnl">${voltar}<p class="empty">Este cliente ainda não tem pedidos.</p></div></section>`; $('#dVoltar').onclick = () => irPara('perfil'); return; }
@@ -1864,6 +1864,11 @@ async function telaPedidosCliente() {
   if (sabL.length) leit.push(`O sabor que mais sai é <b>${esc(sabL[0].n)}</b> (${Math.round(sabL[0].q / sabT * 100)}% das unidades).`);
   if (tend != null && Math.abs(tend) >= .1) leit.push(`Os 3 últimos pedidos foram <b>${Math.round(Math.abs(tend) * 100)}% ${tend > 0 ? 'maiores' : 'menores'}</b> que a média anterior.`);
   const dowMax = Math.max(...dow); if (peds.length >= 4 && dowMax / peds.length >= .4) leit.push(`Costuma comprar na <b>${DIAS[dow.indexOf(dowMax)].toLowerCase()}</b> (${Math.round(dowMax / peds.length * 100)}% dos pedidos).`);
+  // preço aplicado: combinado no cadastro, último pago e média paga (valor ÷ quantidade, já com desconto)
+  const pp = {}; peds.forEach(o => (itens[o.id] || []).forEach(x => { if (!x.pr || !x.q) return; const e = pp[x.pr.id] = pp[x.pr.id] || { q: 0, v: 0, ult: null, em: null };
+    e.q += x.q; e.v += x.v; if (!e.em || o.criado_em >= e.em) { e.em = o.criado_em; e.ult = x.v / x.q; } }));
+  const linhasPreco = S.base.produtos.filter(pr => pp[pr.id] || precosC[pr.id] != null).map(pr => ({ pr, tab: Number(pr.preco), comb: precosC[pr.id] != null ? Number(precosC[pr.id]) : null, ...(pp[pr.id] || {}), med: pp[pr.id] ? pp[pr.id].v / pp[pr.id].q : null }));
+  const difTab = (v, tab) => v == null || !tab ? '' : Math.abs(v - tab) < 0.005 ? '<small class="ptab">= tabela</small>' : `<small class="${v < tab ? 'pdn' : 'pup'}">${v < tab ? '▼' : '▲'} ${Math.abs(Math.round((v / tab - 1) * 100))}%</small>`;
   const xsP = ds.map(d => d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }));
   $('#main').innerHTML = `<section class="view on"><div class="dash pnl">${voltar}
   <div class="pfiltros"><div><h2>${esc(p.nome)}</h2><small>${peds.length} pedidos desde ${dataLonga(ds[0])} · ${etapa(p.etapa).n}</small></div></div>
@@ -1878,6 +1883,11 @@ async function telaPedidosCliente() {
    <div class="panel"><h3>Quando e como compra</h3><p class="psub">Pedidos por dia da semana</p>${ranking([1, 2, 3, 4, 5, 6, 0].map(i => ({ n: DIAS[i], v: dow[i], c: COR.s1 })), 'un')}
     ${nPag ? `<p class="psub" style="margin-top:14px">Forma de pagamento <small>(${nPag} de ${peds.length} pedidos têm a forma registrada)</small></p>${ranking(Object.entries(pag).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ n: k, v, c: COR.s3, tip: `${Math.round(v / nPag * 100)}% dos pedidos com forma registrada` })), 'un')}` : ''}</div>
   </div>
+  ${linhasPreco.length ? `<div class="panel"><h3>Preço aplicado por produto</h3><p class="psub">Combinado: preço guardado para este cliente na venda · Pago: valor do item ÷ quantidade, já com desconto · % comparado à tabela do Bling</p>
+   <table class="dped dprec"><tr><th>Produto</th><th>Tabela</th><th>Combinado</th><th>Último pago</th><th>Média paga</th><th>Unidades</th></tr>
+   ${linhasPreco.map(x => `<tr><td><span class="dchip" style="--c:${LINHAS_COR[(x.pr.linha || '').split(' ')[0]] || COR.neutro}">${esc((x.pr.linha || '').split(' ')[0])}</span> ${esc(x.pr.sabor)}</td><td>${brl(x.tab)}</td>
+    <td>${x.comb != null ? `<b>${brl(x.comb)}</b> ${difTab(x.comb, x.tab)}` : '<small style="color:var(--mute)">tabela</small>'}</td>
+    <td>${x.ult != null ? `${brl(x.ult)} ${difTab(x.ult, x.tab)}<br><small>${dstr(x.em)}</small>` : '—'}</td><td>${x.med != null ? `${brl(x.med)} ${difTab(x.med, x.tab)}` : '—'}</td><td>${x.q ? fmt(Math.round(x.q)) : '—'}</td></tr>`).join('')}</table></div>` : ''}
   <div class="panel"><h3>Todos os pedidos</h3><table class="dped"><tr><th>Data</th><th>Nº</th><th>Itens</th><th>Un.</th><th>Pagamento</th><th style="text-align:right">Valor</th></tr>
    ${peds.slice().reverse().map(o => { const its = itens[o.id] || []; return `<tr><td>${new Date(o.criado_em).toLocaleDateString('pt-BR')}<br><small>${DIAS[new Date(o.criado_em).getDay()].slice(0, 3)}</small></td><td>${esc(o.bling_pedido_id || o.numero || '—')}${o.tipo === 'abertura' ? '<br><small>abertura</small>' : ''}</td>
     <td>${its.length ? its.sort((a, b) => b.q - a.q).map(x => `<span class="dchip" style="--c:${LINHAS_COR[linha(x)] || COR.neutro}">${esc(x.pr ? x.pr.sabor : x.cod)} <b>${x.q}</b></span>`).join('') : '<small style="color:var(--mute)">sem itens</small>'}</td>
