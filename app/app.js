@@ -475,7 +475,12 @@ async function desenharNuvens(enquadrar) {
   if (!S.sel) painel();
 }
 // categorias de ponto de venda para extrair no Outscraper
-const BUSCAS_PDV = ['escola', 'escola particular', 'colégio', 'cantina escolar', 'faculdade', 'padaria', 'confeitaria', 'cafeteria', 'lanchonete', 'pastelaria', 'açaí', 'sorveteria', 'loja de doces', 'restaurante', 'restaurante a quilo', 'pizzaria', 'hamburgueria', 'minimercado', 'mercado', 'supermercado', 'mercearia', 'loja de conveniência', 'posto de combustível', 'empório', 'hortifruti', 'fruteira', 'distribuidora de bebidas', 'tabacaria', 'banca de revistas', 'academia', 'crossfit', 'estúdio de pilates', 'barbearia', 'salão de beleza', 'lava-rápido', 'pet shop', 'farmácia', 'hospital', 'clínica médica', 'hotel', 'casa lotérica', 'papelaria', 'bar', 'coworking'];
+const BUSCAS_PDV = [ // categorias escolhidas (21/11): comida rápida, varejo de bairro, universidade, farmácia, serviços de espera, noite e lojas
+  'lanchonete', 'cafeteria', 'café', 'padaria', 'confeitaria', 'doceria', 'pastelaria', 'loja de açaí', 'sorveteria', 'casa de sucos', 'cachorro-quente', 'hamburgueria', 'pizzaria', 'restaurante self-service', 'restaurante', 'praça de alimentação',
+  'loja de conveniência', 'minimercado', 'mercado', 'supermercado', 'mercearia', 'armazém', 'hortifruti', 'empório', 'loja de produtos naturais', 'distribuidora de bebidas', 'tabacaria', 'banca de jornal', 'posto de gasolina',
+  'universidade', 'cantina', 'copiadora', 'papelaria', 'livraria', 'moradia estudantil', 'escola de idiomas', 'cursinho preparatório',
+  'farmácia', 'drogaria', 'barbearia', 'salão de beleza',
+  'bar', 'boteco', 'cervejaria', 'sinuca', 'loja de presentes', 'loja de chocolates', 'loja de produtos importados'];
 function bairrosZona(z, comCidade) { const cnt = {}, cid = {}; S.pdvs.filter(p => p.lat && p.bairro && distM(p, z.c) < 2000).forEach(p => { const b = p.bairro.trim(); cnt[b] = (cnt[b] || 0) + 1; if (p.cidade) cid[b] = p.cidade; }); const ks = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a]); return comCidade ? ks.map(b => [b, cid[b] || z.cidade || 'Porto Alegre']) : ks; }
 function painelZonas(s) {
   s.classList.add('open');
@@ -2286,17 +2291,18 @@ function baixarModelo(k) {
 }
 
 /* ---- importação direta do Google Maps (arquivo do Outscraper) ---- */
-const GMAPS_CANAL = [[/padaria|panificadora/, 'Padaria'], [/confeitaria|doceria|loja de doces|bolo/, 'Confeitaria'], [/cafeteria|cafe/, 'Cafeteria'],
+// nomes de categoria do Google em português e em inglês (o Outscraper pode devolver nos dois)
+const GMAPS_CANAL = [[/padaria|panificadora|bakery/, 'Padaria'], [/confeitaria|doceria|loja de doces|bolo|confection|dessert|pastry shop|chocolate/, 'Confeitaria'], [/cafeteria|cafe|coffee/, 'Cafeteria'],
   [/auto ?atendimento|autosservico|self service|mercado autonomo|minimercado autonomo|honest market/, 'Minimercado de autoatendimento'],
-  [/minimercado|mercearia|supermercado|mercado|armazem|emporio|atacad/, 'Minimercado'], [/hortifruti|fruteira|quitanda|sacolao/, 'Fruteira'],
-  [/conveniencia|posto de (gasolina|combustivel)/, 'Conveniência'], [/cantina/, 'Cantina'],
-  [/escola|colegio|faculdade|universidade|curso|cursinho|ensino|educa/, 'Escola / faculdade'],
-  [/lanchonete|lancheria|hamburgueria|pastelaria|pastel|cachorro|lanche|acai|sorvet/, 'Lancheria'],
-  [/restaurante|buffet|pizzaria|churrascaria|comida/, 'Restaurante'], [/bar\b|choperia|cervejaria|pub|boteco/, 'Bar'],
-  [/academia|crossfit|pilates|fitness|ginastica|danca|clube/, 'Academia / clube'], [/farmacia|drogaria/, 'Farmácia'],
-  [/barbearia|salao|cabeleireir|estetica|manicure/, 'Barbearia / salão'], [/lava|oficina|borracharia|auto ?center|mecanic/, 'Serviços automotivos'],
-  [/pet/, 'Pet shop'], [/hospital|clinica|laboratorio/, 'Saúde'], [/hotel|hostel|pousada/, 'Hotel'], [/distribuidora de bebidas|bebidas|adega|tabacaria/, 'Bebidas / tabacaria'],
-  [/banca|loterica|papelaria/, 'Banca / lotérica / papelaria']];
+  [/minimercado|mercearia|supermercado|mercado|armazem|emporio|atacad|grocery|mini ?market|supermarket|general store|health food|imported food|produtos naturais|importados/, 'Minimercado'], [/hortifruti|fruteira|quitanda|sacolao|produce/, 'Fruteira'],
+  [/conveniencia|posto de (gasolina|combustivel)|convenience|gas station/, 'Conveniência'], [/cantina|canteen|praca de alimentacao|food court/, 'Cantina'],
+  [/escola|colegio|faculdade|universidade|curso|cursinho|ensino|educa|university|language school|test preparation|student housing|moradia estudantil/, 'Escola / faculdade'],
+  [/lanchonete|lancheria|hamburgueria|pastelaria|pastel|cachorro|lanche|acai|sorvet|sucos|snack|hot dog|hamburger|ice cream|juice/, 'Lancheria'],
+  [/restaurante|buffet|pizzaria|churrascaria|comida|restaurant|pizza/, 'Restaurante'], [/bar\b|choperia|cervejaria|pub|boteco|brewpub|sinuca|pool hall/, 'Bar'],
+  [/academia|crossfit|pilates|fitness|ginastica|danca|clube/, 'Academia / clube'], [/farmacia|drogaria|pharmacy|drug ?store/, 'Farmácia'],
+  [/barbearia|salao|cabeleireir|estetica|manicure|barber|beauty salon/, 'Barbearia / salão'], [/lava|oficina|borracharia|auto ?center|mecanic/, 'Serviços automotivos'],
+  [/pet/, 'Pet shop'], [/hospital|clinica|laboratorio/, 'Saúde'], [/hotel|hostel|pousada/, 'Hotel'], [/distribuidora de bebidas|bebidas|adega|tabacaria|beverage|tobacco/, 'Bebidas / tabacaria'],
+  [/banca|loterica|papelaria|copiadora|grafica rapida|livraria|newsstand|stationery|copy shop|book ?store/, 'Banca / lotérica / papelaria'], [/presentes|gift/, 'Loja de presentes']];
 function canalGoogle(cat) { const n = norm(cat); const m = GMAPS_CANAL.find(([re]) => re.test(n)); return m ? m[1] : (cat || 'Outro'); }
 const campo = (l, ...ks) => { for (const k of ks) if (l[k]) return l[k]; return ''; };
 let gmaps = null;
