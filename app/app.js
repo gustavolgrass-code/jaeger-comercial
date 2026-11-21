@@ -222,7 +222,7 @@ function telaMapa() {
     <div class="msatalhos"><button type="button" data-ms="todas">Todas</button><button type="button" data-ms="nenhuma">Nenhuma</button><button type="button" data-ms="carteira">Carteira</button><button type="button" data-ms="prosp">Prospecção</button></div>
     ${ETAPAS.filter(NO_MAPA).map(e => `<label><input type="checkbox" value="${e.k}" ${S.etapasMapa.has(e.k) ? 'checked' : ''}><i class="dot" style="background:${e.c}"></i>${e.n}</label>`).join('')}</div></div>
    <select id="fReg"><option value="">Todas as regiões</option>${S.base.regioes.map(r => `<option value="${r.codigo}">${r.codigo} · ${esc(r.nome)}</option>`).join('')}</select>
-   <label class="regchk"><input type="checkbox" id="tReg" ${mostrarReg ? 'checked' : ''}> Regiões</label><button class="btn ${S.nuvens ? 'car' : ''}" id="bNuvem">☁️ Nuvens de potencial</button><button class="btn ${S.quad ? 'car' : ''}" id="bQuad">▦ Quadrantes</button></div>
+   <label class="regchk"><input type="checkbox" id="tReg" ${mostrarReg ? 'checked' : ''}> Regiões</label><button class="btn ${S.nuvens ? 'car' : ''}" id="bNuvem">☁️ Nuvens de potencial</button><button class="btn ${S.quad ? 'car' : ''}" id="bQuad">▦ Quadrantes</button><button class="btn ${S.areasOn ? 'car' : ''}" id="bAreas">🗺 Áreas mapeadas</button></div>
    <div class="hint" id="hint">Toque no mapa onde fica o ponto</div>
    <div class="rotabox" id="rotaBox" hidden></div>
    <div class="legend ${S.legOculta ? 'oculta' : ''}" id="legend"></div><button class="legdot" id="legDot" title="${S.legOculta ? 'Mostrar legenda' : 'Esconder legenda'}"></button></div><aside id="side"></aside></section>`;
@@ -265,6 +265,8 @@ function telaMapa() {
   $('#bNuvem').onclick = () => { S.nuvens = !S.nuvens; $('#bNuvem').classList.toggle('car', S.nuvens); if (S.nuvens) { S.sel = null; desenharNuvens(true); } else { camadaNuvem?.clearLayers(); painel(); } };
   camadaNuvem = null; if (S.nuvens) setTimeout(() => desenharNuvens(false), 0);
   camadaQuad = null; if (S.quad) setTimeout(() => desenharQuad(), 0);
+  camadaAreas = null; if (S.areasOn) setTimeout(() => desenharAreas(), 0);
+  $('#bAreas').onclick = () => { S.areasOn = !S.areasOn; $('#bAreas').classList.toggle('car', S.areasOn); S.areaSel = null; if (S.areasOn) { S.sel = null; desenharAreas(true); } else { camadaAreas?.clearLayers(); painel(); } };
   $('#bQuad').onclick = () => { S.quad = !S.quad; $('#bQuad').classList.toggle('car', S.quad); if (S.quad) { S.sel = null; desenharQuad(); } else { camadaQuad?.clearLayers(); painel(); } };
   desenhar(); painel();
 }
@@ -387,7 +389,7 @@ function painelArea(f, i) {
    <h3 style="margin:14px 0 6px">Categorias</h3><div class="acats">${BUSCAS_PDV.map(t => `<label><input type="checkbox" value="${esc(t)}" ${cats.includes(t) ? 'checked' : ''}>${esc(t)}</label>`).join('')}</div>
    <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:12px"><button class="btn pri" id="aLinks">Baixar buscas da área (.txt)</button><button class="btn" id="aCopia">Copiar ${fmtO}</button><a class="btn" style="text-decoration:none" target="_blank" rel="noopener" href="https://www.google.com/maps/${fmtO}">Ver no Google Maps ↗</a></div>
    <p style="color:var(--mute);font-size:12px;margin-top:10px">Cada linha é uma busca "categoria, bairro, cidade, RS". No Outscraper (Raspador do Google Maps), cole em Consultas, coloque o limite máximo de resultados maior que o número de buscas × 20, exporte em CSV e suba em Uploads → Google Maps: os pontos entram como Mapeado.</p>
-   <button class="mini" id="aExcluir" style="margin-top:6px">apagar este desenho</button>`;
+   <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px"><button class="btn" id="aMapeada">✓ Marcar como área mapeada</button><button class="mini" id="aExcluir">apagar este desenho</button></div>`;
   $('#xArea').onclick = () => { s.classList.remove('open'); painel(); };
   s.querySelectorAll('.acats:not(#aBairros) input').forEach(x => x.onchange = () => { S.areaCats = [...s.querySelectorAll('.acats:not(#aBairros) input:checked')].map(i => i.value); painelArea(f, i); });
   s.querySelectorAll('#aBairros input').forEach(x => x.onchange = () => { const fora = new Set(S.areaFora || []); x.checked ? fora.delete(x.value) : fora.add(x.value); S.areaFora = [...fora]; painelArea(f, i); });
@@ -398,7 +400,57 @@ function painelArea(f, i) {
     const ls = []; cats.forEach(t => bairrosA.forEach(([b, c]) => ls.push(`${t}, ${b}, ${c}, RS`)));
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([ls.join('\n') + '\n'], { type: 'text/plain;charset=utf-8' })); a.download = `buscas_area_${cidade.replace(/\s+/g, '_')}_${dec(raioKm).replace(',', '-')}km.txt`; document.body.appendChild(a); a.click(); a.remove();
     toast(`${ls.length} buscas (${bairrosA.length} bairros × ${cats.length} categorias)`); };
+  $('#aMapeada').onclick = () => { modal(`<h3>Salvar como área mapeada</h3><p style="color:var(--soft)">O desenho sai dos rabiscos e passa a aparecer no botão <b>🗺 Áreas mapeadas</b>, com o avanço da prospecção dentro dele.</p><label>Nome da área<input id="amNome" value="${esc(bairros[0] || 'Área ' + (((S.base.regras.areas_mapeadas || []).length) + 1))}"></label><label>Como foi mapeada<input id="amMet" value="Google Maps (48 categorias)"></label><div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="amOk">Salvar</button></div>`);
+    $('#amOk').onclick = async () => { const nome = $('#amNome').value.trim() || 'Área'; const { cor, ...geo } = f; const nova = { id: Date.now().toString(36), nome, ...geo, em: new Date().toISOString().slice(0, 10), metodo: $('#amMet').value.trim(), base: dentro.length };
+      try { const lista = [...(S.base.regras.areas_mapeadas || []), nova]; await db.salvarRegra('areas_mapeadas', lista); S.base.regras.areas_mapeadas = lista;
+        const D = S.desenho; D.formas.splice(i, 1); await db.salvarRegra('desenhos_mapa', D.formas); S.base.regras.desenhos_mapa = D.formas.slice();
+        fecharModal(); toast('Área mapeada salva'); S.areasOn = true; S.areaSel = nova.id; s.classList.remove('open'); irPara('mapa', true); } catch (e) { erro(e); } }; };
   $('#aExcluir').onclick = () => { const D = S.desenho; D.formas.splice(i, 1); db.salvarRegra('desenhos_mapa', D.formas).then(() => { S.base.regras.desenhos_mapa = D.formas.slice(); }).catch(erro); s.classList.remove('open'); irPara('mapa', true); };
+}
+
+/* ---- áreas mapeadas: regiões já varridas (ex.: extração do Google Maps) e o avanço da prospecção dentro delas ---- */
+let camadaAreas = null;
+function statsArea(a) {
+  const ps = S.pdvs.filter(p => p.lat && dentroDaArea(a, p)), n = k => ps.filter(p => k.includes(p.etapa)).length;
+  const mapeados = n(['mapeado']), contato = n(['visitado', 'negociacao']), clientes = n(CART), descartados = n(['perdido', 'fechado']);
+  const total = ps.length, trabalhados = total - mapeados;
+  const canais = {}; ps.filter(p => p.etapa === 'mapeado').forEach(p => { canais[p.canal || 'Outro'] = (canais[p.canal || 'Outro'] || 0) + 1; });
+  return { ps, total, mapeados, contato, clientes, descartados, trabalhados, pct: total ? Math.round(trabalhados / total * 100) : 0, canais };
+}
+const limArea = a => a.t === 'c' ? L.latLngBounds([a.lat - a.r / 111200, a.lng - a.r / 96300], [a.lat + a.r / 111200, a.lng + a.r / 96300]) : L.latLngBounds(a.b);
+function desenharAreas(ajustar) {
+  if (camadaAreas) camadaAreas.clearLayers(); else camadaAreas = L.layerGroup().addTo(mapa);
+  const As = S.base.regras.areas_mapeadas || [];
+  As.forEach(a => { const st = statsArea(a), sel = S.areaSel === a.id, cor = '#1baf7a';
+    const g = a.t === 'c' ? L.circle([a.lat, a.lng], { radius: a.r, color: cor, weight: sel ? 4 : 3, dashArray: '10 6', fillColor: cor, fillOpacity: .08 + st.pct / 100 * .25 })
+      : L.rectangle(a.b, { color: cor, weight: sel ? 4 : 3, dashArray: '10 6', fillColor: cor, fillOpacity: .08 + st.pct / 100 * .25 });
+    g.bindTooltip(`${esc(a.nome)} · ${st.total} pontos · ${st.pct}% trabalhado`, { sticky: true }).on('click', e => { L.DomEvent.stop(e); S.sel = null; S.areaSel = a.id; desenharAreas(); painel(); }).addTo(camadaAreas);
+    const lb = limArea(a), c = lb.getNorth(), lng = lb.getCenter().lng;
+    L.marker([c, lng], { interactive: false, icon: L.divIcon({ className: '', html: `<div class="qrot" style="--c:${cor}">${esc(a.nome)}<small>${st.mapeados} a abordar · ${st.pct}%</small></div>`, iconSize: [130, 34], iconAnchor: [65, 40] }) }).addTo(camadaAreas); });
+  if (ajustar && As.length) { const b = As.map(limArea).reduce((x, y) => x.extend(y)); if (b.isValid()) mapa.fitBounds(b, { padding: [40, 40], maxZoom: 15 }); }
+  if (ajustar && !As.length) toast('Nenhuma área mapeada ainda: desenhe um quadrado ou círculo e use "Marcar como área mapeada"');
+  painel();
+}
+function painelAreas(s) {
+  s.classList.add('open'); const As = S.base.regras.areas_mapeadas || [];
+  const barra = st => `<div class="ambar"><i style="width:${st.total ? st.clientes / st.total * 100 : 0}%;background:#2F7D4E"></i><i style="width:${st.total ? st.contato / st.total * 100 : 0}%;background:#3F6FA8"></i><i style="width:${st.total ? st.descartados / st.total * 100 : 0}%;background:#9A8F86"></i></div>`;
+  const det = (a, st) => `<div class="zkv"><div><small>Pontos na área</small><b>${st.total}</b></div><div><small>Mapeados a abordar</small><b>${st.mapeados}</b></div><div><small>Em prospecção</small><b>${st.contato}</b></div><div><small>Viraram clientes</small><b>${st.clientes}</b></div><div><small>Perdidos ou fechados</small><b>${st.descartados}</b></div><div><small>Avanço</small><b>${st.pct}%</b></div></div>
+    ${Object.keys(st.canais).length ? `<h3 style="margin:12px 0 4px;font-size:14px">A abordar por canal</h3><div style="font-size:13px">${Object.entries(st.canais).sort((x, y) => y[1] - x[1]).map(([k, v]) => `<div class="row" style="justify-content:space-between"><span>${esc(k)}</span><b>${v}</b></div>`).join('')}</div>` : ''}
+    <p style="color:var(--mute);font-size:12px;margin:8px 0 0">Mapeada em ${new Date(a.em + 'T12:00').toLocaleDateString('pt-BR')}${a.metodo ? ' · ' + esc(a.metodo) : ''}</p>
+    <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px"><button class="btn pri" data-amver="${a.id}">Ver os mapeados no mapa</button><button class="mini" data-amren="${a.id}">renomear</button><button class="mini" data-amdel="${a.id}">remover área</button></div>`;
+  const tot = As.reduce((acc, a) => { const st = statsArea(a); acc.t += st.total; acc.m += st.mapeados; return acc; }, { t: 0, m: 0 });
+  s.innerHTML = `<div class="row" style="justify-content:space-between"><h2 style="margin:0">Áreas mapeadas</h2><button class="btn" id="xAreas" style="padding:4px 10px">✕</button></div>
+   <p style="color:var(--soft);font-size:13px;margin-top:6px">${As.length ? `${As.length} área(s) · ${tot.t} pontos · ${tot.m} ainda a abordar. A cor fica mais forte conforme a área é trabalhada.` : 'Nenhuma área ainda. Desenhe um quadrado ou círculo, toque nele e use <b>Marcar como área mapeada</b>.'}</p>
+   <div class="amleg"><span><i style="background:#2F7D4E"></i>clientes</span><span><i style="background:#3F6FA8"></i>em prospecção</span><span><i style="background:#9A8F86"></i>perdidos/fechados</span><span><i style="background:var(--sand2,#e8e0d4)"></i>a abordar</span></div>
+   ${As.map(a => { const st = statsArea(a); return `<div class="zona ${S.areaSel === a.id ? 'on' : ''}" data-am="${a.id}" style="border-left:4px solid #1baf7a"><div class="row" style="justify-content:space-between"><b>${esc(a.nome)}</b><b>${st.pct}%</b></div>${barra(st)}<small style="color:var(--soft)">${st.mapeados} a abordar · ${st.contato} em prospecção · ${st.clientes} clientes</small>${S.areaSel === a.id ? det(a, st) : ''}</div>`; }).join('')}`;
+  $('#xAreas').onclick = () => { S.areasOn = false; $('#bAreas')?.classList.remove('car'); camadaAreas?.clearLayers(); painel(); };
+  s.querySelectorAll('[data-am]').forEach(d => d.onclick = e => { if (e.target.closest('button')) return; const a = As.find(x => x.id === d.dataset.am); S.areaSel = S.areaSel === a.id ? null : a.id; if (S.areaSel) mapa.fitBounds(limArea(a), { padding: [40, 40] }); desenharAreas(); });
+  s.querySelectorAll('[data-amver]').forEach(b => b.onclick = () => { const a = As.find(x => x.id === b.dataset.amver); S.etapasMapa = new Set(['mapeado', 'visitado', 'negociacao']); document.querySelectorAll('#fEtMenu input').forEach(i => i.checked = S.etapasMapa.has(i.value)); const fb = $('#fEtBtn'); if (fb) fb.textContent = '3 etapas';
+    mapa.fitBounds(limArea(a), { padding: [30, 30] }); desenhar(); });
+  const salvarA = async lista => { await db.salvarRegra('areas_mapeadas', lista); S.base.regras.areas_mapeadas = lista; desenharAreas(); };
+  s.querySelectorAll('[data-amren]').forEach(b => b.onclick = () => { const a = As.find(x => x.id === b.dataset.amren), n = prompt('Nome da área', a.nome); if (!n?.trim()) return; salvarA(As.map(x => x.id === a.id ? { ...x, nome: n.trim() } : x)).catch(erro); });
+  s.querySelectorAll('[data-amdel]').forEach(b => b.onclick = () => { const a = As.find(x => x.id === b.dataset.amdel); modal(`<h3>Remover a área "${esc(a.nome)}"?</h3><p style="color:var(--soft)">Só o contorno sai do mapa. Os pontos mapeados continuam cadastrados.</p><div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="amDelOk">Remover</button></div>`);
+    $('#amDelOk').onclick = () => { fecharModal(); S.areaSel = null; salvarA(As.filter(x => x.id !== a.id)).catch(erro); }; });
 }
 
 /* ---- quadrantes da carteira: agrupa os clientes pela proximidade e mede quanto cada grupo compra ---- */
@@ -553,6 +605,7 @@ function painel() {
   const antes = s.classList.contains('open'); setTimeout(() => { if (mapa && s.classList.contains('open') !== antes) mapa.invalidateSize(); }, 0);
   const p = S.pdvs.find(x => x.id === S.sel);
   if (!p && S.modoPend) return listaPendentes(s);
+  if (!p && S.areasOn) return painelAreas(s);
   if (!p && S.quad && S.quads) return painelQuad(s);
   if (!p && S.nuvens && S.zonas) return painelZonas(s);
   if (!p) { s.classList.remove('open'); s.innerHTML = `<div class="empty"><b>Selecione um ponto no mapa.</b><br>A cor mostra a etapa do funil.<br><br><b>+ Cadastrar ponto</b>: pela sua localização, marcando no mapa ou colando o link do Google Maps.<br><b>Reposições pendentes</b>: mostra quem precisa de reposição hoje ou está atrasado.</div>`; return; }
