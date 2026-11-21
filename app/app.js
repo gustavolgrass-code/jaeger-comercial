@@ -353,6 +353,20 @@ function pontosDaArea(f) {
   return pts;
 }
 const dentroDaArea = (f, p) => f.t === 'c' ? distM(p, f) <= f.r : (() => { const [a, b] = f.b; return p.lat >= Math.min(a[0], b[0]) && p.lat <= Math.max(a[0], b[0]) && p.lng >= Math.min(a[1], b[1]) && p.lng <= Math.max(a[1], b[1]); })();
+// bairros da área: os dos pontos já cadastrados + consulta ao mapa (OpenStreetMap) nos pontos espalhados pela área
+async function descobrirBairros(f, pts, dentro) {
+  const m = new Map(); dentro.forEach(p => { if (p.bairro?.trim()) m.set(norm(p.bairro.trim()), [p.bairro.trim(), p.cidade || 'Porto Alegre']); });
+  const amostra = pts.length <= 12 ? pts : pts.filter((_, k) => k % Math.ceil(pts.length / 12) === 0);
+  const borda = f.t === 'c' ? [0, 90, 180, 270].map(a => ({ lat: f.lat + Math.cos(a * Math.PI / 180) * f.r * 0.85 / 111200, lng: f.lng + Math.sin(a * Math.PI / 180) * f.r * 0.85 / 96300 }))
+    : [[f.b[0][0], f.b[0][1]], [f.b[0][0], f.b[1][1]], [f.b[1][0], f.b[0][1]], [f.b[1][0], f.b[1][1]]].map(([la, lo]) => ({ lat: la + (f.b[1][0] > f.b[0][0] ? 1 : -1) * 0.0015, lng: lo + (f.b[1][1] > f.b[0][1] ? 1 : -1) * 0.0015 }));
+  for (const q of [...amostra, ...borda]) {
+    try { const r = await (await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=16&accept-language=pt-BR&lat=${q.lat}&lon=${q.lng}`)).json(), a = r.address || {};
+      const b = a.suburb || a.neighbourhood || a.quarter || a.city_district, c = a.city || a.town || a.municipality || 'Porto Alegre';
+      if (b && !m.has(norm(b))) m.set(norm(b), [b, c]); } catch { }
+    await new Promise(r => setTimeout(r, 1100)); // o mapa gratuito pede 1 consulta por segundo
+  }
+  return [...m.values()];
+}
 function painelArea(f, i) {
   const s = $('#side'); s.classList.add('open'); mapa.invalidateSize();
   const c = f.t === 'c' ? { lat: f.lat, lng: f.lng } : { lat: (f.b[0][0] + f.b[1][0]) / 2, lng: (f.b[0][1] + f.b[1][1]) / 2 };
@@ -361,22 +375,29 @@ function painelArea(f, i) {
   const zoom = raioKm <= 1 ? 15 : raioKm <= 2.5 ? 14 : raioKm <= 5 ? 13 : 12, fmtO = `@${c.lat.toFixed(5)},${c.lng.toFixed(5)},${zoom}z`;
   const pts = pontosDaArea(f), dentro = S.pdvs.filter(p => p.lat && dentroDaArea(f, p)), cli = dentro.filter(p => CART.includes(p.etapa)), pro = dentro.filter(p => PROSP.includes(p.etapa));
   const bairros = [...new Set(dentro.map(p => p.bairro?.trim()).filter(Boolean))], cidade = dentro.find(p => p.cidade)?.cidade || 'Porto Alegre';
-  const cats = S.areaCats || BUSCAS_PDV.slice(), nLinks = pts.length * cats.length;
+  const cats = S.areaCats || BUSCAS_PDV.slice();
+  // o Outscraper ignora a coordenada do link, então as buscas vão por bairro: "categoria, bairro, cidade, RS"
+  const chaveA = JSON.stringify(f.t === 'c' ? [f.lat, f.lng, f.r] : f.b); S.areaBairros = S.areaBairros || {};
+  const achados = S.areaBairros[chaveA], bairrosA = achados ? achados.filter(x => !(S.areaFora || []).includes(x[0])) : null, nLinks = bairrosA ? bairrosA.length * cats.length : 0;
   s.innerHTML = `<div class="row" style="justify-content:space-between"><h2 style="margin:0">Área desenhada</h2><button class="btn" id="xArea" style="padding:4px 10px">✕</button></div>
    <p style="color:var(--soft);font-size:13px;margin-top:6px">${f.t === 'c' ? `Círculo de raio ${dec(raioKm)} km` : `Quadrado de ${dec(larg)} × ${dec(alt)} km`} · ${dec(km2a)} km²</p>
-   <div class="zkv"><div><small>Clientes dentro</small><b>${cli.length}</b></div><div><small>Prospects dentro</small><b>${pro.length}</b></div><div><small>Pontos de busca</small><b>${pts.length}</b></div><div><small>Buscas no total</small><b>${nLinks}</b></div></div>
+   <div class="zkv"><div><small>Clientes dentro</small><b>${cli.length}</b></div><div><small>Prospects dentro</small><b>${pro.length}</b></div><div><small>Bairros na área</small><b>${achados ? bairrosA.length : '…'}</b></div><div><small>Buscas no total</small><b>${achados ? nLinks : '…'}</b></div></div>
    <div class="zcoord"><div><small>Formato do Outscraper (centro e zoom)</small><b>${fmtO}</b></div>${bairros.length ? `<div><small>Bairros com pontos já cadastrados</small><b style="font-weight:600">${esc(bairros.join(', '))}</b></div>` : ''}</div>
+   <h3 style="margin:14px 0 6px">Bairros dentro da área</h3><div class="acats" id="aBairros">${achados ? achados.map(([b, c]) => `<label><input type="checkbox" value="${esc(b)}" ${(S.areaFora || []).includes(b) ? '' : 'checked'}>${esc(b)} <small style="color:var(--mute)">${esc(c)}</small></label>`).join('') || '<span style="color:var(--mute)">Não achei bairros nesta área.</span>' : '<span style="color:var(--mute)">Descobrindo os bairros pelo mapa…</span>'}</div>
    <h3 style="margin:14px 0 6px">Categorias</h3><div class="acats">${BUSCAS_PDV.map(t => `<label><input type="checkbox" value="${esc(t)}" ${cats.includes(t) ? 'checked' : ''}>${esc(t)}</label>`).join('')}</div>
    <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:12px"><button class="btn pri" id="aLinks">Baixar buscas da área (.txt)</button><button class="btn" id="aCopia">Copiar ${fmtO}</button><a class="btn" style="text-decoration:none" target="_blank" rel="noopener" href="https://www.google.com/maps/${fmtO}">Ver no Google Maps ↗</a></div>
-   <p style="color:var(--mute);font-size:12px;margin-top:10px">Cada linha do arquivo é uma busca do Google Maps (categoria + ponto da área). No Outscraper (Google Maps Scraper), cole as linhas em "Queries", rode e exporte em CSV. Depois suba o CSV em Uploads → Google Maps: os pontos entram como Mapeado.</p>
+   <p style="color:var(--mute);font-size:12px;margin-top:10px">Cada linha é uma busca "categoria, bairro, cidade, RS". No Outscraper (Raspador do Google Maps), cole em Consultas, coloque o limite máximo de resultados maior que o número de buscas × 20, exporte em CSV e suba em Uploads → Google Maps: os pontos entram como Mapeado.</p>
    <button class="mini" id="aExcluir" style="margin-top:6px">apagar este desenho</button>`;
   $('#xArea').onclick = () => { s.classList.remove('open'); painel(); };
-  s.querySelectorAll('.acats input').forEach(x => x.onchange = () => { S.areaCats = [...s.querySelectorAll('.acats input:checked')].map(i => i.value); painelArea(f, i); });
+  s.querySelectorAll('.acats:not(#aBairros) input').forEach(x => x.onchange = () => { S.areaCats = [...s.querySelectorAll('.acats:not(#aBairros) input:checked')].map(i => i.value); painelArea(f, i); });
+  s.querySelectorAll('#aBairros input').forEach(x => x.onchange = () => { const fora = new Set(S.areaFora || []); x.checked ? fora.delete(x.value) : fora.add(x.value); S.areaFora = [...fora]; painelArea(f, i); });
+  if (!achados) descobrirBairros(f, pts, dentro).then(l => { S.areaBairros[chaveA] = l; if ($('#xArea')) painelArea(f, i); });
   $('#aCopia').onclick = async () => { try { await navigator.clipboard.writeText(fmtO); toast('Copiado: ' + fmtO); } catch { prompt('Copie:', fmtO); } };
   $('#aLinks').onclick = () => { if (!cats.length) return toast('Escolha pelo menos uma categoria');
-    const ls = []; cats.forEach(t => pts.forEach(q => ls.push(`https://www.google.com/maps/search/${encodeURIComponent(t)}/@${q.lat.toFixed(5)},${q.lng.toFixed(5)},15z`)));
+    if (!bairrosA?.length) return toast(achados ? 'Marque pelo menos um bairro' : 'Espere terminar de descobrir os bairros');
+    const ls = []; cats.forEach(t => bairrosA.forEach(([b, c]) => ls.push(`${t}, ${b}, ${c}, RS`)));
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([ls.join('\n') + '\n'], { type: 'text/plain;charset=utf-8' })); a.download = `buscas_area_${cidade.replace(/\s+/g, '_')}_${dec(raioKm).replace(',', '-')}km.txt`; document.body.appendChild(a); a.click(); a.remove();
-    toast(`${ls.length} buscas (${pts.length} pontos × ${cats.length} categorias)`); };
+    toast(`${ls.length} buscas (${bairrosA.length} bairros × ${cats.length} categorias)`); };
   $('#aExcluir').onclick = () => { const D = S.desenho; D.formas.splice(i, 1); db.salvarRegra('desenhos_mapa', D.formas).then(() => { S.base.regras.desenhos_mapa = D.formas.slice(); }).catch(erro); s.classList.remove('open'); irPara('mapa', true); };
 }
 
