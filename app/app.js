@@ -631,8 +631,10 @@ function painel() {
    ${podeComprar ? `<button class="btn car" style="font-size:15px;padding:11px" id="bComprar">Registrar venda →</button>` : ''}
    <button class="btn ${podeComprar ? '' : 'pri'}" id="bVisita">Registrar visita de prospecção</button>
    <button class="btn" id="bPerfil">Abrir perfil do negócio</button>
-   ${gm ? `<a class="btn" href="${gm}" target="_blank" rel="noopener">Abrir no Google Maps ↗</a>` : ''}</div>`;
+   ${gm ? `<a class="btn" href="${gm}" target="_blank" rel="noopener">Abrir no Google Maps ↗</a>` : ''}
+   ${p.etapa === 'mapeado' ? `<button class="btn" id="bExMapa" style="color:#B8402A">Excluir do mapa</button>` : ''}</div>`;
   $('#bPerfil').onclick = () => abrirPerfil(p.id);
+  if ($('#bExMapa')) $('#bExMapa').onclick = () => excluirDoMapa(p, () => { S.sel = null; desenhar(); painel(); });
   if ($('#bTraco')) $('#bTraco').onclick = () => { S.rotaDe = p.id; camadaTraco?.clearLayers(); mostrarRotaBox(`<b>${esc(p.nome)}</b> → toque no ponto de destino`, true); };
   $('#xSide').onclick = () => { S.sel = null; desenhar(); painel(); };
   db.ultimosPedidos(p.id, 500).then(todos => { const el = $('#sPeds'); if (!el || S.sel !== p.id) return; const ls = todos.slice(0, 5);
@@ -1782,7 +1784,7 @@ function ligarRota(k, todas) {
     await salvarRotaDia({ paradas: ps }); toast(`${p.nome}: não estava. Próximo dia na janela: ${proximoDiaJanela(p, R.data)}`); desenharRota(); });
   document.querySelectorAll('[data-pv]').forEach(b => b.onclick = async () => { const p = S.pdvs.find(x => x.id === b.dataset.pv);
     try { await db.registrarVisita(p.id, 'prospeccao', null, S.eu.id); if (p.etapa === 'mapeado') await db.atualizarPdv(p.id, { etapa: 'visitado' }); } catch (e) { return erro(e); }
-    await salvarRotaDia({ paradas: (R.paradas?.length ? R.paradas : fixar()).map(x => x.id === p.id ? { ...x, status: 'feito' } : x) }, 'Visita registrada'); telaRota(); });
+    await salvarRotaDia({ paradas: (R.paradas?.length ? R.paradas : fixar()).map(x => x.id === p.id ? { ...x, status: 'feito' } : x) }, 'Visita registrada'); completarCadastro(p, () => telaRota()); });
   document.querySelectorAll('[data-reab]').forEach(b => b.onclick = () => { const p = S.pdvs.find(x => x.id === b.dataset.reab), v = RT.visitas.filter(x => x.pdv_id === p.id && x.tipo === 'reposicao').sort((a, b) => new Date(b.em) - new Date(a.em))[0];
     modal(`<h3>Reabrir a reposição de ${esc(p.nome)}?</h3><p style="color:var(--soft)">Apaga a reposição lançada (pedido e contagem) e <b>exclui o pedido de venda no Bling</b>. Depois abre a contagem com os mesmos números para você corrigir e fechar de novo, o que cria um pedido novo no Bling.</p><div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="reOk">Reabrir</button></div>`);
     $('#reOk').onclick = async () => { $('#reOk').disabled = true; $('#reOk').textContent = 'Reabrindo…';
@@ -1984,11 +1986,51 @@ function ligarEmpresa(pre, nomeId) {
 }
 const lerEmpresa = pre => ({ cnpj: soDig($('#' + pre + 'Cnpj').value) || null, razao_social: $('#' + pre + 'Razao').value.trim() || null });
 
+/* ---------- depois de uma visita de prospecção: cadastrar o contato e completar os dados do negócio ---------- */
+function completarCadastro(p, depois, semContato) {
+  const fim = () => { try { depois && depois(); } catch (e) { erro(e); } };
+  const c = S.contatos.find(x => x.id === p.contato_id);
+  modal(`<h3>Completar cadastro · ${esc(p.nome)}</h3><p style="color:var(--soft);margin-top:0">Aproveite a visita para registrar quem atende e os dados do negócio. Dá para pular.</p>
+   ${semContato ? '' : `<div class="sect" style="margin-top:6px"><h3>Contato</h3>
+   ${c ? `<p style="margin:2px 0 6px">Principal hoje: <b>${esc(c.nome)}</b>${c.cargo ? ' (' + esc(c.cargo) + ')' : ''}${c.telefone ? ' · ' + esc(c.telefone) : ''}<br><small style="color:var(--mute)">Preencha abaixo só se quiser adicionar outra pessoa.</small></p>` : ''}
+   <div class="row"><div style="flex:1"><label>Nome</label><input id="ccNome" placeholder="Com quem falou"></div><div style="flex:1"><label>Cargo</label><select id="ccCargo">${CARGOS.map(x => `<option>${x}</option>`).join('')}</select></div></div>
+   <div class="row"><div style="flex:1"><label>Telefone / WhatsApp</label><input id="ccTel" inputmode="tel"></div><div style="flex:1"><label>E-mail</label><input id="ccEmail" inputmode="email"></div></div>
+   <label class="chkbox" style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" id="ccComp" style="width:auto" ${c ? '' : 'checked'}> É quem decide a compra (vira o contato principal)</label></div>`}
+   <div class="sect"><h3>Detalhes do negócio</h3>
+   <label>Canal</label>${campoCanal('ccCanal', p.canal || 'Minimercado')}
+   <div class="row"><div style="flex:2"><label>Endereço</label><input id="ccEnd" value="${esc(p.endereco || '')}"></div><div style="flex:1"><label>Bairro</label><input id="ccBairro" value="${esc(p.bairro || '')}"></div></div>
+   <div class="row"><div style="flex:1"><label>Classe</label><select id="ccClasse"><option value="">—</option>${['A', 'B', 'C', 'D'].map(k => `<option ${p.classe === k ? 'selected' : ''}>${k}</option>`).join('')}</select></div><div style="flex:1"><label>Fornecedor atual</label><input id="ccForn" value="${esc(p.fornecedor_atual || '')}"></div></div>
+   <label>Horário de atendimento</label>${campoJanela('ccJ', p)}
+   <label>Observação</label><textarea id="ccObs" rows="2">${esc(p.observacao || '')}</textarea></div>
+   <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" id="ccPula">Pular</button><button class="btn pri" id="ccOk">Salvar</button></div>`);
+  ligarCanal('ccCanal'); ligarJanela('ccJ');
+  $('#ccPula').onclick = () => { fecharModal(); fim(); };
+  $('#ccOk').onclick = async () => { $('#ccOk').disabled = true;
+    try {
+      const patch = { canal: lerCanal('ccCanal'), endereco: $('#ccEnd').value.trim() || null, bairro: $('#ccBairro').value.trim() || null, classe: $('#ccClasse').value || null, fornecedor_atual: $('#ccForn').value.trim() || null, observacao: $('#ccObs').value.trim() || null, ...lerJanela('ccJ') };
+      if (!semContato) { const nome = $('#ccNome').value.trim(), tel = $('#ccTel').value.trim(), email = $('#ccEmail').value.trim(), comp = $('#ccComp').checked;
+        if (nome || tel) { const id = await obterContato({ nome, telefone: tel, whatsapp: tel, email, cargo: $('#ccCargo').value, empresa: p.nome, comprador: comp });
+          if (id && id !== p.contato_id) { if (!p.contato_id || comp) { patch.contato_id = id; if (p.contato_id) await db.vincularContato(p.id, p.contato_id).catch(() => {}); } else await db.vincularContato(p.id, id).catch(() => {}); } } }
+      await db.atualizarPdv(p.id, patch); await atualizarUm(p.id); fecharModal(); toast('Cadastro atualizado'); fim();
+    } catch (e) { $('#ccOk').disabled = false; erro(/janela_|precisa_dono/.test(e.message) ? new Error('Rode o SQL 018 no Supabase para salvar a janela de atendimento') : e); } };
+}
+// mapeado que não faz sentido: some do mapa e do cadastro
+function excluirDoMapa(p, depois) {
+  modal(`<h3>Excluir ${esc(p.nome)} do mapa?</h3><p style="color:var(--soft)">O ponto sai do mapa e do cadastro. Use para mapeados que não são ponto de venda para vocês.</p><div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="exmOk">Excluir</button></div>`);
+  $('#exmOk').onclick = async () => { $('#exmOk').disabled = true;
+    // com histórico (visita, contato, tarefa), não apaga, para não perder o registro: marca como estabelecimento fechado, que também some do mapa
+    const temHist = p.ultima_prospeccao || p.ultima_visita || p.contato_id || p.acao_data;
+    try { if (temHist) throw new Error('historico'); await db.excluirPdv(p.id); S.pdvs = S.pdvs.filter(x => x.id !== p.id); toast('Excluído do mapa'); }
+    catch (e) {
+      try { await db.atualizarPdv(p.id, { etapa: 'fechado' }); await atualizarUm(p.id); toast('Tinha histórico: marquei como estabelecimento fechado (some do mapa)'); } catch (e2) { fecharModal(); return erro(e2); } }
+    fecharModal(); depois && depois(); };
+}
+
 /* ---------- visita rápida + comentário depois ---------- */
 async function visitaRapida(p, depois) {
   try { const v = await db.registrarVisita(p.id, 'prospeccao', null, S.eu.id);
     if (p.etapa === 'mapeado') await db.atualizarPdv(p.id, { etapa: 'visitado' });
-    S.ultimaVisita = { pdvId: p.id, id: v.id, em: new Date() }; await atualizarUm(p.id); toast('Visita registrada'); depois && depois(); } catch (e) { erro(e); }
+    S.ultimaVisita = { pdvId: p.id, id: v.id, em: new Date() }; await atualizarUm(p.id); toast('Visita registrada'); completarCadastro(S.pdvs.find(x => x.id === p.id) || p, depois); } catch (e) { erro(e); }
 }
 function caixaComentario(p) {
   const u = S.ultimaVisita; if (!u || u.pdvId !== p.id) return '';
@@ -2386,15 +2428,15 @@ function prepararGoogle(linhas, el) {
     const lat = parseFloat(String(campo(l, 'latitude', 'lat')).replace(',', '.')), lng = parseFloat(String(campo(l, 'longitude', 'lng', 'lon')).replace(',', '.')), nome = campo(l, 'name', 'nome', 'title');
     if (!nome || !isFinite(lat) || !isFinite(lng)) { semCoord++; continue; }
     if (/closed/i.test(campo(l, 'business_status'))) { fechados++; continue; }
-    const cid = campo(l, 'city', 'cidade'); if (cid && !norm(cid).includes('porto alegre')) { fora++; continue; }
+    const cid = campo(l, 'city', 'cidade') || 'Porto Alegre';
     const id = campo(l, 'google_id', 'place_id', 'cid') || norm(nome) + lat.toFixed(4) + lng.toFixed(4); if (vistos.has(id)) { repetidos++; continue; } vistos.add(id);
     if (S.pdvs.some(p => p.lat && norm(p.nome) === norm(nome) && distM(p, { lat, lng }) < 150)) { jaTem++; continue; }
     const cat = campo(l, 'category', 'type', 'categoria') || (campo(l, 'subtypes').split(',')[0] || '').trim();
-    ok.push({ l, nome, lat, lng, cat, canal: canalGoogle(cat + ' ' + campo(l, 'subtypes')) });
+    ok.push({ l, nome, lat, lng, cat, cid, canal: canalGoogle(cat + ' ' + campo(l, 'subtypes')) });
   }
   const porCanal = {}; ok.forEach(x => { (porCanal[x.canal] = porCanal[x.canal] || { n: 0, cats: {} }).n++; porCanal[x.canal].cats[x.cat] = (porCanal[x.canal].cats[x.cat] || 0) + 1; });
   gmaps = { ok, porCanal };
-  el.innerHTML = `<p style="margin:6px 0"><b>${ok.length} pontos novos</b> no arquivo · ${repetidos} repetidos no arquivo · ${jaTem} já estão no sistema · ${fechados} fechados · ${fora} fora de Porto Alegre${semCoord ? ` · ${semCoord} sem coordenada` : ''}</p>
+  el.innerHTML = `<p style="margin:6px 0"><b>${ok.length} pontos novos</b> no arquivo · ${repetidos} repetidos no arquivo · ${jaTem} já estão no sistema · ${fechados} fechados${(() => { const cs = [...new Set(ok.map(x => x.cid))]; return cs.length > 1 || (cs[0] && cs[0] !== 'Porto Alegre') ? ' · cidades: ' + esc(cs.join(', ')) : ''; })()}${semCoord ? ` · ${semCoord} sem coordenada` : ''}</p>
    <p style="color:var(--soft);margin:4px 0 8px">Desmarque o que não quer importar. O canal é sugerido a partir da categoria do Google.</p>
    <table><tr><th></th><th>Canal</th><th>Categorias do Google</th><th style="text-align:right">Pontos</th></tr>${Object.entries(porCanal).sort((a, b) => b[1].n - a[1].n).map(([c, v]) => `<tr><td><input type="checkbox" data-gc="${esc(c)}" checked style="width:auto"></td><td><b>${esc(c)}</b></td><td><small>${Object.entries(v.cats).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, n]) => `${esc(k || '—')} (${n})`).join(' · ')}</small></td><td style="text-align:right">${v.n}</td></tr>`).join('')}</table>
    <div class="row" style="margin-top:10px;justify-content:flex-end"><button class="btn pri" id="gImp">Importar selecionados</button></div><div id="gRes"></div>`;
@@ -2404,9 +2446,9 @@ function prepararGoogle(linhas, el) {
   $('#gImp').onclick = async () => {
     const lista = atual(); if (!lista.length) return toast('Nada selecionado'); $('#gImp').disabled = true;
     try {
-      const regs = []; for (const x of lista) regs.push(await garantirRegiao(x.lng, x.lat, 'Porto Alegre'));
+      const regs = []; for (const x of lista) regs.push(await garantirRegiao(x.lng, x.lat, x.cid));
       const linhasDb = lista.map((x, i) => { const l = x.l, tel = campo(l, 'phone', 'telefone'), nota = campo(l, 'rating'), av = campo(l, 'reviews'), site = campo(l, 'site', 'website');
-        return { nome: x.nome, canal: x.canal, endereco: campo(l, 'street', 'endereco') || (campo(l, 'full_address', 'address').split(' - ')[0]) || null, bairro: campo(l, 'borough', 'bairro', 'neighborhood') || null, cidade: 'Porto Alegre', lat: x.lat, lng: x.lng, geo_precisao: 'exata', potencial: 3,
+        return { nome: x.nome, canal: x.canal, endereco: campo(l, 'street', 'endereco') || (campo(l, 'full_address', 'address').split(' - ')[0]) || null, bairro: campo(l, 'borough', 'bairro', 'neighborhood') || null, cidade: x.cid, lat: x.lat, lng: x.lng, geo_precisao: 'exata', potencial: 3,
           observacao: ['Google: ' + (x.cat || '—'), tel ? 'Tel ' + tel : null, nota ? `★ ${nota}${av ? ' (' + av + ')' : ''}` : null, site || null].filter(Boolean).join(' · '), etapa: 'mapeado', origem: 'google_maps', regiao: regs[i], criado_por: S.eu.id }; });
       $('#gRes').innerHTML = '<small>Gravando…</small>';
       await db.criarPdvs(linhasDb); await recarregar();
@@ -2669,10 +2711,11 @@ function painelParada(s) {
   ${p.acao_data ? `<p style="margin:4px 0">${chipAcao(p)}</p>` : ''}
   ${r ? `<div class="esteira" style="background:#E3F0E7;border-color:#BFD9C6"><b>Visitado hoje:</b> ${RESULTADOS[r]?.n || 'visita registrada'}</div>` : ''}
   <div class="sect"><h3>Como foi a visita?</h3><div class="resultados">${Object.entries(RESULTADOS).map(([k, v]) => `<button data-res="${k}" style="--c:${v.c}"><span>${v.ic}</span>${v.n}</button>`).join('')}</div></div>
-  <div class="actions"><button class="btn" id="zPerfil">Abrir perfil</button>${p.lat ? `<a class="btn" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}&travelmode=walking">Ir a pé até aqui ↗</a>` : ''}<button class="btn" id="zTirar">Tirar do plano</button></div>`;
+  <div class="actions"><button class="btn" id="zPerfil">Abrir perfil</button>${p.lat ? `<a class="btn" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}&travelmode=walking">Ir a pé até aqui ↗</a>` : ''}<button class="btn" id="zTirar">Tirar do plano</button>${p.etapa === 'mapeado' ? `<button class="btn" id="zExMapa" style="color:#B8402A">Excluir do mapa</button>` : ''}</div>`;
   $('#zVolta').onclick = () => { PZ.aberto = null; painelProsp(); desenharProsp(); };
   $('#zPerfil').onclick = () => abrirPerfil(p.id);
   $('#zTirar').onclick = () => { PZ.plano = PZ.plano.filter(x => x !== p.id); PZ.aberto = null; salvarPlanoAtual(); painelProsp(); desenharProsp(); };
+  if ($('#zExMapa')) $('#zExMapa').onclick = () => excluirDoMapa(p, () => { PZ.plano = PZ.plano.filter(x => x !== p.id); PZ.aberto = null; salvarPlanoAtual(); painelProsp(); desenharProsp(); });
   s.querySelectorAll('[data-res]').forEach(b => b.onclick = () => resultadoVisita(p, b.dataset.res));
 }
 async function concluirParada(p, res, toastTxt) {
@@ -2694,7 +2737,7 @@ function resultadoVisita(p, res) {
     <label>Anotação</label><textarea id="rObs" rows="2" placeholder="O que ficou de pensar, objeções…"></textarea>${tarefaHtml('Retorno: ' + p.nome + ' (vai pensar)', 2, 'whatsapp')}
     <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="rOk">Salvar</button></div>`);
     $('#rCanal').onchange = () => { $('#rTipo').value = document.querySelector('input[name=rc]:checked').value; };
-    $('#rOk').onclick = async () => { try { await db.registrarVisita(p.id, 'prospeccao', $('#rObs').value.trim() || null, S.eu.id, 'pensar'); await avancar(p, 'negociacao'); await criarTar(); fecharModal(); await concluirParada(p, 'pensar', 'Anotado: vai pensar.'); } catch (e) { erro(e); } };
+    $('#rOk').onclick = async () => { try { await db.registrarVisita(p.id, 'prospeccao', $('#rObs').value.trim() || null, S.eu.id, 'pensar'); await avancar(p, 'negociacao'); await criarTar(); fecharModal(); completarCadastro(p, () => concluirParada(p, 'pensar', 'Anotado: vai pensar.')); } catch (e) { erro(e); } };
     return;
   }
   if (res === 'nao_estava') {
@@ -2713,7 +2756,7 @@ function resultadoVisita(p, res) {
         await db.registrarVisita(p.id, 'prospeccao', obs, S.eu.id, 'nao_estava');
         await db.atualizarPdv(p.id, { melhor_horario: hor || p.melhor_horario || null, contato_id, ...(p.etapa === 'mapeado' ? { etapa: 'visitado' } : {}) });
         if ($('#rTar').checked) await db.criarTarefa({ titulo: $('#rTit').value.trim() || 'Voltar', tipo: $('#rTipo').value, data: $('#rData').value, hora: $('#rHora').value || null, pdv_id: p.id, contato_id, descricao: hor ? 'Melhor horário: ' + hor : null, dono: S.eu.id });
-        fecharModal(); await concluirParada(p, 'nao_estava', 'Anotado: não estava.');
+        fecharModal(); completarCadastro(S.pdvs.find(x => x.id === p.id) || p, () => concluirParada(p, 'nao_estava', 'Anotado: não estava.'), true);
       } catch (e) { erro(e); } };
     return;
   }
@@ -2722,7 +2765,7 @@ function resultadoVisita(p, res) {
     <label>Anotação</label><textarea id="rObs" rows="2" placeholder="Preço que paga, giro, o que gostaria de melhorar…"></textarea>${tarefaHtml('Voltar em ' + p.nome + ' (tem fornecedor)', 60, 'visita')}
     <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="rOk">Salvar</button></div>`);
     $('#rOk').onclick = async () => { try { const f = $('#rForn').value.trim(); await db.registrarVisita(p.id, 'prospeccao', [f ? 'Fornecedor: ' + f : null, $('#rObs').value.trim() || null].filter(Boolean).join(' · ') || null, S.eu.id, 'fornecedor');
-      await db.atualizarPdv(p.id, { fornecedor_atual: f || null, ...(p.etapa === 'mapeado' ? { etapa: 'visitado' } : {}) }); await criarTar(); fecharModal(); await concluirParada(p, 'fornecedor', 'Anotado: já tem fornecedor.'); } catch (e) { erro(e); } };
+      await db.atualizarPdv(p.id, { fornecedor_atual: f || null, ...(p.etapa === 'mapeado' ? { etapa: 'visitado' } : {}) }); await criarTar(); fecharModal(); completarCadastro(p, () => concluirParada(p, 'fornecedor', 'Anotado: já tem fornecedor.')); } catch (e) { erro(e); } };
   }
 }
 // alertas de prospecção para o painel: visitados sem próxima ação
