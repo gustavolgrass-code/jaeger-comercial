@@ -25,7 +25,8 @@ export async function carregarBase() {
   const r = Object.fromEntries(regras.map(x => [x.chave, x.valor]));
   return { regras: r, regioes, produtos, expositores, alvo };
 }
-export async function carregarPdvs() { return ok(await sb.from('v_pdv_resumo').select('*').order('nome')); }
+// o Supabase devolve no máximo 1000 linhas por consulta: busca em páginas até trazer todos
+export async function carregarPdvs() { const tudo = []; for (let de = 0; ; de += 1000) { const pg = ok(await sb.from('v_pdv_resumo').select('*').order('nome').order('id').range(de, de + 999)); tudo.push(...pg); if (pg.length < 1000) break; } return tudo; }
 export async function carregarPdv(id) { return ok(await sb.from('v_pdv_resumo').select('*').eq('id', id).single()); }
 export async function carregarSellouts(dias = 180) {
   const desde = new Date(Date.now() - dias * 864e5).toISOString();
