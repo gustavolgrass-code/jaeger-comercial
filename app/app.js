@@ -611,7 +611,9 @@ function painel() {
   if (!p) { s.classList.remove('open'); s.innerHTML = `<div class="empty"><b>Selecione um ponto no mapa.</b><br>A cor mostra a etapa do funil.<br><br><b>+ Cadastrar ponto</b>: pela sua localização, marcando no mapa ou colando o link do Google Maps.<br><b>Reposições pendentes</b>: mostra quem precisa de reposição hoje ou está atrasado.</div>`; return; }
   s.classList.add('open');
   const podeComprar = p.etapa !== 'perdido';
-  const gm = p.lat ? `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}` : null;
+  // abre a ficha do lugar no Google (nome + endereço, buscando em volta da coordenada), não só o ponto
+  const gm = /^https?:\/\/(www\.)?(google\.[a-z.]+\/maps|maps\.app\.goo\.gl|goo\.gl\/maps)/.test(p.link_maps || '') ? p.link_maps
+    : p.lat ? `https://www.google.com/maps/search/${encodeURIComponent([p.nome, p.endereco ? limparRua(p.endereco) : null, p.cidade].filter(Boolean).join(', '))}/@${p.lat},${p.lng},18z` : null;
   s.innerHTML = `<button class="btn" style="float:right;padding:4px 10px" id="xSide">✕</button>${p.lat ? `<button class="btn" style="float:right;padding:4px 10px;margin-right:6px" id="bTraco">🧭 Traçar rota</button>` : ''}
   <small style="color:var(--mute)">${esc(p.canal || '')} · ${esc(p.cidade || '')}</small><h2>${esc(p.nome)}</h2>${p.contato_nome ? `<div style="color:var(--soft)">Contato: <b>${esc(p.contato_nome)}</b>${p.contato_telefone ? ' · ' + esc(p.contato_telefone) : ''}</div>` : ''}
   <div class="badges"><span class="badge st" style="background:${etapa(p.etapa).c}">${etapa(p.etapa).n}</span>${p.classe ? `<span class="badge">Classe ${p.classe}</span>` : ''}<span class="badge">${p.regiao || '—'} · ${esc(regNome(p.regiao))}</span>${p.expositor_id ? `<span class="badge">Expositor ${esc(expo(p.expositor_id).nome)}</span>` : ''}${seloPrior(p)}</div>
