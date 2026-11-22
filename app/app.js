@@ -2451,6 +2451,7 @@ function prepararGoogle(linhas, el) {
       const regs = []; for (const x of lista) regs.push(await garantirRegiao(x.lng, x.lat, x.cid));
       const linhasDb = lista.map((x, i) => { const l = x.l, tel = campo(l, 'phone', 'telefone'), nota = campo(l, 'rating'), av = campo(l, 'reviews'), site = campo(l, 'site', 'website');
         return { nome: x.nome, canal: x.canal, endereco: campo(l, 'street', 'endereco') || (campo(l, 'full_address', 'address').split(' - ')[0]) || null, bairro: campo(l, 'borough', 'bairro', 'neighborhood') || null, cidade: x.cid, lat: x.lat, lng: x.lng, geo_precisao: 'exata', potencial: 3,
+          link_maps: (() => { const ll = campo(l, 'location_link', 'link', 'url'), gid = campo(l, 'google_id'); return /^https?:\/\//.test(ll) ? ll : /^0x[0-9a-f]+:0x[0-9a-f]+$/i.test(gid) ? `https://www.google.com/maps/place/data=!4m2!3m1!1s${gid}` : null; })(),
           observacao: ['Google: ' + (x.cat || '—'), tel ? 'Tel ' + tel : null, nota ? `★ ${nota}${av ? ' (' + av + ')' : ''}` : null, site || null].filter(Boolean).join(' · '), etapa: 'mapeado', origem: 'google_maps', regiao: regs[i], criado_por: S.eu.id }; });
       $('#gRes').innerHTML = '<small>Gravando…</small>';
       await db.criarPdvs(linhasDb); await recarregar();
