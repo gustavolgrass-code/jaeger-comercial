@@ -1853,9 +1853,12 @@ function ligarRota(k, todas) {
      <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="rbOk">Salvar</button></div>`);
     $('#rbOk').onclick = async () => { const end = $('#rbEnd').value.trim(), nv = { ...cfgRota(), tempo_rep: +$('#rbTr').value || 20, tempo_prosp: +$('#rbTp').value || 15 };
       if (end && end !== b.end) { $('#rbOk').disabled = true; $('#rbOk').textContent = 'Localizando…';
-        try { const r = await (await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=br&accept-language=pt-BR&q=${encodeURIComponent(end)}`)).json();
-          if (!r.length) { $('#rbOk').disabled = false; $('#rbOk').textContent = 'Salvar'; return toast('Não achei esse endereço. Confira número e cidade.'); }
-          Object.assign(nv, { endereco: end, lat: +r[0].lat, lng: +r[0].lon }); } catch (e) { return erro(e); } }
+        // procura só na Grande Porto Alegre; sem cidade no texto, prefere Canoas (onde fica o estoque)
+        try { const busca = async q => (await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&countrycodes=br&accept-language=pt-BR&viewbox=-51.7,-29.3,-49.9,-30.4&bounded=1&q=${encodeURIComponent(q)}`)).json();
+          let r = await busca(end); const temCidade = /canoas|porto alegre|novo hamburgo|esteio|sapucaia|cachoeirinha|gravata|alvorada|viam|s[aã]o leopoldo|capão|capao/i.test(end);
+          if (!temCidade) { const rc = await busca(end + ', Canoas'); if (rc.length) r = rc; }
+          if (!r.length) { $('#rbOk').disabled = false; $('#rbOk').textContent = 'Salvar'; return toast('Não achei esse endereço. Confira rua, número e cidade.'); }
+          Object.assign(nv, { endereco: end, lat: +r[0].lat, lng: +r[0].lon }); toast('Localizado: ' + r[0].display_name.split(', Rio Grande do Sul')[0]); } catch (e) { return erro(e); } }
       try { await db.salvarRegra('rota', nv); S.base.regras.rota = nv; fecharModal(); toast('Ponto de saída salvo'); desenharRota(); } catch (e) { erro(e); } }; };
   ligarBusca($('#rProsp'), $('#rProspSug'), p => PROSP_ETAPAS.includes(p.etapa));
   // mapa: mesma cor e símbolo da lista (urgência, prospecção, feito, não estava) e o caminho pelas ruas
