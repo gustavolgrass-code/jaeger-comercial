@@ -140,7 +140,9 @@ export async function blingOrfaos() { return ok(await sb.from('bling_orfaos').se
 export async function blingIgnorar(blingId) { return ok(await sb.from('bling_orfaos').delete().eq('bling_id', blingId)); }
 // venda para quem já é cliente: só o pedido (não conta como visita de reposição nem mexe na etapa)
 export async function registrarVenda({ pdvId, usuarioId, pedido, itens, patch }) {
-  const ped = ok(await sb.from('pedidos').insert({ ...pedido, pdv_id: pdvId, criado_por: usuarioId }).select().single());
+  // venda para quem já é cliente também é uma reposição: gera a visita, para contar no Dia de rota e recalcular a próxima reposição
+  const vis = pedido.tipo === 'reposicao' ? await registrarVisita(pdvId, 'reposicao', 'Venda registrada sem contagem do expositor', usuarioId) : null;
+  const ped = ok(await sb.from('pedidos').insert({ ...pedido, pdv_id: pdvId, criado_por: usuarioId, ...(vis ? { visita_id: vis.id } : {}) }).select().single());
   const its = itens.filter(i => i.quantidade > 0);
   if (its.length) ok(await sb.from('pedido_itens').insert(its.map(i => ({ ...i, pedido_id: ped.id }))));
   if (patch) await atualizarPdv(pdvId, patch);
@@ -229,3 +231,13 @@ export async function ultimoPedidoItens(pdvId) {
 }
 // junta pedidos do mesmo cliente (ainda fora do Bling) em um só; devolve o id do pedido que ficou
 export async function agruparPedidos(ids) { const { data, error } = await sb.rpc('agrupar_pedidos', { ids }); if (error) throw new Error(error.message); return data; }
+
+// vendas lançadas antes da correção (sem visita): cria a visita de reposição na data do pedido
+export async function corrigirVendasSemVisita(dias = 30) {
+  const desde = new Date(Date.now() - dias * 864e5).toISOString();
+  const r = await sb.from('pedidos').select('id, pdv_id, criado_em, criado_por').eq('tipo', 'reposicao').is('visita_id', null).not('criado_por', 'is', null).gte('criado_em', desde);
+  if (r.error || !r.data?.length) return 0; let n = 0;
+  for (const o of r.data) { const v = await sb.from('visitas').insert({ pdv_id: o.pdv_id, tipo: 'reposicao', em: o.criado_em, usuario_id: o.criado_por, observacao: 'Venda registrada sem contagem do expositor' }).select('id').single();
+    if (v.error) continue; await sb.from('pedidos').update({ visita_id: v.data.id }).eq('id', o.id); n++; }
+  return n;
+}

@@ -157,7 +157,7 @@ function irPara(a, semHist) {
   else if (!semHist && S.aba && !mesmo) { S.hist.push({ aba: S.aba, ...(S.histEnt || {}) }); if (S.hist.length > 40) S.hist.shift(); }
   S.aba = a; S.histEnt = ctx;
   $('#nav').innerHTML = ABAS[lado].map(([k, n]) => `<button data-a="${k}" class="${k === a ? 'on' : ''}">${n}</button>`).join('');
-  $('#nav').onclick = e => { const k = e.target.dataset.a; if (k) { S.vendaVolta = null; S.hist = []; irPara(k, true); } };
+  $('#nav').onclick = e => { const k = e.target.dataset.a; if (k) { S.vendaVolta = null; S.repVolta = null; S.hist = []; irPara(k, true); } };
   ({ agenda: telaAgenda, perfil: telaPerfil, contato: telaContato, contatos: telaContatos, uploads: telaUploads, mapa: telaMapa, funil: telaFunil, carteira: telaCarteira, abertura: telaAbertura, painel: telaPainel, regras: telaRegras, rota: telaRota, reposicao: telaReposicao, pedcli: telaPedidosCliente, resumo: telaResumo })[a]();
 }
 window.irPara = irPara;
@@ -647,6 +647,7 @@ function painel() {
   <div class="sect"><h3>Etapa do funil</h3><select id="sEt" style="width:100%">${ETAPAS.map(e => `<option value="${e.k}" ${e.k === p.etapa ? 'selected' : ''}>${e.n}</option>`).join('')}</select></div>
   ${p.observacao ? `<div class="sect"><h3>Observação</h3><div style="color:var(--soft)">${esc(p.observacao)}</div></div>` : ''}
   <div class="actions">
+   ${repoe(p) ? `<button class="btn pri" style="font-size:15px;padding:11px" id="bRepor">Repor (contar o expositor) →</button>` : ''}
    ${podeComprar ? `<button class="btn car" style="font-size:15px;padding:11px" id="bComprar">Registrar venda →</button>` : ''}
    <button class="btn ${podeComprar ? '' : 'pri'}" id="bVisita">Registrar visita de prospecção</button>
    <button class="btn" id="bPerfil">Abrir perfil do negócio</button>
@@ -662,6 +663,7 @@ function painel() {
   s.querySelectorAll('[data-pot]').forEach(b => b.onclick = () => salvarPdv(p.id, { potencial: +b.dataset.pot }, 'Potencial atualizado'));
   $('#sEt').onchange = e => mudarEtapa(p.id, e.target.value, () => { desenhar(); painel(); });
   if ($('#sCad')) $('#sCad').onchange = e => salvarPdv(p.id, { cadencia_dias: e.target.value ? +e.target.value : null }, 'Frequência atualizada');
+  if ($('#bRepor')) $('#bRepor').onclick = () => { S.contando = p.id; S.repVolta = { aba: 'mapa', id: p.id }; irPara('reposicao'); };
   if ($('#bComprar')) $('#bComprar').onclick = () => { S.abPdv = p.id; S.vendaVolta = { aba: 'mapa', id: p.id }; irPara('abertura'); };
   $('#bVisita').onclick = () => visitaRapida(p);
   ligarPrior(p, () => { desenhar(); painel(); });
@@ -1673,6 +1675,7 @@ async function telaRota() {
   $('#main').innerHTML = '<section class="view on"><div class="loading">Montando o dia de rota…</div></section>';
   RT.data = RT.data || hoje();
   try {
+    if (!S.vendasCorrigidas) { S.vendasCorrigidas = true; await db.corrigirVendasSemVisita().catch(() => 0); }
     await recarregar();
     const [raw, perfis, doDia, vis] = await Promise.all([db.dadosRota(), RT.perfis.length ? RT.perfis : db.perfisTodos().catch(() => [S.eu]), db.rotasDoDia(RT.data).catch(e => { RT.semTabela = true; return []; }), db.visitasDoDia(RT.data)]);
     RT.raw = raw; RT.perfis = perfis; RT.visitas = vis; RT.prev = prever(raw, RT.data);
@@ -2036,6 +2039,7 @@ function ligarSteppers(raiz) {
     i.value = Math.max(0, (+i.value || 0) + +b.dataset.d); i.dispatchEvent(new Event('input', { bubbles: true })); });
   raiz.addEventListener('focusin', e => { if (e.target.matches('.stp input')) e.target.select(); });
 }
+function voltarDaRep() { const v = S.repVolta; S.repVolta = null; S.contando = null; if (v?.aba === 'perfil') abrirPerfil(v.id); else if (v?.aba === 'mapa') { S.sel = v.id; irPara('mapa'); } else irPara('rota'); }
 async function telaReposicao() {
   const p = S.pdvs.find(x => x.id === S.contando);
   if (!p) { $('#main').innerHTML = '<section class="view on"><div class="empty">Escolha um cliente no <b>Dia de rota</b> para começar.</div></section>'; return; }
@@ -2101,7 +2105,7 @@ async function telaReposicao() {
       try { await db.salvarRegra('encomendas', todas); S.base.regras.encomendas = todas; fecharModal(); toast('Encomenda salva: aparece no Dia de rota'); S.contando = null; irPara('rota'); } catch (e) { erro(e); } }; };
   if ($('#encDesc')) $('#encDesc').onclick = async e => { e.preventDefault(); const todas = { ...(S.base.regras.encomendas || {}) }; delete todas[p.id];
     try { await db.salvarRegra('encomendas', todas); S.base.regras.encomendas = todas; toast('Encomenda descartada'); telaReposicao(); } catch (er) { erro(er); } };
-  $('#bVoltar').onclick = () => { S.reabrir = null; irPara('rota'); };
+  $('#bVoltar').onclick = () => { S.reabrir = null; voltarDaRep(); };
   $('#fechar').onclick = async () => {
     const t = calc(), g = pag.ler(), pg = g.condicao, venc = g.vencimento, mandar = $('#rBling').checked;
     if (!g.ok) return toast('Cada parcela precisa ter valor, e a soma não pode passar do total');
@@ -2123,7 +2127,7 @@ async function telaReposicao() {
         await db.atualizarPdv(p.id, { etapa: novo }); extra = novo === 'ativo' ? ' Avaliação concluída: virou cliente ativo.' : ' Avaliação abaixo da meta: foi para revisão comercial.';
       } else if (n.etapa === 'avaliacao') extra = ` Avaliação: ${n.aval_reposicoes} de ${r.reposicoes}.`;
       if (p.condicao !== g.forma && !cons && !g.parcelas.length) await db.atualizarPdv(p.id, { condicao: g.forma }).catch(() => { });
-      S.reabrir = null; await recarregar(); await avaliarRisco(); toast('Reposição registrada.' + extra); S.contando = null; irPara('rota');
+      S.reabrir = null; await recarregar(); await avaliarRisco(); toast('Reposição registrada.' + extra); voltarDaRep();
       if (mandar && reg.pedido && (cons ? t.so : t.un) > 0) enviarAoBling(reg.pedido.id, p.nome);
     } catch (e) { erro(e); $('#fechar').disabled = false; }
   };
@@ -2334,7 +2338,7 @@ async function telaPerfil() {
      <p style="color:var(--soft);margin:6px 0">${esc(p.endereco || 'Sem endereço')}${p.condicao ? ` · Condição: <b>${esc(p.condicao)}</b>` : ''}${p.proxima_reposicao ? ` · Próxima reposição: <b>${dstr(p.proxima_reposicao)}</b> (${prazoTxt(p)})` : ''}</p>
      ${p.observacao ? `<p style="background:var(--sand);padding:8px 10px;border-radius:8px;margin:8px 0 0">${esc(p.observacao)}</p>` : ''}
      <div class="row" style="flex-wrap:wrap;margin-top:12px">
-      ${podeComprar ? '<button class="btn car" id="pComprar">Registrar venda →</button>' : ''}
+      ${repoe(p) ? '<button class="btn pri" id="pRepor">Repor (contar o expositor) →</button>' : ''}${podeComprar ? '<button class="btn car" id="pComprar">Registrar venda →</button>' : ''}
       <button class="btn pri" id="pVisita">Registrar visita</button>
       <select id="pEtapa">${ETAPAS.map(e => `<option value="${e.k}" ${e.k === p.etapa ? 'selected' : ''}>${e.n}</option>`).join('')}</select>
       <button class="btn" id="pEditar">Editar dados</button><button class="btn" id="pMapa">Ver no mapa</button><button class="btn" id="pAjustar">Ajustar localização</button><button class="btn" id="pExcluirTopo" style="color:#7A2414">Excluir negócio</button>
@@ -2368,6 +2372,7 @@ async function telaPerfil() {
   if (h.pedidos.length) db.itensDoCliente(p.id).then(it => { const el = $('#pProd'); if (el) el.outerHTML = maisSaem(it, h.pedidos); }).catch(() => { });
   $('#pNovaTar').onclick = $('#pTarTopo').onclick = () => modalTarefa({ data: hojeISO(), pdv_id: p.id, contato_id: p.contato_id });
   document.querySelectorAll('[data-tid]').forEach(el => el.onclick = () => modalTarefa(tars.find(t => t.id === el.dataset.tid)));
+  if ($('#pRepor')) $('#pRepor').onclick = () => { S.contando = p.id; S.repVolta = { aba: 'perfil', id: p.id }; irPara('reposicao'); };
   if ($('#pComprar')) $('#pComprar').onclick = () => { S.abPdv = p.id; S.vendaVolta = { aba: 'perfil', id: p.id }; irPara('abertura'); };
   $('#pVisita').onclick = () => visitaRapida(p, telaPerfil);
   ligarComentario(telaPerfil);
