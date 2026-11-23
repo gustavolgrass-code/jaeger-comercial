@@ -10,7 +10,7 @@ const dstr = d => d ? new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', 
 const dec = n => Number(n || 0).toFixed(1).replace('.', ',');
 const DIA = 864e5;
 function toast(t) { const e = $('#toast'); e.textContent = t; e.style.display = 'block'; clearTimeout(e._t); e._t = setTimeout(() => e.style.display = 'none', 4200); }
-function erro(e) { console.error(e); const m = String(e.message || e); toast(/janela_periodo_check/.test(m) ? 'Para marcar mais de um período, rode o 029_periodos_multiplos.sql no Supabase' : /consumidor_final/.test(m) ? 'Para usar consumidor final, rode o 030_consumidor_final.sql no Supabase' : 'Erro: ' + m); }
+function erro(e) { console.error(e); const m = String(e.message || e); toast(/janela_periodo_check/.test(m) ? 'Para marcar mais de um período, rode o 029_periodos_multiplos.sql no Supabase' : /'(numero|uf|cep)' column|column pdvs\.(numero|uf|cep)|(numero|uf|cep)" of relation/.test(m) ? 'Para salvar número, UF e CEP separados, rode o 033_endereco_campos.sql no Supabase' : /consumidor_final/.test(m) ? 'Para usar consumidor final, rode o 030_consumidor_final.sql no Supabase' : 'Erro: ' + m); }
 function modal(html) { $('#modalBox').innerHTML = html; $('#modal').classList.add('on'); }
 function fecharModal() { $('#modal').classList.remove('on'); }
 window.fecharModal = fecharModal;
@@ -49,6 +49,20 @@ const regiaoDe = (lng, lat) => {
 };
 const semAcento = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 const CORES = ['#3F6FA8', '#2F7D4E', '#C27A2C', '#B8402A', '#6B4FA0', '#8A4E17', '#2C7F8C', '#9A3B6E', '#5E6B2E'];
+// endereço no padrão do Google: "Av. Benjamin Constant, 76 - São João, Porto Alegre - RS, 90550-003"
+const ABREV_RUA = [[/^avenida\s/i, 'Av. '], [/^rua\s/i, 'R. '], [/^travessa\s/i, 'Tv. '], [/^estrada\s/i, 'Estr. '], [/^rodovia\s/i, 'Rod. '], [/^alameda\s/i, 'Al. '], [/^praça\s/i, 'Pç. ']];
+const abreviarRua = r => { let t = String(r || '').trim(); ABREV_RUA.forEach(([re, a]) => t = t.replace(re, a)); return t; };
+const linhaEndereco = a => { const l1 = [a.rua, a.num].filter(Boolean).join(', '), l2 = [a.cidade, a.uf].filter(Boolean).join(' - ');
+  return [[l1, a.bairro].filter(Boolean).join(' - '), [l2, a.cep].filter(Boolean).join(', ')].filter(Boolean).join(', '); };
+// separa "Av. Benjamin Constant, 76" em rua e número (para quem foi cadastrado com tudo junto)
+const separarRua = p => { if (p.numero) return { rua: String(p.endereco || '').replace(new RegExp(',\\s*' + String(p.numero).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$'), ''), num: p.numero };
+  const m = String(p.endereco || '').match(/^(.*?),\s*(\d+[A-Za-z]?)\s*$/); return m ? { rua: m[1], num: m[2] } : { rua: p.endereco || '', num: '' }; };
+// endereço completo de um ponto do mapa (rua, número, bairro, cidade, UF, CEP)
+async function enderecoDoPonto(lat, lng) {
+  try { const a = (await (await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1&accept-language=pt-BR&lat=${lat}&lon=${lng}`)).json()).address || {};
+    const UFS = { 'Rio Grande do Sul': 'RS', 'Santa Catarina': 'SC', 'Paraná': 'PR', 'São Paulo': 'SP' }, uf = (a['ISO3166-2-lvl4'] || '').replace('BR-', '') || UFS[a.state] || '';
+    return { rua: abreviarRua(a.road || ''), num: a.house_number || '', bairro: a.suburb || a.neighbourhood || a.quarter || a.city_district || '', cidade: a.city || a.town || a.village || a.municipality || '', uf, cep: a.postcode || '' };
+  } catch { return null; } }
 async function geoReverso(lat, lng) {
   try {
     const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=16&accept-language=pt-BR&lat=${lat}&lon=${lng}`);
@@ -2177,6 +2191,7 @@ function ligarEmpresa(pre, nomeId) {
     b.disabled = true; b.textContent = '…';
     try { const r = await fetch('https://brasilapi.com.br/api/cnpj/v1/' + c); if (!r.ok) throw new Error('CNPJ não encontrado'); const j = await r.json();
       $('#' + pre + 'Razao').value = j.razao_social || ''; if (nomeId && !$('#' + nomeId).value) $('#' + nomeId).value = j.nome_fantasia || j.razao_social || '';
+      document.dispatchEvent(new CustomEvent('cnpj-encontrado', { detail: j }));
       toast('Dados do CNPJ preenchidos' + (j.descricao_situacao_cadastral && j.descricao_situacao_cadastral !== 'ATIVA' ? ' · situação: ' + j.descricao_situacao_cadastral : '')); }
     catch (e) { toast(e.message); } b.disabled = false; b.textContent = 'Buscar'; };
 }
@@ -2362,12 +2377,23 @@ async function telaPerfil() {
   $('#pAjustar').onclick = () => { irPara('mapa'); if (p.lat) mapa.setView([p.lat, p.lng], 17); marcando = true; $('#hint').textContent = 'Toque no lugar exato de ' + p.nome; $('#hint').style.display = 'block';
     aoMarcar = async ([lng, lat]) => { try { const g = await geoReverso(lat, lng); await db.atualizarPdv(p.id, { lat, lng, geo_precisao: 'manual', regiao: await garantirRegiao(lng, lat, g.cidade || p.cidade), endereco: g.rua || p.endereco, bairro: g.bairro || p.bairro, cidade: g.cidade || p.cidade }); $('#hint').textContent = 'Toque no mapa onde fica o ponto'; await atualizarUm(p.id); toast('Localização ajustada'); } catch (e) { erro(e); } }; };
   $('#pEditar').onclick = () => { modal(`<h3>Editar ${esc(p.nome)}</h3><label>Nome fantasia</label><input id="eNome" value="${esc(p.nome)}">${campoEmpresa('e', p)}<label>Canal</label>${campoCanal('eCanal', p.canal)}
-    <label>Endereço</label><input id="eEnd" value="${esc(p.endereco || '')}" placeholder="Rua, número"><div class="row"><div style="flex:1"><label>Bairro</label><input id="eBai" value="${esc(p.bairro || '')}"></div><div style="flex:1"><label>Cidade</label><input id="eCid" value="${esc(p.cidade || '')}"></div></div>
+    ${(() => { const sp = separarRua(p); return `<div class="row"><div style="flex:3"><label>Rua</label><input id="eEnd" value="${esc(sp.rua)}" placeholder="Av. Benjamin Constant"></div><div style="flex:1"><label>Número</label><input id="eNum" value="${esc(sp.num)}" inputmode="numeric"></div></div>
+    <div class="row"><div style="flex:2"><label>Bairro</label><input id="eBai" value="${esc(p.bairro || '')}"></div><div style="flex:2"><label>Cidade</label><input id="eCid" value="${esc(p.cidade || '')}"></div><div style="flex:.8"><label>UF</label><input id="eUf" value="${esc(p.uf || (p.cidade ? 'RS' : ''))}" maxlength="2" style="text-transform:uppercase"></div><div style="flex:1.4"><label>CEP</label><input id="eCep" value="${esc(p.cep || '')}" inputmode="numeric" placeholder="00000-000"></div></div>
+    <small id="eEndTxt" style="color:var(--mute)"></small>`; })()}
     <label>Link do Google Maps <small style="color:var(--mute);font-weight:400">(opcional: cole o link do lugar e o pino vai para lá)</small></label><input id="eLink" value="${esc(/^https?:/.test(p.link_maps || '') ? p.link_maps : '')}" placeholder="https://www.google.com/maps/place/…"><div class="linkmsg" id="eLinkMsg"></div>
     <div class="row"><div style="flex:1"><label>Classe</label><select id="eCla"><option value="">—</option>${['A', 'B', 'C', 'D'].map(x => `<option ${x === p.classe ? 'selected' : ''}>${x}</option>`).join('')}</select></div><div style="flex:1"><label>Potencial</label>${campoPot('ePot', p.potencial)}</div></div>
     <label class="chkbox" style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="eCF" style="width:auto" ${p.consumidor_final ? 'checked' : ''}> Consumidor final <small style="color:var(--mute)">(não gera reposição automática; dá para pôr na rota à mão)</small></label>
     <label>Observação</label><textarea id="eObs" rows="3">${esc(p.observacao || '')}</textarea><div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="eOk">Salvar</button></div>`);
     ligarCanal('eCanal'); ligarEmpresa('e', 'eNome');
+    // mostra o endereço montado no padrão do Google ("Av. Benjamin Constant, 76 - São João, Porto Alegre - RS, 90550-003")
+    const mostraEnd = () => { const t = linhaEndereco({ rua: $('#eEnd').value.trim(), num: $('#eNum').value.trim(), bairro: $('#eBai').value.trim(), cidade: $('#eCid').value.trim(), uf: $('#eUf').value.trim().toUpperCase(), cep: $('#eCep').value.trim() }); $('#eEndTxt').textContent = t ? '📍 ' + t : ''; };
+    ['eEnd', 'eNum', 'eBai', 'eCid', 'eUf', 'eCep'].forEach(id => $('#' + id).addEventListener('input', mostraEnd)); mostraEnd();
+    const pore = a => { if (a.rua != null) $('#eEnd').value = a.rua; if (a.num != null) $('#eNum').value = a.num; if (a.bairro) $('#eBai').value = a.bairro; if (a.cidade) $('#eCid').value = a.cidade; if (a.uf) $('#eUf').value = a.uf; if (a.cep) $('#eCep').value = a.cep; mostraEnd(); };
+    // CEP completo: preenche rua, bairro, cidade e UF
+    $('#eCep').addEventListener('input', async () => { const c = soDig($('#eCep').value); if (c.length !== 8) return; $('#eCep').value = c.slice(0, 5) + '-' + c.slice(5);
+      try { const j = await (await fetch('https://brasilapi.com.br/api/cep/v2/' + c)).json(); if (j.street || j.city) pore({ rua: j.street ? abreviarRua(j.street) : null, bairro: j.neighborhood, cidade: j.city, uf: j.state }); } catch { } });
+    // CNPJ buscado: usa o endereço da Receita
+    document.addEventListener('cnpj-encontrado', e => { const j = e.detail; if (!$('#eEnd')) return; pore({ rua: abreviarRua([j.descricao_tipo_de_logradouro, j.logradouro].filter(Boolean).join(' ')), num: j.numero && j.numero !== 'S/N' ? j.numero : '', bairro: j.bairro, cidade: j.municipio ? j.municipio.toLowerCase().replace(/(^|\s)\S/g, x => x.toUpperCase()) : '', uf: j.uf, cep: j.cep ? String(j.cep).replace(/^(\d{5})(\d{3})$/, '$1-$2') : '' }); }, { once: true });
     // link do Google colado: lê a localização (e o nome) para mostrar antes de salvar
     const lerLink = u => { const m = u.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/) || u.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) || u.match(/[?&](?:q|query|ll)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/); return m ? { lat: +m[1], lng: +m[2] } : null; };
     const msgLink = (t, okk) => { const m = $('#eLinkMsg'); m.style.display = t ? 'block' : 'none'; m.style.background = okk ? '#E3F0E7' : '#F7E9DD'; m.style.color = okk ? '#1F5A37' : '#7A4A16'; m.innerHTML = t; };
@@ -2375,18 +2401,20 @@ async function telaPerfil() {
       if (/maps\.app\.goo\.gl|goo\.gl\/maps/.test(u)) return msgLink('Link curto do celular: abra ele no navegador, copie o endereço completo da barra (começa com google.com/maps/place) e cole aqui.', false);
       const g = lerLink(u); if (!g) return msgLink('Não achei a localização nesse link. Copie o link da página do lugar no Google Maps.', false);
       msgLink(`Localização do link: ${g.lat.toFixed(5)}, ${g.lng.toFixed(5)} · buscando o endereço…`, true);
-      const r = await geoReverso(g.lat, g.lng); msgLink(`📍 O pino vai para: ${esc([r.rua, r.bairro, r.cidade].filter(Boolean).join(', ') || `${g.lat.toFixed(5)}, ${g.lng.toFixed(5)}`)}`, true);
-      if (r.rua && $('#eEnd').value.trim() === (p.endereco || '')) $('#eEnd').value = r.rua; if (r.bairro && !$('#eBai').value.trim()) $('#eBai').value = r.bairro; if (r.cidade && !$('#eCid').value.trim()) $('#eCid').value = r.cidade; };
-    $('#eOk').onclick = async () => { try { const end = $('#eEnd').value.trim(), bai = $('#eBai').value.trim(), cid = $('#eCid').value.trim();
+      const r = await enderecoDoPonto(g.lat, g.lng); if (r) pore({ ...r, num: r.num || $('#eNum').value.trim() });
+      msgLink(`📍 O pino vai para o lugar do link${r ? ': ' + esc(linhaEndereco({ ...r, num: r.num || $('#eNum').value.trim() })) : ''}${r && !r.num ? '<br><small>O número não veio do mapa: confira e digite.</small>' : ''}`, true); };
+    $('#eOk').onclick = async () => { try { const rua = $('#eEnd').value.trim(), num = $('#eNum').value.trim(), bai = $('#eBai').value.trim(), cid = $('#eCid').value.trim(), uf = $('#eUf').value.trim().toUpperCase(), cep = $('#eCep').value.trim();
+      const end = [rua, num].filter(Boolean).join(', ');
       const patch = { nome: $('#eNome').value.trim() || p.nome, ...lerEmpresa('e'), canal: lerCanal('eCanal'), endereco: end || null, bairro: bai || null, cidade: cid || null, classe: $('#eCla').value || null, potencial: +$('#ePot').value, observacao: $('#eObs').value.trim() || null };
       if (!!$('#eCF').checked !== !!p.consumidor_final) patch.consumidor_final = $('#eCF').checked;
+      if ((num || null) !== (p.numero || null)) patch.numero = num || null; if ((uf || null) !== (p.uf || null)) patch.uf = uf || null; if ((cep || null) !== (p.cep || null)) patch.cep = cep || null;
       // link do Google novo: o pino vai para o lugar do link (mais preciso que o endereço) e o link fica guardado
       const link = $('#eLink').value.trim(), gl = link && link !== p.link_maps ? lerLink(link) : null;
       if (link !== (/^https?:/.test(p.link_maps || '') ? p.link_maps : '') && (gl || !link)) patch.link_maps = link ? link.split('?')[0] : null;
       if (gl) Object.assign(patch, { lat: gl.lat, lng: gl.lng, geo_precisao: 'exata', regiao: await garantirRegiao(gl.lng, gl.lat, cid || p.cidade) });
       // endereço digitado mudou (e não veio link): move o pino para o endereço novo
       else if (end && (end !== (p.endereco || '') || cid !== (p.cidade || '') || bai !== (p.bairro || ''))) { $('#eOk').disabled = true; $('#eOk').textContent = 'Localizando endereço…';
-        const g = await geocodificar(`${end}${bai ? ' - ' + bai : ''} - ${cid || 'Porto Alegre'}/RS`).catch(() => null);
+        const g = await geocodificar(`${end}${bai ? ' - ' + bai : ''} - ${cid || 'Porto Alegre'}/${uf || 'RS'}${cep ? ' - ' + cep : ''}`).catch(() => null);
         if (g) Object.assign(patch, { lat: g.lat, lng: g.lng, geo_precisao: g.precisao, regiao: await garantirRegiao(g.lng, g.lat, g.cidade || cid), cidade: cid || g.cidade || null, bairro: bai || g.bairro || null });
         else toast('Não achei esse endereço no mapa: o pino ficou onde estava (use Ajustar localização)'); }
       await db.atualizarPdv(p.id, patch); fecharModal(); await atualizarUm(p.id); toast('Dados salvos'); telaPerfil(); } catch (e) { erro(e); } }; };
