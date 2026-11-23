@@ -1800,8 +1800,8 @@ function ligarRota(k, todas) {
   $('#rSalvar').onclick = async () => { await salvarRotaDia({ paradas: fixar() }, 'Rota salva'); desenharRota(); };
   $('#rRecalc').onclick = async () => { await salvarRotaDia({ paradas: fixar(false) }, k.manual ? 'Voltou para a ordem automática' : 'Rota recalculada a partir de agora'); desenharRota(); };
   // arrastar a parada pela alça ⠿: solta no lugar novo e a rota (horários e links do Google Maps) é refeita nessa ordem
-  const salvarOrdem = async ids => { const l = [...k.fixos, ...ids.map(id => k.ordem.find(s => s.id === id))];
-    await salvarRotaDia({ paradas: l.map(s => ({ id: s.id, tipo: s.tipo, status: (R.paradas || []).find(x => x.id === s.id)?.status || null, manual: true })) }); desenharRota(); };
+  const salvarOrdem = async ids => { const l = [...k.fixos, ...ids.map(id => k.ordem.find(s => s.id === id))], y = window.scrollY;
+    await salvarRotaDia({ paradas: l.map(s => ({ id: s.id, tipo: s.tipo, status: (R.paradas || []).find(x => x.id === s.id)?.status || null, manual: true })) }); await desenharRota(); window.scrollTo(0, y); }; // continua no mesmo ponto da lista
   document.querySelectorAll('[data-grip]').forEach(g => g.onpointerdown = e => {
     if (e.button > 0) return; e.preventDefault();
     const cards = [...document.querySelectorAll('.rstop[data-id]')].filter(c => c.querySelector('[data-grip]')), card = g.closest('.rstop'), i0 = cards.indexOf(card);
