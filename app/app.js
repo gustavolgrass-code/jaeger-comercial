@@ -1112,6 +1112,7 @@ function telaAbertura() {
   $('#oCad').onclick = () => abrirCadastro(null);
   $('#oExp').onchange = fill; const sec = $('#main section'); sec.addEventListener('input', calc); sec.addEventListener('change', calc);
   S.precosCli = {}; fill();
+  if (p && S.prefillVenda?.pdv === p.id) { const q = S.prefillVenda.q; S.prefillVenda = null; document.querySelectorAll('.oq').forEach(i => i.value = q[i.dataset.p] || 0); calc(); toast('Itens do pedido excluído já preenchidos: corrija e lance de novo'); }
   if (p) db.precosCliente(p.id).then(pc => { if (S.abPdv !== p.id || !Object.keys(pc || {}).length) return; S.precosCli = pc; const q = {}; document.querySelectorAll('.oq').forEach(i => q[i.dataset.p] = i.value); fill(); document.querySelectorAll('.oq').forEach(i => i.value = q[i.dataset.p] || 0); calc(); toast('Preços combinados com este cliente carregados'); });
   $('#oSave').onclick = async () => {
     const t = calc(); if (!t.un) return toast('Coloque os itens do pedido');
@@ -2545,12 +2546,13 @@ async function telaPedidosCliente() {
   <div class="panel"><div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:8px"><h3 style="margin:0">Todos os pedidos</h3>
     <div class="row" style="gap:8px;align-items:center"><small id="dSelN" style="color:var(--mute)">${foraBling.length ? `${foraBling.length} pedido${foraBling.length > 1 ? 's' : ''} fora do Bling · marque para enviar` : 'Todos os pedidos estão no Bling'}</small><button class="btn pri" id="dEnviar" hidden>Mandar ao Bling</button></div></div>
    <table class="dped"><tr><th></th><th>Data</th><th>Nº</th><th>Bling</th><th>Itens</th><th>Un.</th><th>Pagamento</th><th style="text-align:right">Valor</th></tr>
-   ${peds.slice().reverse().map(o => { const its = itens[o.id] || [], fora = foraBling.includes(o); return `<tr class="${fora ? 'fora' : ''}"><td>${fora ? `<input type="checkbox" class="dsel" value="${o.id}">` : ''}</td><td>${new Date(o.criado_em).toLocaleDateString('pt-BR')}<br><small>${DIAS[new Date(o.criado_em).getDay()].slice(0, 3)}</small></td><td>${esc(o.bling_pedido_id || o.numero || '—')}${o.tipo === 'abertura' ? '<br><small>abertura</small>' : ''}</td><td>${seloBling(o)}</td>
+   ${peds.slice().reverse().map(o => { const its = itens[o.id] || [], fora = foraBling.includes(o); return `<tr class="lnk ${fora ? 'fora' : ''}" data-ped="${o.id}" title="Ver o pedido e a contagem"><td>${fora ? `<input type="checkbox" class="dsel" value="${o.id}">` : ''}</td><td>${new Date(o.criado_em).toLocaleDateString('pt-BR')}<br><small>${DIAS[new Date(o.criado_em).getDay()].slice(0, 3)}</small></td><td>${esc(o.bling_pedido_id || o.numero || '—')}${o.tipo === 'abertura' ? '<br><small>abertura</small>' : ''}</td><td>${seloBling(o)}</td>
     <td>${its.length ? its.sort((a, b) => b.q - a.q).map(x => `<span class="dchip" style="--c:${LINHAS_COR[linha(x)] || COR.neutro}">${esc(x.pr ? x.pr.sabor : x.cod)} <b>${x.q}</b></span>`).join('') : '<small style="color:var(--mute)">sem itens</small>'}</td>
     <td>${fmt(un(o))}</td><td>${esc(formaDe(o) || '—')}${Array.isArray(o.pagamentos) && o.pagamentos.length > 1 ? `<br><small>${o.pagamentos.map(x => `${esc(x.forma)} ${brl(x.valor)}`).join(' · ')}</small>` : ''}</td><td style="text-align:right"><b>${brl(o.valor)}</b></td></tr>`; }).join('')}</table></div>
   </div></section>`;
   $('#dVoltar').onclick = () => voltar('perfil');
   ligarGraficos($('#main section'));
+  document.querySelectorAll('tr[data-ped]').forEach(tr => tr.onclick = e => { if (e.target.closest('.dsel')) return; verPedido(tr.dataset.ped, p); });
   const marcados = () => [...document.querySelectorAll('.dsel:checked')].map(i => i.value);
   document.querySelectorAll('.dsel').forEach(i => i.onchange = () => { const n = marcados().length, b = $('#dEnviar'); b.hidden = !n;
     b.textContent = n > 1 ? `Juntar ${n} pedidos e mandar como um só` : 'Mandar ao Bling'; $('#dSelN').textContent = n ? `${n} selecionado${n > 1 ? 's' : ''} · ${brl(peds.filter(o => marcados().includes(o.id)).reduce((a, o) => a + Number(o.valor || 0), 0))}` : `${foraBling.length} pedido${foraBling.length > 1 ? 's' : ''} fora do Bling · marque para enviar`; });
@@ -2562,6 +2564,45 @@ async function telaPedidosCliente() {
     $('#agOk').onclick = async () => { $('#agOk').disabled = true; $('#agOk').textContent = 'Juntando…';
       try { const id = await db.agruparPedidos(ids); fecharModal(); toast('Pedidos juntados'); await enviarAoBling(id, p.nome); telaPedidosCliente(); }
       catch (e) { fecharModal(); erro(/agrupar_pedidos|function/.test(e.message) ? new Error('Rode o 025_pagamento_dividido_agrupar.sql no Supabase') : e); } }; };
+}
+
+// um pedido em detalhe: itens, pagamento e a contagem do expositor (tinha, vendeu, trocas, repôs, bonificação, ficou); dá para excluir e refazer
+async function verPedido(id, p) {
+  modal('<div class="loading">Abrindo o pedido…</div>');
+  let d; try { d = await db.detalhePedido(id); } catch (e) { fecharModal(); return erro(e); }
+  const o = d.pedido, pr = Object.fromEntries(S.base.produtos.map(x => [x.id, x])), porCod = {}; S.base.produtos.forEach(x => { if (x.bling_codigo) porCod[x.bling_codigo] = x; });
+  const nomeP = x => x ? `${(x.linha || '').split(' ')[0]} ${x.sabor}` : '—';
+  const bon = Object.fromEntries(d.itens.filter(i => +i.bonificado).map(i => [i.produto_id, +i.bonificado])), cob = Object.fromEntries(d.itens.map(i => [i.produto_id, +i.quantidade]));
+  const its = d.itens.length ? d.itens.filter(i => +i.quantidade > 0).map(i => ({ n: nomeP(pr[i.produto_id]), q: +i.quantidade, u: +i.preco_unit, v: +i.quantidade * +i.preco_unit }))
+    : d.bitens.map(i => ({ n: porCod[i.codigo] ? nomeP(porCod[i.codigo]) : i.descricao || i.codigo, q: +i.quantidade, u: +i.valor, v: +i.quantidade * +i.valor - (+i.desconto || 0) }));
+  const cs = d.contagens.slice().sort((a, b) => a.produto_id - b.produto_id), soma = k => cs.reduce((a, c) => a + (+c[k] || 0), 0);
+  const repCob = c => cob[c.produto_id] ?? Math.max(0, (+c.reposto || 0) - (+c.troca || 0) - (bon[c.produto_id] || 0));
+  const tabC = cs.length ? `<h4 style="margin:14px 0 6px">Contagem do expositor</h4><div style="overflow-x:auto"><table class="dped"><tr><th>Produto</th><th>Tinha</th><th>Encontrou</th><th>Vendeu</th><th>Trocas</th><th>Repôs</th><th>Bonif.</th><th>Ficou</th></tr>
+     ${cs.map(c => `<tr><td>${esc(nomeP(pr[c.produto_id]))}</td><td>${c.deixado_anterior}</td><td>${c.encontrado}</td><td><b>${c.sellout ?? Math.max(0, c.deixado_anterior - c.encontrado)}</b></td><td>${c.troca || '—'}</td><td>${repCob(c) || '—'}</td><td>${bon[c.produto_id] || '—'}</td><td>${c.deixado_agora ?? ''}</td></tr>`).join('')}
+     <tr style="font-weight:700"><td>Total</td><td>${soma('deixado_anterior')}</td><td>${soma('encontrado')}</td><td>${soma('sellout')}</td><td>${soma('troca')}</td><td>${cs.reduce((a, c) => a + repCob(c), 0)}</td><td>${Object.values(bon).reduce((a, b) => a + b, 0)}</td><td>${soma('deixado_agora')}</td></tr></table></div>
+     <small style="color:var(--mute)">Tinha = deixado na reposição anterior · Vendeu = tinha − encontrou · Repôs = cobrado no pedido · Ficou = encontrou − trocas + tudo que foi colocado</small>`
+    : `<p style="color:var(--mute);margin:12px 0 0">${o.visita_id ? 'Esta visita não tem contagem do expositor (venda registrada sem contar).' : 'Pedido sem contagem do expositor.'}</p>`;
+  const doBling = o.bling_status === 'importado' && !o.criado_por;
+  modal(`<h3 style="margin-top:0">Pedido ${esc(o.bling_pedido_id || o.numero || '')} · ${new Date(o.criado_em).toLocaleDateString('pt-BR')}</h3>
+   <p style="color:var(--soft);margin:0">${esc(p.nome)} · ${o.tipo === 'abertura' ? 'abertura' : 'reposição'}${d.visita?.perfis?.nome ? ' · por ' + esc(d.visita.perfis.nome) : ''} · ${o.bling_id ? 'no Bling' : doBling ? 'veio do Bling' : 'não enviado ao Bling'}</p>
+   <p style="margin:6px 0 0">Pagamento: <b>${esc(o.condicao || '—')}</b>${o.vencimento ? ' · vence ' + dstr(o.vencimento + 'T12:00') : ''}${Array.isArray(o.pagamentos) && o.pagamentos.length > 1 ? '<br><small>' + o.pagamentos.map(x => `${esc(x.forma)} ${brl(x.valor)}${x.vencimento ? ' (' + dstr(x.vencimento + 'T12:00') + ')' : ''}`).join(' · ') + '</small>' : ''}${+o.frete ? ` · frete ${brl(o.frete)}` : ''}</p>
+   <h4 style="margin:14px 0 6px">Itens cobrados</h4>${its.length ? `<table class="dped"><tr><th>Produto</th><th>Qtd.</th><th>Preço</th><th style="text-align:right">Valor</th></tr>${its.map(i => `<tr><td>${esc(i.n)}</td><td>${i.q}</td><td>${brl(i.u)}</td><td style="text-align:right">${brl(i.v)}</td></tr>`).join('')}<tr style="font-weight:700"><td>Total</td><td>${its.reduce((a, i) => a + i.q, 0)}</td><td></td><td style="text-align:right">${brl(o.valor)}</td></tr></table>` : '<small style="color:var(--mute)">sem itens detalhados</small>'}
+   ${tabC}${d.visita?.observacao ? `<p style="background:var(--sand);padding:8px 10px;border-radius:8px;margin:10px 0 0">${esc(d.visita.observacao)}</p>` : ''}
+   <div class="row" style="margin-top:16px;justify-content:space-between;flex-wrap:wrap;gap:8px">
+    ${doBling ? '<small style="color:var(--mute)">Pedido importado do Bling: exclua por lá.</small>' : '<div class="row" style="gap:8px"><button class="btn" id="vpExc" style="color:#7A2414">Excluir pedido</button><button class="btn car" id="vpRef">Excluir e refazer</button></div>'}
+    <button class="btn pri" onclick="fecharModal()">Fechar</button></div>`);
+  if (doBling) return;
+  const excluir = async refazer => {
+    modal(`<h3>Excluir o pedido de ${new Date(o.criado_em).toLocaleDateString('pt-BR')} (${brl(o.valor)})?</h3><p style="color:var(--soft)">Apaga o pedido${o.visita_id ? ' e a visita/contagem ligada a ele' : ''} no app${o.bling_id ? ` e <b>exclui o pedido nº ${esc(o.bling_pedido_id || o.bling_id)} no Bling</b>` : ''}. Não dá para desfazer.${refazer ? ' Em seguida abre a tela para lançar de novo, já preenchida.' : ''}</p>
+     <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="vpOk" style="background:#7A2414;border-color:#7A2414">${refazer ? 'Excluir e refazer' : 'Excluir'}</button></div>`);
+    $('#vpOk').onclick = async () => { $('#vpOk').disabled = true; $('#vpOk').textContent = 'Excluindo…';
+      try { if (o.bling_id) await db.bling('excluir_pedido', { pedido_id: o.id }); await db.excluirPedido(o.id, o.visita_id || null); }
+      catch (e) { fecharModal(); return modal(`<h3>Não deu para excluir</h3><p style="font-size:13px;color:#7A2414">${esc(e.message)}</p><p style="color:var(--soft)">Se o Bling recusou (por exemplo, pedido já faturado), cancele por lá primeiro.</p><div class="row" style="justify-content:flex-end"><button class="btn pri" onclick="fecharModal()">Ok</button></div>`); }
+      fecharModal(); toast(o.bling_id ? `Pedido excluído, também no Bling (nº ${o.bling_pedido_id || o.bling_id})` : 'Pedido excluído'); await recarregar();
+      if (!refazer) return telaPedidosCliente();
+      if (cs.length && d.visita?.tipo === 'reposicao') { S.reabrir = { pdvId: p.id, contagens: cs, condicao: o.condicao, vencimento: o.vencimento, bonif: bon }; S.contando = p.id; S.repVolta = { aba: 'perfil', id: p.id }; irPara('reposicao'); }
+      else { S.prefillVenda = { pdv: p.id, q: Object.fromEntries(d.itens.filter(i => +i.quantidade > 0).map(i => [i.produto_id, +i.quantidade])) }; S.abPdv = p.id; S.vendaVolta = { aba: 'perfil', id: p.id }; irPara('abertura'); } }; };
+  $('#vpExc').onclick = () => excluir(false); $('#vpRef').onclick = () => excluir(true);
 }
 
 /* =================== contatos =================== */

@@ -199,6 +199,17 @@ export async function dadosReabrir(visitaId) {
   const itens = peds[0] ? ok(await sb.from('pedido_itens').select('produto_id, bonificado').eq('pedido_id', peds[0].id)) : [];
   return { contagens, pedido: peds[0] || null, itens };
 }
+// tudo de um pedido: itens (app ou Bling) e, se veio de uma reposição, a contagem do expositor
+export async function detalhePedido(id) {
+  const o = ok(await sb.from('pedidos').select('*').eq('id', id).single());
+  const [itens, bitens, contagens] = await Promise.all([
+    sb.from('pedido_itens').select('produto_id, quantidade, preco_unit, bonificado').eq('pedido_id', id).then(ok),
+    sb.from('bling_itens').select('codigo, descricao, quantidade, valor, desconto').eq('pedido_id', id).then(ok).catch(() => []),
+    o.visita_id ? sb.from('contagens').select('produto_id, deixado_anterior, encontrado, troca, reposto, sellout, deixado_agora').eq('visita_id', o.visita_id).then(ok) : [],
+  ]);
+  const vis = o.visita_id ? ok(await sb.from('visitas').select('id, tipo, em, observacao, perfis(nome)').eq('id', o.visita_id).maybeSingle()) : null;
+  return { pedido: o, itens, bitens, contagens, visita: vis };
+}
 // itens de todos os pedidos de um cliente (do app e do Bling), para ver o que mais sai
 export async function itensDoCliente(pdvId) {
   const peds = ok(await sb.from('pedidos').select('id').eq('pdv_id', pdvId)); const ids = peds.map(o => o.id); if (!ids.length) return { pitens: [], bitens: [] };
