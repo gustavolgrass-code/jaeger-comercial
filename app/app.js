@@ -2362,16 +2362,30 @@ async function telaPerfil() {
   $('#pAjustar').onclick = () => { irPara('mapa'); if (p.lat) mapa.setView([p.lat, p.lng], 17); marcando = true; $('#hint').textContent = 'Toque no lugar exato de ' + p.nome; $('#hint').style.display = 'block';
     aoMarcar = async ([lng, lat]) => { try { const g = await geoReverso(lat, lng); await db.atualizarPdv(p.id, { lat, lng, geo_precisao: 'manual', regiao: await garantirRegiao(lng, lat, g.cidade || p.cidade), endereco: g.rua || p.endereco, bairro: g.bairro || p.bairro, cidade: g.cidade || p.cidade }); $('#hint').textContent = 'Toque no mapa onde fica o ponto'; await atualizarUm(p.id); toast('Localização ajustada'); } catch (e) { erro(e); } }; };
   $('#pEditar').onclick = () => { modal(`<h3>Editar ${esc(p.nome)}</h3><label>Nome fantasia</label><input id="eNome" value="${esc(p.nome)}">${campoEmpresa('e', p)}<label>Canal</label>${campoCanal('eCanal', p.canal)}
-    <label>Endereço</label><input id="eEnd" value="${esc(p.endereco || '')}"><div class="row"><div style="flex:1"><label>Bairro</label><input id="eBai" value="${esc(p.bairro || '')}"></div><div style="flex:1"><label>Cidade</label><input id="eCid" value="${esc(p.cidade || '')}"></div></div>
+    <label>Endereço</label><input id="eEnd" value="${esc(p.endereco || '')}" placeholder="Rua, número"><div class="row"><div style="flex:1"><label>Bairro</label><input id="eBai" value="${esc(p.bairro || '')}"></div><div style="flex:1"><label>Cidade</label><input id="eCid" value="${esc(p.cidade || '')}"></div></div>
+    <label>Link do Google Maps <small style="color:var(--mute);font-weight:400">(opcional: cole o link do lugar e o pino vai para lá)</small></label><input id="eLink" value="${esc(/^https?:/.test(p.link_maps || '') ? p.link_maps : '')}" placeholder="https://www.google.com/maps/place/…"><div class="linkmsg" id="eLinkMsg"></div>
     <div class="row"><div style="flex:1"><label>Classe</label><select id="eCla"><option value="">—</option>${['A', 'B', 'C', 'D'].map(x => `<option ${x === p.classe ? 'selected' : ''}>${x}</option>`).join('')}</select></div><div style="flex:1"><label>Potencial</label>${campoPot('ePot', p.potencial)}</div></div>
     <label class="chkbox" style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="eCF" style="width:auto" ${p.consumidor_final ? 'checked' : ''}> Consumidor final <small style="color:var(--mute)">(não gera reposição automática; dá para pôr na rota à mão)</small></label>
     <label>Observação</label><textarea id="eObs" rows="3">${esc(p.observacao || '')}</textarea><div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="eOk">Salvar</button></div>`);
     ligarCanal('eCanal'); ligarEmpresa('e', 'eNome');
+    // link do Google colado: lê a localização (e o nome) para mostrar antes de salvar
+    const lerLink = u => { const m = u.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/) || u.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) || u.match(/[?&](?:q|query|ll)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/); return m ? { lat: +m[1], lng: +m[2] } : null; };
+    const msgLink = (t, okk) => { const m = $('#eLinkMsg'); m.style.display = t ? 'block' : 'none'; m.style.background = okk ? '#E3F0E7' : '#F7E9DD'; m.style.color = okk ? '#1F5A37' : '#7A4A16'; m.innerHTML = t; };
+    $('#eLink').oninput = async () => { const u = $('#eLink').value.trim(); if (!u || u === p.link_maps) return msgLink('');
+      if (/maps\.app\.goo\.gl|goo\.gl\/maps/.test(u)) return msgLink('Link curto do celular: abra ele no navegador, copie o endereço completo da barra (começa com google.com/maps/place) e cole aqui.', false);
+      const g = lerLink(u); if (!g) return msgLink('Não achei a localização nesse link. Copie o link da página do lugar no Google Maps.', false);
+      msgLink(`Localização do link: ${g.lat.toFixed(5)}, ${g.lng.toFixed(5)} · buscando o endereço…`, true);
+      const r = await geoReverso(g.lat, g.lng); msgLink(`📍 O pino vai para: ${esc([r.rua, r.bairro, r.cidade].filter(Boolean).join(', ') || `${g.lat.toFixed(5)}, ${g.lng.toFixed(5)}`)}`, true);
+      if (r.rua && $('#eEnd').value.trim() === (p.endereco || '')) $('#eEnd').value = r.rua; if (r.bairro && !$('#eBai').value.trim()) $('#eBai').value = r.bairro; if (r.cidade && !$('#eCid').value.trim()) $('#eCid').value = r.cidade; };
     $('#eOk').onclick = async () => { try { const end = $('#eEnd').value.trim(), bai = $('#eBai').value.trim(), cid = $('#eCid').value.trim();
       const patch = { nome: $('#eNome').value.trim() || p.nome, ...lerEmpresa('e'), canal: lerCanal('eCanal'), endereco: end || null, bairro: bai || null, cidade: cid || null, classe: $('#eCla').value || null, potencial: +$('#ePot').value, observacao: $('#eObs').value.trim() || null };
       if (!!$('#eCF').checked !== !!p.consumidor_final) patch.consumidor_final = $('#eCF').checked;
-      // endereço digitado mudou: move o pino para o endereço novo
-      if (end && (end !== (p.endereco || '') || cid !== (p.cidade || '') || bai !== (p.bairro || ''))) { $('#eOk').disabled = true; $('#eOk').textContent = 'Localizando endereço…';
+      // link do Google novo: o pino vai para o lugar do link (mais preciso que o endereço) e o link fica guardado
+      const link = $('#eLink').value.trim(), gl = link && link !== p.link_maps ? lerLink(link) : null;
+      if (link !== (/^https?:/.test(p.link_maps || '') ? p.link_maps : '') && (gl || !link)) patch.link_maps = link ? link.split('?')[0] : null;
+      if (gl) Object.assign(patch, { lat: gl.lat, lng: gl.lng, geo_precisao: 'exata', regiao: await garantirRegiao(gl.lng, gl.lat, cid || p.cidade) });
+      // endereço digitado mudou (e não veio link): move o pino para o endereço novo
+      else if (end && (end !== (p.endereco || '') || cid !== (p.cidade || '') || bai !== (p.bairro || ''))) { $('#eOk').disabled = true; $('#eOk').textContent = 'Localizando endereço…';
         const g = await geocodificar(`${end}${bai ? ' - ' + bai : ''} - ${cid || 'Porto Alegre'}/RS`).catch(() => null);
         if (g) Object.assign(patch, { lat: g.lat, lng: g.lng, geo_precisao: g.precisao, regiao: await garantirRegiao(g.lng, g.lat, g.cidade || cid), cidade: cid || g.cidade || null, bairro: bai || g.bairro || null });
         else toast('Não achei esse endereço no mapa: o pino ficou onde estava (use Ajustar localização)'); }
