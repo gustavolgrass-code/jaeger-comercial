@@ -1793,13 +1793,13 @@ async function passarCliente(id, para) {
   await salvarRotaDia({ tirar: [...new Set([...R.tirar, id])], incluir: R.incluir.filter(x => x !== id), paradas: (R.paradas || []).filter(x => x.id !== id) }, `${p?.nome || 'Cliente'} foi para a rota de ${quem}`);
   desenharRota();
 }
-function linksMaps(base, ordem, de = null, pulo = 0) { // de: última parada concluída (o trajeto sai dela); pulo: quantas já foram feitas, para numerar
+function linksMaps(base, ordem, de = null, pulo = 0, aqui = null) { // aqui: localização atual do celular (o trajeto sai dela) e termina na última parada // de: última parada concluída (o trajeto sai dela); pulo: quantas já foram feitas, para numerar
   const pto = p => { const hex = (String(p.link_maps || '').match(/(0x[0-9a-f]+:0x[0-9a-f]+)/i) || [])[1];
     return hex ? { seg: encodeURIComponent(p.nome || 'Parada').replace(/%20/g, '+'), blk: `!1m5!1m1!1s${hex}!2m2!1d${(+p.lng).toFixed(6)}!2d${(+p.lat).toFixed(6)}`, n: 6, ficha: true }
       : { seg: `${(+p.lat).toFixed(5)},${(+p.lng).toFixed(5)}`, blk: '!1m0', n: 1, ficha: false }; };
-  const o = pto({ lat: base.lat, lng: base.lng }), o0 = de ? pto(de) : o, pts = ordem.map(s => pto(s.p)), out = [];
+  const o = pto({ lat: base.lat, lng: base.lng }), o0 = aqui ? pto(aqui) : de ? pto(de) : o, pts = ordem.map(s => pto(s.p)), out = [];
   for (let i = 0; i < pts.length; i += 9) { const tr = pts.slice(i, i + 9), fimTr = i + 9 >= pts.length;
-    const lista = [i ? pts[i - 1] : o0, ...tr, ...(fimTr ? [o] : [])], dentro = lista.reduce((a, x) => a + x.n, 0) + 1;
+    const lista = [i ? pts[i - 1] : o0, ...tr, ...(fimTr && !aqui ? [o] : [])], dentro = lista.reduce((a, x) => a + x.n, 0) + 1;
     out.push({ n: `${pulo + i + 1}–${pulo + i + tr.length}`, fichas: tr.filter(x => x.ficha).length, url: `https://www.google.com/maps/dir/${lista.map(x => x.seg).join('/')}/data=!4m${dentro + 1}!4m${dentro}${lista.map(x => x.blk).join('')}!3e0` }); }
   return out;
 }
@@ -1846,7 +1846,7 @@ function pintarRota(k) {
    <div class="tile"><small>🔵 Reposição</small><b>${feitosN(nRep)}/${nRep.length}</b><small>feitas</small></div>
    <div class="tile"><small>🟣 Prospecção</small><b>${feitosN(nPr)}/${nPr.length}</b><small>visitadas</small></div></div>
   <div class="rgrid"><div>
-   <div class="toolbar">${k.ordem.length ? linksMaps(base, k.ordem, k.fixos.length ? k.fixos[k.fixos.length - 1].p : null, k.fixos.length).map(l => `<a class="btn car" href="${l.url}" target="_blank" rel="noopener" style="text-decoration:none">Google Maps · paradas ${l.n} ↗</a>`).join('') + (k.fixos.length ? ` <small style="color:var(--mute)">só o que falta, saindo de ${esc(k.fixos[k.fixos.length - 1].p.nome)}</small>` : '') : todas.length ? '<span class="badge" style="background:#E3F0E7">✅ Todas as paradas concluídas</span>' : ''}
+   <div class="toolbar">${k.ordem.length ? linksMaps(base, k.ordem, k.fixos.length ? k.fixos[k.fixos.length - 1].p : null, k.fixos.length, RT.aqui).map((l, i) => `<a class="btn car gmlink" data-gmi="${i}" href="${l.url}" target="_blank" rel="noopener" style="text-decoration:none">Google Maps · paradas ${l.n} ↗</a>`).join('') + ` <small style="color:var(--mute)" id="gmDe">${RT.aqui ? 'saindo da sua localização atual' : k.fixos.length ? 'só o que falta, saindo de ' + esc(k.fixos[k.fixos.length - 1].p.nome) : 'buscando sua localização…'}</small>` : todas.length ? '<span class="badge" style="background:#E3F0E7">✅ Todas as paradas concluídas</span>' : ''}
     ${k.manual ? '<span class="badge" style="background:#F7E9DD">✋ ordem definida à mão</span>' : ''}<button class="btn" id="rRecalc">${k.manual ? '↻ Voltar à ordem automática' : '↻ Recalcular o resto'}</button>${R.data === hoje() ? '<button class="btn car" id="rComecar" title="Começa agora: refaz a previsão de horário a partir deste momento">▶ Começar rota agora</button>' : ''}<button class="btn pri" id="rSalvar">Salvar rota</button></div>
    <div class="stop rstop rcasa"><div class="n">🏠</div><div class="info"><div class="rhora">${R.inicio}</div><b>Saída</b> <small style="color:var(--mute)">carregar o carro (lista abaixo)</small></div></div>
    ${todas.map((s, i) => linha(s, i, i >= k.fixos.length ? hs[i - k.fixos.length] : null)).join('') || '<div class="empty">Nenhuma parada para este dia. Escolha clientes na fila abaixo.</div>'}
@@ -1863,6 +1863,15 @@ function pintarRota(k) {
   ligarRota(k, todas);
 }
 function ligarRota(k, todas) {
+  // início do trajeto no Google Maps = onde o celular está agora (atualiza enquanto a tela está aberta)
+  const gm = pos => { RT.aqui = { lat: pos.coords.latitude, lng: pos.coords.longitude, em: Date.now() };
+    const ls = linksMaps(k.base, k.ordem, null, k.fixos.length, RT.aqui); document.querySelectorAll('a.gmlink').forEach(a => { const l = ls[+a.dataset.gmi]; if (l) a.href = l.url; });
+    if ($('#gmDe')) $('#gmDe').textContent = 'saindo da sua localização atual'; };
+  if (navigator.geolocation && k.ordem.length) {
+    if (RT.gmWatch != null) navigator.geolocation.clearWatch(RT.gmWatch);
+    RT.gmWatch = navigator.geolocation.watchPosition(p => { if (!document.querySelector('a.gmlink')) { navigator.geolocation.clearWatch(RT.gmWatch); RT.gmWatch = null; return; } gm(p); },
+      () => { if ($('#gmDe') && !RT.aqui) $('#gmDe').textContent = 'sem acesso à localização: permita no navegador para sair de onde você está'; }, { enableHighAccuracy: true, maximumAge: 30000, timeout: 15000 });
+  }
   document.querySelectorAll('[data-passa]').forEach(b => b.onclick = () => passarCliente(b.dataset.passa, b.dataset.para));
   ligarCarga(carga(todas.filter(s => !k.feitos.has(s.id))));
   const R = RT.salvo, comStatus = () => (R.paradas || []).filter(x => x.status), troca = async patch => { await salvarRotaDia({ ...patch, paradas: comStatus() }); desenharRota(); };
