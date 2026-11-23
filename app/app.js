@@ -10,7 +10,7 @@ const dstr = d => d ? new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', 
 const dec = n => Number(n || 0).toFixed(1).replace('.', ',');
 const DIA = 864e5;
 function toast(t) { const e = $('#toast'); e.textContent = t; e.style.display = 'block'; clearTimeout(e._t); e._t = setTimeout(() => e.style.display = 'none', 4200); }
-function erro(e) { console.error(e); const m = String(e.message || e); toast(/janela_periodo_check/.test(m) ? 'Para marcar mais de um período, rode o 029_periodos_multiplos.sql no Supabase' : 'Erro: ' + m); }
+function erro(e) { console.error(e); const m = String(e.message || e); toast(/janela_periodo_check/.test(m) ? 'Para marcar mais de um período, rode o 029_periodos_multiplos.sql no Supabase' : /consumidor_final/.test(m) ? 'Para usar consumidor final, rode o 030_consumidor_final.sql no Supabase' : 'Erro: ' + m); }
 function modal(html) { $('#modalBox').innerHTML = html; $('#modal').classList.add('on'); }
 function fecharModal() { $('#modal').classList.remove('on'); }
 window.fecharModal = fecharModal;
@@ -28,6 +28,8 @@ const CANAIS = ['Minimercado', 'Minimercado de autoatendimento', 'Padaria', 'Fru
 const CONDICOES = ['À vista · dinheiro', 'À vista · Pix', 'A prazo · 7 dias', 'A prazo · 14 dias', 'A prazo · 28 dias', 'Consignado', 'Bonificação na abertura'];
 const DIAS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 const ROTA_ETAPAS = ['ativo', 'avaliacao', 'risco', 'revisao'];
+// consumidor final: cliente que compra, mas não entra na reposição automática
+const repoe = p => !!p && ROTA_ETAPAS.includes(p.etapa) && !p.consumidor_final;
 const FORMAS = ['Boleto', 'Pix', 'Cartão', 'Dinheiro'];
 // kits mais pedidos (pelos pedidos do Bling): código do produto no Bling → quantidade
 const KITS = [{ n: 'Brownie 32', q: { B1: 8, B2: 8, B3: 8, B4: 8 } }, { n: 'Cookies 32', q: { C1: 8, C2: 8, C3: 8, C4: 8 } }, { n: 'Palha 45', q: { P1: 18, P2: 18, P3: 9 } }];
@@ -66,7 +68,7 @@ async function garantirRegiao(lng, lat, cidade) {
 }
 const regNome = c => (S.base.regioes.find(r => r.codigo === c) || {}).nome || 'sem região';
 const atraso = p => p.proxima_reposicao ? Math.floor((Date.now() - new Date(p.proxima_reposicao)) / DIA) : null;
-const prazoTxt = p => { const a = atraso(p); if (a === null) return ROTA_ETAPAS.includes(p.etapa) ? '1ª reposição' : '—'; return a > 0 ? `atrasada ${a} dia${a > 1 ? 's' : ''}` : a === 0 ? 'vence hoje' : `em ${-a} dia${a < -1 ? 's' : ''}`; };
+const prazoTxt = p => { const a = atraso(p); if (p.consumidor_final) return 'consumidor final'; if (a === null) return repoe(p) ? '1ª reposição' : '—'; return a > 0 ? `atrasada ${a} dia${a > 1 ? 's' : ''}` : a === 0 ? 'vence hoje' : `em ${-a} dia${a < -1 ? 's' : ''}`; };
 const expo = id => S.base.expositores.find(e => e.id === id) || S.base.expositores[0];
 const alvo = (expoId, prodId) => (S.base.alvo.find(a => a.expositor_id === expoId && a.produto_id === prodId) || {}).quantidade || 0;
 
@@ -307,7 +309,7 @@ function caixaEsteira(p) {
 }
 /* ---------- reposições pendentes ---------- */
 function repPendentes() {
-  return S.pdvs.filter(p => ROTA_ETAPAS.includes(p.etapa) && (!p.proxima_reposicao || atraso(p) >= 0))
+  return S.pdvs.filter(p => repoe(p) && (!p.proxima_reposicao || atraso(p) >= 0))
     .sort((a, b) => (atraso(b) ?? 999) - (atraso(a) ?? 999));
 }
 function listaPendentes(s) {
@@ -665,6 +667,7 @@ function abrirCadastro(loc) {
   modal(`<h3>Novo ponto de venda</h3>
   <label>Link do Google Maps</label><input id="cLink" placeholder="Cole o link do lugar no Google Maps">
   <div class="linkmsg" id="cMsg"></div>
+  <label>ou Endereço</label><div class="row" style="gap:6px"><input id="cEnd" placeholder="Rua, número" style="flex:1"><button class="btn" id="cBuscaEnd">📍 Localizar</button></div>
   <div class="row" style="margin-top:8px"><button class="btn" id="cGps" style="flex:1">Usar minha localização</button><button class="btn" id="cMarcar" style="flex:1">Marcar no mapa</button></div>
   <label>Nome fantasia</label><input id="cNome">
   ${campoEmpresa('c')}
@@ -677,7 +680,7 @@ function abrirCadastro(loc) {
   <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="cSalvar">Salvar no funil</button></div>`);
   ligarCanal('cCanal'); ligarEmpresa('c', 'cNome'); ligarJanela('cj');
   const msg = (t, okk) => { const m = $('#cMsg'); m.style.display = 'block'; m.style.background = okk ? '#E3F0E7' : '#F7E9DD'; m.style.color = okk ? '#1F5A37' : '#7A4A16'; m.innerHTML = t; };
-  let rua = '';
+  let rua = '', linkG = null;
   const marcarPos = async (lng, lat, origem) => { pos = [lng, lat]; msg(`Localização ${origem}: ${lat.toFixed(5)}, ${lng.toFixed(5)} · buscando endereço…`, true);
     const g = await geoReverso(lat, lng); rua = g.rua;
     if (g.cidade) $('#cCidade').value = g.cidade; if (g.bairro && !$('#cBairro').value) $('#cBairro').value = g.bairro;
@@ -688,14 +691,24 @@ function abrirCadastro(loc) {
     const u = $('#cLink').value.trim(); if (!u) return;
     const m = u.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/) || u.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) || u.match(/[?&](?:q|query|ll)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/);
     const nm = u.match(/\/place\/([^\/@]+)/);
-    if (m) { marcarPos(+m[2], +m[1], 'encontrada no link'); if (nm && !$('#cNome').value) $('#cNome').value = decodeURIComponent(nm[1].replace(/\+/g, ' ')); return; }
+    if (m) { linkG = /google\.[a-z.]+\/maps/.test(u) ? u.split('?')[0] : null; marcarPos(+m[2], +m[1], 'encontrada no link'); if (nm && !$('#cNome').value) $('#cNome').value = decodeURIComponent(nm[1].replace(/\+/g, ' ')); return; }
     if (/maps\.app\.goo\.gl|goo\.gl\/maps/.test(u)) { msg('Link curto do celular. Ainda não consigo ler esse tipo (vem na próxima versão). Por enquanto: abra o link no navegador, copie o endereço completo da barra e cole aqui, ou use "Usar minha localização".', false); return; }
     msg('Não encontrei a localização nesse link.', false);
   };
   $('#cGps').onclick = () => { if (!navigator.geolocation) return msg('Este aparelho não informa a localização.', false); msg('Buscando localização…', true); navigator.geolocation.getCurrentPosition(g => marcarPos(g.coords.longitude, g.coords.latitude, 'do aparelho'), () => msg('Não foi possível pegar a localização. Verifique a permissão do navegador.', false), { enableHighAccuracy: true, timeout: 15000 }); };
   $('#cMarcar').onclick = () => { fecharModal(); if (S.aba !== 'mapa') irPara('mapa'); marcando = true; $('#hint').style.display = 'block'; };
+  // endereço digitado livremente: localiza no mapa e mantém o texto que a pessoa escreveu
+  const buscaEnd = async () => { const end = $('#cEnd').value.trim(); if (!end) return msg('Escreva a rua e o número.', false);
+    msg('Localizando o endereço…', true); const cid = $('#cCidade').value.trim(), bai = $('#cBairro').value.trim();
+    const g = await geocodificar(`${end}${bai ? ' - ' + bai : ''} - ${cid || 'Porto Alegre'}/RS`).catch(() => null);
+    if (!g) return msg('Não achei esse endereço. Confira a rua e a cidade, ou use "Marcar no mapa".', false);
+    pos = [g.lng, g.lat]; rua = end; if (g.cidade && !cid) $('#cCidade').value = g.cidade; if (g.bairro && !bai) $('#cBairro').value = g.bairro;
+    const z = regiaoDe(g.lng, g.lat);
+    msg(`Endereço localizado${g.precisao === 'exata' ? '' : g.precisao === 'rua' ? ' (pela rua, confira o pino depois)' : ' (só pela cidade: use Marcar no mapa)'}: ${esc(end)}, ${esc(g.bairro || '')} ${esc(g.cidade || '')} · região ${z ? z + ' · ' + esc(regNome(z)) : '—'}`, g.precisao !== 'cidade'); };
+  $('#cBuscaEnd').onclick = buscaEnd; $('#cEnd').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); buscaEnd(); } };
   $('#cSalvar').onclick = async () => {
-    if (!pos) return msg('Informe a localização: link, localização do aparelho ou marcar no mapa.', false);
+    if (!pos && $('#cEnd').value.trim()) await buscaEnd();
+    if (!pos) return msg('Informe a localização: link, endereço, localização do aparelho ou marcar no mapa.', false);
     const nome = $('#cNome').value.trim(); if (!nome) return msg('Coloque o nome do estabelecimento.', false);
     const dup = duplicado(nome, pos[1], pos[0]);
     if (dup && !$('#cSalvar').dataset.forca) { msg(`Já existe <b>${esc(dup.nome)}</b> (${etapa(dup.etapa).n}) nesse lugar ou com esse nome. <a href="#" id="cAbrirDup">Abrir o perfil dele</a> ou toque em Salvar de novo para cadastrar mesmo assim.`, false); $('#cAbrirDup').onclick = e => { e.preventDefault(); fecharModal(); abrirPerfil(dup.id); }; $('#cSalvar').dataset.forca = 1; return; }
@@ -703,7 +716,7 @@ function abrirCadastro(loc) {
     try {
       const cidade = $('#cCidade').value.trim() || null;
       const contato_id = await contatoDoForm(nome);
-      const n = await db.criarPdv({ contato_id, geo_precisao: 'exata', nome, ...lerEmpresa('c'), canal: lerCanal('cCanal'), endereco: rua || null, bairro: $('#cBairro').value.trim() || null, cidade, lng: pos[0], lat: pos[1], regiao: await garantirRegiao(pos[0], pos[1], cidade), potencial: +$('#cPot').value, observacao: $('#cObs').value.trim() || null, melhor_horario: $('#cHor').value.trim() || null, ...lerJanela('cj'), origem: $('#cLink').value ? 'link_maps' : 'manual', link_maps: $('#cLink').value.trim() || null, criado_por: S.eu.id });
+      const n = await db.criarPdv({ contato_id, geo_precisao: 'exata', nome, ...lerEmpresa('c'), canal: lerCanal('cCanal'), endereco: rua || $('#cEnd').value.trim() || null, bairro: $('#cBairro').value.trim() || null, cidade, lng: pos[0], lat: pos[1], ...(linkG ? { link_maps: linkG } : {}), regiao: await garantirRegiao(pos[0], pos[1], cidade), potencial: +$('#cPot').value, observacao: $('#cObs').value.trim() || null, melhor_horario: $('#cHor').value.trim() || null, ...lerJanela('cj'), origem: $('#cLink').value ? 'link_maps' : 'manual', link_maps: $('#cLink').value.trim() || null, criado_por: S.eu.id });
       fecharModal(); await atualizarUm(n.id); S.sel = n.id; if (S.aba === 'mapa') { desenhar(); painel(); } if (S.aba === 'abertura') { S.abPdv = n.id; telaAbertura(); } toast(nome + ' entrou no funil como Mapeado');
     } catch (e) { erro(e); $('#cSalvar').disabled = false; }
   };
@@ -1554,7 +1567,7 @@ function prever(raw, data) {
   const ult = {}; raw.contagens.forEach(c => { const v = c.visitas; const u = ult[v.pdv_id]; if (!u || v.em > u.em) ult[v.pdv_id] = { id: v.id, em: v.em, por: {} }; });
   raw.contagens.forEach(c => { const u = ult[c.visitas.pdv_id]; if (u && u.id === c.visitas.id) u.por[c.produto_id] = (u.por[c.produto_id] || 0) + c.deixado_agora; });
   const agora = data && data !== hoje() ? new Date(data + 'T08:00').getTime() : Date.now(), out = {};
-  S.pdvs.filter(p => ROTA_ETAPAS.includes(p.etapa)).forEach(p => {
+  S.pdvs.filter(p => repoe(p)).forEach(p => {
     const ps = (porPdv[p.id] || []).slice(-7), r = { fonte: 'cadência', dias: null, vd: null, estoque: null, pedido: {}, un: 0 };
     if (ps.length >= 2) { const span = (new Date(ps[ps.length - 1].criado_em) - new Date(ps[0].criado_em)) / DIA, inter = span / (ps.length - 1);
       const unMed = ps.reduce((a, o) => a + (o.unidades || 0), 0) / ps.length; if (inter > 0) { r.vd = unMed / inter;
@@ -1625,7 +1638,7 @@ function montarOrdem(reps, prosps, ini, fim, base, t0, pos0) {
   const prio = { ruptura: 2, ideal: 1, espera: 0 }, foraRep = [];
   while (ordem.length && !sim(ordem)) {
     let pior = null, pc = -1e9;
-    ordem.forEach((s, i) => { const nova = ordem.filter((_, k) => k !== i), ganho = dist(ordem) - dist(nova) + (sim(nova) ? 1000 : 0) - prio[s.urg] * 10000; if (ganho > pc) { pc = ganho; pior = s; } });
+    ordem.forEach((s, i) => { const nova = ordem.filter((_, k) => k !== i), ganho = dist(ordem) - dist(nova) + (sim(nova) ? 1000 : 0) - (s.livre ? 3 : prio[s.urg]) * 10000; if (ganho > pc) { pc = ganho; pior = s; } });
     ordem = melhorar(ordem.filter(s => s !== pior)); foraRep.push(pior);
   }
   // prospecções: encaixa onde aumentar menos o caminho
@@ -1662,16 +1675,19 @@ function calcularRota() {
   const jan = p => { const ks = perList(p); return ks.length ? ks.map(k => JANELAS[k]).sort((a, b) => a[0] - b[0]) : [[ini, fim]]; };
   const atendeHoje = p => !p.janela_dias?.length || p.janela_dias.includes(dow);
   // fila de reposição
-  const fila = S.pdvs.filter(p => ROTA_ETAPAS.includes(p.etapa) && p.lat).map(p => ({ p, ...RT.prev[p.id] })).filter(x => x.urg).sort((a, b) => a.dias - b.dias);
+  const fila = S.pdvs.filter(p => repoe(p) && p.lat).map(p => ({ p, ...RT.prev[p.id] })).filter(x => x.urg).sort((a, b) => a.dias - b.dias);
   const entra = x => { if (tira.has(x.p.id)) return false; if (incl.has(x.p.id)) return true; if (R.tipo === 'prospeccao') return false;
     if (!atendeHoje(x.p)) return false; if (ehCanoas(x.p) && !moises && x.urg !== 'ruptura') return false; return x.urg !== 'espera'; };
-  const reps = fila.filter(entra).map(x => ({ id: x.p.id, tipo: 'rep', p: x.p, urg: x.urg, jan: jan(x.p), temJan: !!x.p.janela_periodo, serv: c.tempo_rep }));
+  const reps = fila.filter(entra).map(x => ({ id: x.p.id, tipo: 'rep', p: x.p, urg: x.urg, jan: jan(x.p), temJan: !!x.p.janela_periodo, serv: c.tempo_rep, livre: incl.has(x.p.id) }));
   // prospecções: no misto, até 500 m de alguma parada de reposição; na prospecção, as que você escolheu
   let prosps = [];
   if (R.tipo !== 'reposicao') {
     const perto = S.pdvs.filter(p => PROSP_ETAPAS.includes(p.etapa) && p.lat && !tira.has(p.id) && atendeHoje(p) && (incl.has(p.id) || (R.tipo === 'misto' && reps.some(r => km(r.p, p) <= 0.5))));
     prosps = perto.sort((a, b) => (b.potencial || 0) - (a.potencial || 0)).slice(0, 25).map(p => ({ id: p.id, tipo: 'prosp', p, urg: 'espera', jan: jan(p), serv: c.tempo_prosp }));
   }
+  // clientes colocados à mão na rota (qualquer um, mesmo sem urgência ou consumidor final)
+  R.incluir.forEach(id => { if (tira.has(id) || reps.some(x => x.id === id) || prosps.some(x => x.id === id)) return; const p = S.pdvs.find(q => q.id === id); if (!p || !p.lat) return;
+    const pr = PROSP_ETAPAS.includes(p.etapa); (pr ? prosps : reps).push({ id, tipo: pr ? 'prosp' : 'rep', p, urg: RT.prev[id]?.urg || 'espera', jan: jan(p), temJan: !!p.janela_periodo, serv: pr ? c.tempo_prosp : c.tempo_rep, livre: true }); });
   // rota já em andamento: o que foi feito fica, o resto é recalculado a partir de agora
   const st = Object.fromEntries((R.paradas || []).map(s => [s.id, s.status]));
   const feito = s => feitos.has(s.id) || st[s.id] === 'feito' || st[s.id] === 'ausente';
@@ -1688,9 +1704,19 @@ function calcularRota() {
   const emAndamento = fixos.length && ehHoje && agoraMin > ini && agoraMin < fim; // fora do horário (ex.: testando à noite) a rota parte da casa
   const t0 = emAndamento ? agoraMin : ini, pos0 = emAndamento ? fixos[fixos.length - 1].p : base;
   const pend = x => !fixos.some(f => f.id === x.id);
-  const m = montarOrdem(reps.filter(pend), prosps.filter(pend), ini, fim, base, t0, pos0);
+  // ordem manual (setas ↑ ↓): mantém a sequência escolhida e só calcula os horários; o que entrar depois vai para o fim
+  const manual = (R.paradas || []).some(s => s.manual);
+  const simLivre = o => { let t = t0, pos = pos0; const hs = [];
+    for (const s of o) { const chega = t + viagem(pos, s.p), w = s.jan.find(([a, b]) => Math.max(chega, a) + s.serv <= b), comeca = w ? Math.max(chega, w[0]) : chega;
+      hs.push({ chega, comeca, espera: comeca - chega, foraJanela: !w }); t = comeca + s.serv; pos = s.p; }
+    return { hs, volta: t + viagem(pos, base), km: o.reduce((a, s, i) => a + kmRua(i ? o[i - 1].p : pos0, s.p), 0) + (o.length ? kmRua(o[o.length - 1].p, base) : 0) }; };
+  let m;
+  if (manual) { const pt = [...reps, ...prosps].filter(pend), ids = (R.paradas || []).map(s => s.id);
+    const ordem = [...ids.map(id => pt.find(x => x.id === id)).filter(Boolean), ...pt.filter(x => !ids.includes(x.id) && incl.has(x.id))]; // os urgentes que não estavam na ordem ficam na fila, com "+ pôr na rota"
+    m = { ordem, sim: simLivre(ordem), foraRep: [], foraP: [] }; }
+  else m = montarOrdem(reps.filter(pend), prosps.filter(pend), ini, fim, base, t0, pos0);
   const naoHoje = fila.filter(x => R.tipo !== 'prospeccao' && !tira.has(x.p.id) && x.urg !== 'espera' && !atendeHoje(x.p) && !incl.has(x.p.id));
-  return { base, ini, fim, t0, pos0, fixos, ordem: m.ordem, sim: m.sim, foraRep: m.foraRep, foraP: m.foraP, fila, naoHoje, moises, mot, st, feitos };
+  return { base, ini, fim, t0, pos0, fixos, ordem: m.ordem, sim: m.sim, foraRep: m.foraRep, foraP: m.foraP, fila, naoHoje, moises, mot, st, feitos, manual };
 }
 function carga(ordem) {
   const tot = {}; ordem.filter(s => s.tipo === 'rep').forEach(s => Object.entries(RT.prev[s.id]?.pedido || {}).forEach(([k, q]) => tot[k] = (tot[k] || 0) + q));
@@ -1724,11 +1750,11 @@ function pintarRota(k) {
   const linha = (s, i, h) => { const p = s.p, pv = RT.prev[p.id] || {}, est = k.feitos.has(p.id) || k.st[p.id] === 'feito' ? 'feito' : k.st[p.id] === 'ausente' ? 'ausente' : null;
     const u = URG[pv.urg] || URG.espera, rep = s.tipo === 'rep';
     return `<div class="stop rstop ${est ? 'done' : ''}" data-id="${p.id}"><div class="n" style="background:${corPin(s, est)}">${est === 'feito' ? '✓' : est === 'ausente' ? '🚪' : i + 1}</div>
-     <div class="info"><div class="rhora">${est === 'feito' ? '✅ feito' : est === 'ausente' ? '🚪 não estava' : h ? `${hhmm(h.comeca)}${h.espera > 4 ? ` <small>(chega ${hhmm(h.chega)}, espera ${Math.round(h.espera)} min)</small>` : ''}` : ''}</div>
+     <div class="info"><div class="rhora">${est === 'feito' ? '✅ feito' : est === 'ausente' ? '🚪 não estava' : h ? `${hhmm(h.comeca)}${h.espera > 4 ? ` <small>(chega ${hhmm(h.chega)}, espera ${Math.round(h.espera)} min)</small>` : ''}${h.foraJanela ? ' <small style="color:#B8402A">⚠️ fora do horário do cliente</small>' : ''}` : ''}</div>
       <b>${esc(p.nome)}</b> ${est ? '' : rep ? `<span class="badge" style="background:${u.c}22">${u.i} ${pv.dias <= 0 ? 'possível zerado' : `~${Math.round(pv.dias)} dia${Math.round(pv.dias) === 1 ? '' : 's'}`}</span>` : '<span class="badge" style="background:#7B4FC022">🟣 prospecção</span>'}
       ${p.precisa_dono !== false && (p.janela_dias?.length || p.janela_periodo) ? ' <span title="Precisa do dono">🔒</span>' : ''}${ehCanoas(p) ? ' <span class="badge">Canoas</span>' : ''}
       <br><small style="color:var(--mute)">${esc(p.bairro || '')}${janelaTxt(p) ? ' · 🕘 ' + esc(janelaTxt(p)) : ' · sem janela cadastrada'}${rep && pv.deixado != null ? ` · deixado ${pv.deixado} un. em ${dstr(pv.deixadoEm)}${pv.estoque != null ? ` · estimado ~${Math.round(pv.estoque)}` : ''}` : ''}${rep && pv.un ? ` · repor ~${pv.un} un.` : ''}${rep ? ` · previsão por ${pv.fonte}` : ''}</small></div>
-     ${est === 'feito' && rep && RT.visitas.some(v => v.pdv_id === p.id && v.tipo === 'reposicao') ? `<div class="racoes"><button class="mini reabrir" data-reab="${p.id}">reabrir reposição</button></div>` : ''}${est ? '' : `<div class="racoes">${rep ? `<button class="btn pri" data-rep="${p.id}">Repor</button>` : `<button class="btn pri" data-pv="${p.id}">Visitei</button>`}<button class="mini" data-aus="${p.id}">não estava</button><button class="mini" data-tira="${p.id}">tirar</button></div>`}</div>`; };
+     ${est === 'feito' && rep && RT.visitas.some(v => v.pdv_id === p.id && v.tipo === 'reposicao') ? `<div class="racoes"><button class="mini reabrir" data-reab="${p.id}">reabrir reposição</button></div>` : ''}${est ? '' : `<div class="racoes">${rep ? `<button class="btn pri" data-rep="${p.id}">Repor</button>` : `<button class="btn pri" data-pv="${p.id}">Visitei</button>`}<button class="mini" data-aus="${p.id}">não estava</button><button class="mini" data-tira="${p.id}">tirar</button>${i >= k.fixos.length ? `<button class="mini" data-up="${p.id}" title="Subir na ordem" ${i === k.fixos.length ? 'disabled' : ''}>↑</button><button class="mini" data-dn="${p.id}" title="Descer na ordem" ${i === k.fixos.length + k.ordem.length - 1 ? 'disabled' : ''}>↓</button>` : ''}</div>`}</div>`; };
   const nRep = todas.filter(s => s.tipo === 'rep'), nPr = todas.filter(s => s.tipo === 'prosp');
   const feitosN = l => l.filter(s => k.feitos.has(s.id) || k.st[s.id] === 'feito').length;
   const cg = carga(todas.filter(s => !k.feitos.has(s.id)));
@@ -1748,7 +1774,7 @@ function pintarRota(k) {
    <div class="tile"><small>🟣 Prospecção</small><b>${feitosN(nPr)}/${nPr.length}</b><small>visitadas</small></div></div>
   <div class="rgrid"><div>
    <div class="toolbar">${todas.length ? linksMaps(base, k.ordem).map(l => `<a class="btn car" href="${l.url}" target="_blank" rel="noopener" style="text-decoration:none">Google Maps · paradas ${l.n} ↗</a>`).join('') : ''}
-    <button class="btn" id="rRecalc">↻ Recalcular o resto</button><button class="btn pri" id="rSalvar">${R.paradas?.length ? 'Salvar rota' : 'Começar a rota'}</button></div>
+    ${k.manual ? '<span class="badge" style="background:#F7E9DD">✋ ordem definida à mão</span>' : ''}<button class="btn" id="rRecalc">${k.manual ? '↻ Voltar à ordem automática' : '↻ Recalcular o resto'}</button><button class="btn pri" id="rSalvar">${R.paradas?.length ? 'Salvar rota' : 'Começar a rota'}</button></div>
    <div class="stop rstop rcasa"><div class="n">🏠</div><div class="info"><div class="rhora">${R.inicio}</div><b>Saída</b> <small style="color:var(--mute)">carregar o carro (lista abaixo)</small></div></div>
    ${todas.map((s, i) => linha(s, i, i >= k.fixos.length ? hs[i - k.fixos.length] : null)).join('') || '<div class="empty">Nenhuma parada para este dia. Escolha clientes na fila abaixo.</div>'}
    ${todas.length ? `<div class="stop rstop rcasa"><div class="n">🏠</div><div class="info"><div class="rhora">${k.sim ? hhmm(k.sim.volta) : ''}</div><b>Volta</b></div></div>` : ''}
@@ -1756,6 +1782,8 @@ function pintarRota(k) {
    <div class="panel" style="margin-top:12px"><h3 style="margin-top:0">🚗 Carga do carro <small style="font-weight:400;color:var(--mute)">· pedido esperado de cada parada + 10% para trocas</small></h3>
     ${cg.length ? `<table class="rcarga"><tr><th>Produto</th><th>Previsto</th><th>Levar</th></tr>${cg.map(x => `<tr><td>${esc(x.p.linha.split(' ')[0])} · ${esc(x.p.sabor)}</td><td>${x.q}</td><td><b>${x.levar}</b></td></tr>`).join('')}<tr><td><b>Total</b></td><td>${cg.reduce((a, x) => a + x.q, 0)}</td><td><b>${cg.reduce((a, x) => a + x.levar, 0)}</b></td></tr></table>` : '<span style="color:var(--mute)">Sem reposições na rota.</span>'}</div></div></div>
   ${foraLista.length ? `<div class="panel rfora"><h3 style="margin-top:0">⚠️ Urgentes que ficaram fora</h3>${foraLista.map(f => `<div class="rfila"><span>${URG[RT.prev[f.p.id]?.urg]?.i || ''} <b>${esc(f.p.nome)}</b> <small>${f.m} · próximo dia na janela: ${proximoDiaJanela(f.p, R.data)}</small></span>${f.m === 'não cabe no horário' ? `<button class="mini" data-tira="${f.p.id}">tirar de hoje</button>` : `<button class="mini" data-inc="${f.p.id}">pôr mesmo assim</button>`}</div>`).join('')}</div>` : ''}
+  <div class="panel" style="margin-top:12px"><h3 style="margin-top:0">Pôr um cliente na rota</h3><div class="mbusca" style="max-width:420px"><input id="rLivre" autocomplete="off" placeholder="🔍 Qualquer cliente ou prospect pelo nome…"><div id="rLivreSug" class="sugs"></div></div>
+   <small style="color:var(--mute)">Entra na rota de hoje mesmo sem reposição prevista (inclui consumidor final). Depois use ↑ ↓ para mudar a ordem.</small></div>
   <div class="panel" style="margin-top:12px"><h3 style="margin-top:0">Fila de urgência <small style="font-weight:400;color:var(--mute)">· clientes que não estão na rota de hoje</small></h3>
    ${['ruptura', 'ideal', 'espera'].map(u => { const l = naFila.filter(x => x.urg === u); return l.length ? `<div class="lingrp">${URG[u].i} ${URG[u].n} · ${l.length}</div>${l.map(x => `<div class="rfila"><span><b>${esc(x.p.nome)}</b> <small>${x.dias <= 0 ? 'possível zerado' : `~${Math.round(x.dias)} dias`} · ${esc(x.p.bairro || regNome(x.p.regiao))}${ehCanoas(x.p) ? ' · Canoas (Moisés)' : ''}${janelaTxt(x.p) ? ' · 🕘 ' + esc(janelaTxt(x.p)) : ''}</small></span><button class="mini" data-inc="${x.p.id}">+ pôr na rota</button></div>`).join('')}` : ''; }).join('') || '<span style="color:var(--mute)">Todos os clientes já estão na rota.</span>'}
    ${R.tipo !== 'reposicao' ? `<div class="lingrp">🟣 Prospecção ${R.tipo === 'misto' ? '· até 500 m da rota entram sozinhos; busque outros' : ''}</div><div class="mbusca" style="max-width:420px"><input id="rProsp" autocomplete="off" placeholder="🔍 Pôr um prospect na rota…"><div id="rProspSug" class="sugs"></div></div>${k.foraP.length ? `<small style="color:var(--mute)">${k.foraP.length} prospect(s) perto da rota não couberam no horário.</small>` : ''}` : ''}
@@ -1768,9 +1796,19 @@ function ligarRota(k, todas) {
   $('#rMot').onchange = e => troca({ motorista: e.target.value });
   $('#rTipo').onclick = e => { const t = e.target.dataset.t; if (t) troca({ tipo: t }); };
   $('#rIni').onchange = e => troca({ inicio: e.target.value }); $('#rFim').onchange = e => troca({ fim: e.target.value });
-  const fixar = () => [...k.fixos, ...k.ordem].map(s => ({ id: s.id, tipo: s.tipo, status: (R.paradas || []).find(x => x.id === s.id)?.status || null }));
+  const fixar = (manual = k.manual) => [...k.fixos, ...k.ordem].map(s => ({ id: s.id, tipo: s.tipo, status: (R.paradas || []).find(x => x.id === s.id)?.status || null, ...(manual ? { manual: true } : {}) }));
   $('#rSalvar').onclick = async () => { await salvarRotaDia({ paradas: fixar() }, 'Rota salva'); desenharRota(); };
-  $('#rRecalc').onclick = async () => { await salvarRotaDia({ paradas: fixar() }, 'Rota recalculada a partir de agora'); desenharRota(); };
+  $('#rRecalc').onclick = async () => { await salvarRotaDia({ paradas: fixar(false) }, k.manual ? 'Voltou para a ordem automática' : 'Rota recalculada a partir de agora'); desenharRota(); };
+  // ↑ ↓: troca a parada de lugar e a rota (horários e links do Google Maps) é refeita na hora nessa ordem
+  const mover = async (id, d) => { const l = [...k.fixos, ...k.ordem], i = l.findIndex(s => s.id === id), j = i + d; if (i < 0 || j < k.fixos.length || j >= l.length) return;
+    [l[i], l[j]] = [l[j], l[i]]; await salvarRotaDia({ paradas: l.map(s => ({ id: s.id, tipo: s.tipo, status: (R.paradas || []).find(x => x.id === s.id)?.status || null, manual: true })) }); desenharRota(); };
+  document.querySelectorAll('[data-up]').forEach(b => b.onclick = () => mover(b.dataset.up, -1));
+  document.querySelectorAll('[data-dn]').forEach(b => b.onclick = () => mover(b.dataset.dn, 1));
+  const livre = $('#rLivre');
+  if (livre) livre.oninput = () => { const t = norm(livre.value), box = $('#rLivreSug'); if (t.length < 2) { box.innerHTML = ''; return; }
+    const l = S.pdvs.filter(p => p.lat && p.etapa !== 'fechado' && !todas.some(s => s.id === p.id) && norm(p.nome + ' ' + (p.bairro || '')).includes(t)).slice(0, 8);
+    box.innerHTML = l.map(p => `<button data-livre="${p.id}">${esc(p.nome)} <small>${esc(etapa(p.etapa).n)}${p.consumidor_final ? ' · consumidor final' : ''} · ${esc(p.bairro || regNome(p.regiao) || '')}</small></button>`).join('') || '<div style="padding:8px;color:var(--mute)">Nada encontrado</div>';
+    box.querySelectorAll('[data-livre]').forEach(b => b.onclick = async () => { const id = b.dataset.livre; await salvarRotaDia({ incluir: [...new Set([...R.incluir, id])], tirar: R.tirar.filter(x => x !== id) }, 'Cliente colocado na rota'); desenharRota(); }); };
   document.querySelectorAll('[data-inc]').forEach(b => b.onclick = async () => { const id = b.dataset.inc; await salvarRotaDia({ incluir: [...new Set([...R.incluir, id])], tirar: R.tirar.filter(x => x !== id) }); desenharRota(); });
   // tirar da rota: pergunta o motivo (postergar ou cliente negou) e grava no histórico do negócio
   document.querySelectorAll('[data-tira]').forEach(b => b.onclick = () => { const id = b.dataset.tira, p = S.pdvs.find(x => x.id === id);
@@ -2176,9 +2214,18 @@ async function telaPerfil() {
   $('#pEditar').onclick = () => { modal(`<h3>Editar ${esc(p.nome)}</h3><label>Nome fantasia</label><input id="eNome" value="${esc(p.nome)}">${campoEmpresa('e', p)}<label>Canal</label>${campoCanal('eCanal', p.canal)}
     <label>Endereço</label><input id="eEnd" value="${esc(p.endereco || '')}"><div class="row"><div style="flex:1"><label>Bairro</label><input id="eBai" value="${esc(p.bairro || '')}"></div><div style="flex:1"><label>Cidade</label><input id="eCid" value="${esc(p.cidade || '')}"></div></div>
     <div class="row"><div style="flex:1"><label>Classe</label><select id="eCla"><option value="">—</option>${['A', 'B', 'C', 'D'].map(x => `<option ${x === p.classe ? 'selected' : ''}>${x}</option>`).join('')}</select></div><div style="flex:1"><label>Potencial</label>${campoPot('ePot', p.potencial)}</div></div>
+    <label class="chkbox" style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="eCF" style="width:auto" ${p.consumidor_final ? 'checked' : ''}> Consumidor final <small style="color:var(--mute)">(não gera reposição automática; dá para pôr na rota à mão)</small></label>
     <label>Observação</label><textarea id="eObs" rows="3">${esc(p.observacao || '')}</textarea><div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="eOk">Salvar</button></div>`);
     ligarCanal('eCanal'); ligarEmpresa('e', 'eNome');
-    $('#eOk').onclick = async () => { try { await db.atualizarPdv(p.id, { nome: $('#eNome').value.trim() || p.nome, ...lerEmpresa('e'), canal: lerCanal('eCanal'), endereco: $('#eEnd').value.trim() || null, bairro: $('#eBai').value.trim() || null, cidade: $('#eCid').value.trim() || null, classe: $('#eCla').value || null, potencial: +$('#ePot').value, observacao: $('#eObs').value.trim() || null }); fecharModal(); await atualizarUm(p.id); toast('Dados salvos'); telaPerfil(); } catch (e) { erro(e); } }; };
+    $('#eOk').onclick = async () => { try { const end = $('#eEnd').value.trim(), bai = $('#eBai').value.trim(), cid = $('#eCid').value.trim();
+      const patch = { nome: $('#eNome').value.trim() || p.nome, ...lerEmpresa('e'), canal: lerCanal('eCanal'), endereco: end || null, bairro: bai || null, cidade: cid || null, classe: $('#eCla').value || null, potencial: +$('#ePot').value, observacao: $('#eObs').value.trim() || null };
+      if (!!$('#eCF').checked !== !!p.consumidor_final) patch.consumidor_final = $('#eCF').checked;
+      // endereço digitado mudou: move o pino para o endereço novo
+      if (end && (end !== (p.endereco || '') || cid !== (p.cidade || '') || bai !== (p.bairro || ''))) { $('#eOk').disabled = true; $('#eOk').textContent = 'Localizando endereço…';
+        const g = await geocodificar(`${end}${bai ? ' - ' + bai : ''} - ${cid || 'Porto Alegre'}/RS`).catch(() => null);
+        if (g) Object.assign(patch, { lat: g.lat, lng: g.lng, geo_precisao: g.precisao, regiao: await garantirRegiao(g.lng, g.lat, g.cidade || cid), cidade: cid || g.cidade || null, bairro: bai || g.bairro || null });
+        else toast('Não achei esse endereço no mapa: o pino ficou onde estava (use Ajustar localização)'); }
+      await db.atualizarPdv(p.id, patch); fecharModal(); await atualizarUm(p.id); toast('Dados salvos'); telaPerfil(); } catch (e) { erro(e); } }; };
   if ($('#pVerContato')) $('#pVerContato').onclick = () => abrirContato(c.id);
   $('#pTrocarContato').onclick = () => { modal(`<h3>Contato de ${esc(p.nome)}</h3>${campoContato()}<div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="kOk">Vincular</button></div>`); document.querySelector('#modalBox details').open = true;
     $('#kOk').onclick = async () => { try { const id = await contatoDoForm(p.nome); if (!id) return toast('Escolha um contato ou preencha o nome'); await db.atualizarPdv(p.id, { contato_id: id }); fecharModal(); await atualizarUm(p.id); toast('Contato vinculado'); telaPerfil(); } catch (e) { erro(e); } }; };
