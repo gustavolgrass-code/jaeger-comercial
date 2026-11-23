@@ -1804,11 +1804,18 @@ function ligarRota(k, todas) {
     [l[i], l[j]] = [l[j], l[i]]; await salvarRotaDia({ paradas: l.map(s => ({ id: s.id, tipo: s.tipo, status: (R.paradas || []).find(x => x.id === s.id)?.status || null, manual: true })) }); desenharRota(); };
   document.querySelectorAll('[data-up]').forEach(b => b.onclick = () => mover(b.dataset.up, -1));
   document.querySelectorAll('[data-dn]').forEach(b => b.onclick = () => mover(b.dataset.dn, 1));
-  const livre = $('#rLivre');
-  if (livre) livre.oninput = () => { const t = norm(livre.value), box = $('#rLivreSug'); if (t.length < 2) { box.innerHTML = ''; return; }
-    const l = S.pdvs.filter(p => p.lat && p.etapa !== 'fechado' && !todas.some(s => s.id === p.id) && norm(p.nome + ' ' + (p.bairro || '')).includes(t)).slice(0, 8);
-    box.innerHTML = l.map(p => `<button data-livre="${p.id}">${esc(p.nome)} <small>${esc(etapa(p.etapa).n)}${p.consumidor_final ? ' · consumidor final' : ''} · ${esc(p.bairro || regNome(p.regiao) || '')}</small></button>`).join('') || '<div style="padding:8px;color:var(--mute)">Nada encontrado</div>';
-    box.querySelectorAll('[data-livre]').forEach(b => b.onclick = async () => { const id = b.dataset.livre; await salvarRotaDia({ incluir: [...new Set([...R.incluir, id])], tirar: R.tirar.filter(x => x !== id) }, 'Cliente colocado na rota'); desenharRota(); }); };
+  // busca para pôr qualquer cliente na rota (mesma busca do mapa: nome, razão social, bairro, cidade)
+  const ligarBusca = (inp, box, filtro) => { if (!inp) return;
+    const listar = () => { const t = norm(inp.value); if (t.length < 2) { box.style.display = 'none'; box.innerHTML = ''; return; }
+      const l = S.pdvs.filter(p => p.etapa !== 'fechado' && filtro(p) && !todas.some(s => s.id === p.id) && norm([p.nome, p.razao_social, p.bairro, p.cidade].filter(Boolean).join(' ')).includes(t)).slice(0, 10);
+      box.innerHTML = l.map(p => `<div data-livre="${p.id}" ${p.lat ? '' : 'style="opacity:.55"'}><b>${esc(p.nome)}</b> <small style="color:${etapa(p.etapa).c};font-weight:700">${etapa(p.etapa).n}</small>${p.consumidor_final ? ' <small>· consumidor final</small>' : ''}<br><small style="color:var(--mute)">${esc([p.bairro, p.cidade].filter(Boolean).join(' · '))}${p.lat ? '' : ' · sem localização no mapa'}</small></div>`).join('') || '<div style="color:var(--mute)">Nenhum cliente encontrado</div>';
+      box.style.display = 'block';
+      box.querySelectorAll('[data-livre]').forEach(d => d.onmousedown = async e => { e.preventDefault(); const id = d.dataset.livre, p = S.pdvs.find(x => x.id === id);
+        if (!p.lat) return toast('Esse cliente não tem localização: abra o perfil e use Ajustar localização ou Editar endereço');
+        box.style.display = 'none'; inp.value = ''; await salvarRotaDia({ incluir: [...new Set([...R.incluir, id])], tirar: R.tirar.filter(x => x !== id) }, p.nome + ' entrou na rota'); desenharRota(); }); };
+    inp.oninput = listar; inp.onfocus = listar; inp.onblur = () => setTimeout(() => { box.style.display = 'none'; }, 150);
+    inp.onkeydown = e => { if (e.key === 'Enter') box.querySelector('[data-livre]')?.dispatchEvent(new MouseEvent('mousedown')); if (e.key === 'Escape') { inp.value = ''; listar(); } }; };
+  ligarBusca($('#rLivre'), $('#rLivreSug'), () => true);
   document.querySelectorAll('[data-inc]').forEach(b => b.onclick = async () => { const id = b.dataset.inc; await salvarRotaDia({ incluir: [...new Set([...R.incluir, id])], tirar: R.tirar.filter(x => x !== id) }); desenharRota(); });
   // tirar da rota: pergunta o motivo (postergar ou cliente negou) e grava no histórico do negócio
   document.querySelectorAll('[data-tira]').forEach(b => b.onclick = () => { const id = b.dataset.tira, p = S.pdvs.find(x => x.id === id);
@@ -1850,11 +1857,7 @@ function ligarRota(k, todas) {
           if (!r.length) { $('#rbOk').disabled = false; $('#rbOk').textContent = 'Salvar'; return toast('Não achei esse endereço. Confira número e cidade.'); }
           Object.assign(nv, { endereco: end, lat: +r[0].lat, lng: +r[0].lon }); } catch (e) { return erro(e); } }
       try { await db.salvarRegra('rota', nv); S.base.regras.rota = nv; fecharModal(); toast('Ponto de saída salvo'); desenharRota(); } catch (e) { erro(e); } }; };
-  const inp = $('#rProsp');
-  if (inp) inp.oninput = () => { const t = norm(inp.value), box = $('#rProspSug'); if (t.length < 2) { box.innerHTML = ''; return; }
-    const l = S.pdvs.filter(p => PROSP_ETAPAS.includes(p.etapa) && p.lat && norm(p.nome + ' ' + (p.bairro || '')).includes(t)).slice(0, 8);
-    box.innerHTML = l.map(p => `<button data-inc="${p.id}">${esc(p.nome)} <small>${esc(p.bairro || '')}</small></button>`).join('') || '<div style="padding:8px;color:var(--mute)">Nada encontrado</div>';
-    box.querySelectorAll('[data-inc]').forEach(b => b.onclick = async () => { await salvarRotaDia({ incluir: [...new Set([...R.incluir, b.dataset.inc])], tirar: R.tirar.filter(x => x !== b.dataset.inc) }); desenharRota(); }); };
+  ligarBusca($('#rProsp'), $('#rProspSug'), p => PROSP_ETAPAS.includes(p.etapa));
   // mapa: mesma cor e símbolo da lista (urgência, prospecção, feito, não estava) e o caminho pelas ruas
   if (RT.mapa) { RT.mapa.remove(); RT.mapa = null; }
   const el = $('#rmap'); if (!el || !window.L) return;
