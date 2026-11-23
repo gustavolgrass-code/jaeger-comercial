@@ -2401,8 +2401,11 @@ async function telaPerfil() {
       if (/maps\.app\.goo\.gl|goo\.gl\/maps/.test(u)) return msgLink('Link curto do celular: abra ele no navegador, copie o endereço completo da barra (começa com google.com/maps/place) e cole aqui.', false);
       const g = lerLink(u); if (!g) return msgLink('Não achei a localização nesse link. Copie o link da página do lugar no Google Maps.', false);
       msgLink(`Localização do link: ${g.lat.toFixed(5)}, ${g.lng.toFixed(5)} · buscando o endereço…`, true);
-      const r = await enderecoDoPonto(g.lat, g.lng); if (r) pore({ ...r, num: r.num || $('#eNum').value.trim() });
-      msgLink(`📍 O pino vai para o lugar do link${r ? ': ' + esc(linhaEndereco({ ...r, num: r.num || $('#eNum').value.trim() })) : ''}${r && !r.num ? '<br><small>O número não veio do mapa: confira e digite.</small>' : ''}`, true); };
+      // o mapa aberto (OpenStreetMap) às vezes pega o vizinho: bairro, cidade e UF entram sozinhos; rua, número e CEP ficam como sugestão para você confirmar
+      const r = await enderecoDoPonto(g.lat, g.lng); if (r) pore({ bairro: r.bairro, cidade: r.cidade, uf: r.uf });
+      const sug = r && (r.rua || r.cep) ? linhaEndereco(r) : '';
+      msgLink(`📍 O pino vai para o lugar do link.${sug ? `<br><small>Endereço que o mapa achou nesse ponto: <b>${esc(sug)}</b> · <a href="#" id="eUsaSug">usar</a></small>` : ''}<br><small>Para o endereço exato: digite o <b>CEP</b> (preenche a rua) e o número, ou use <b>Buscar</b> no CNPJ.</small>`, true);
+      if ($('#eUsaSug')) $('#eUsaSug').onclick = e => { e.preventDefault(); pore(r); }; };
     $('#eOk').onclick = async () => { try { const rua = $('#eEnd').value.trim(), num = $('#eNum').value.trim(), bai = $('#eBai').value.trim(), cid = $('#eCid').value.trim(), uf = $('#eUf').value.trim().toUpperCase(), cep = $('#eCep').value.trim();
       const end = [rua, num].filter(Boolean).join(', ');
       const patch = { nome: $('#eNome').value.trim() || p.nome, ...lerEmpresa('e'), canal: lerCanal('eCanal'), endereco: end || null, bairro: bai || null, cidade: cid || null, classe: $('#eCla').value || null, potencial: +$('#ePot').value, observacao: $('#eObs').value.trim() || null };
