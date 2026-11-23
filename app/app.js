@@ -83,7 +83,9 @@ async function garantirRegiao(lng, lat, cidade) {
 }
 const regNome = c => (S.base.regioes.find(r => r.codigo === c) || {}).nome || 'sem região';
 const atraso = p => p.proxima_reposicao ? Math.floor((Date.now() - new Date(p.proxima_reposicao)) / DIA) : null;
-const prazoTxt = p => { const a = atraso(p); if (p.consumidor_final) return 'consumidor final'; if (a === null) return repoe(p) ? '1ª reposição' : '—'; return a > 0 ? `atrasada ${a} dia${a > 1 ? 's' : ''}` : a === 0 ? 'vence hoje' : `em ${-a} dia${a < -1 ? 's' : ''}`; };
+// entrega postergada até uma data (ex.: escola que só volta em março): guardado em regras.adiados = { pdvId: 'AAAA-MM-DD' }
+const adiadoAte = (p, d = hoje()) => { const a = (S.base?.regras?.adiados || {})[p?.id]; return a && a > d ? a : null; };
+const prazoTxt = p => { const a = atraso(p); if (p.consumidor_final) return 'consumidor final'; if (adiadoAte(p)) return 'postergada até ' + dstr(adiadoAte(p) + 'T12:00'); if (a === null) return repoe(p) ? '1ª reposição' : '—'; return a > 0 ? `atrasada ${a} dia${a > 1 ? 's' : ''}` : a === 0 ? 'vence hoje' : `em ${-a} dia${a < -1 ? 's' : ''}`; };
 const expo = id => S.base.expositores.find(e => e.id === id) || S.base.expositores[0];
 const alvo = (expoId, prodId) => (S.base.alvo.find(a => a.expositor_id === expoId && a.produto_id === prodId) || {}).quantidade || 0;
 
@@ -324,7 +326,7 @@ function caixaEsteira(p) {
 }
 /* ---------- reposições pendentes ---------- */
 function repPendentes() {
-  return S.pdvs.filter(p => repoe(p) && (!p.proxima_reposicao || atraso(p) >= 0))
+  return S.pdvs.filter(p => repoe(p) && !adiadoAte(p) && (!p.proxima_reposicao || atraso(p) >= 0))
     .sort((a, b) => (atraso(b) ?? 999) - (atraso(a) ?? 999));
 }
 function listaPendentes(s) {
@@ -1698,7 +1700,7 @@ function calcularRota() {
   const jan = p => { const ks = perList(p); return ks.length ? ks.map(k => JANELAS[k]).sort((a, b) => a[0] - b[0]) : [[ini, fim]]; };
   const atendeHoje = p => !p.janela_dias?.length || p.janela_dias.includes(dow);
   // fila de reposição
-  const fila = S.pdvs.filter(p => repoe(p) && p.lat).map(p => ({ p, ...RT.prev[p.id] })).filter(x => x.urg).sort((a, b) => a.dias - b.dias);
+  const fila = S.pdvs.filter(p => repoe(p) && p.lat && !tira.has(p.id) && (incl.has(p.id) || !adiadoAte(p, R.data))).map(p => ({ p, ...RT.prev[p.id] })).filter(x => x.urg).sort((a, b) => a.dias - b.dias);
   // quem já está na rota do outro no mesmo dia não entra sozinho nesta
   const doOutro = new Set((RT.outras || []).flatMap(r => [...(r.paradas || []).map(s => s.id), ...(r.incluir || [])]));
   const encs = S.base.regras.encomendas || {};
@@ -1914,16 +1916,21 @@ function ligarRota(k, todas) {
   document.querySelectorAll('[data-tira]').forEach(b => b.onclick = () => { const id = b.dataset.tira, p = S.pdvs.find(x => x.id === id);
     modal(`<h3>Tirar ${esc(p.nome)} da rota</h3>
      <div class="tiraops"><label><input type="radio" name="tmot" value="adiar" checked><span><b>Postergar a entrega</b><small>Fica para outro dia</small></span></label>
+      <div id="tAte" style="margin:-2px 0 6px 28px"><small>Voltar a entrar na rota a partir de</small><br><input type="date" id="tData" min="${R.data}"> <button class="mini" type="button" id="tMar">1º de março</button><br><small style="color:var(--mute)">Em branco: sai só da rota deste dia.</small></div>
       <label><input type="radio" name="tmot" value="negou"><span><b>Cliente negou a reposição</b><small>Não quis repor agora</small></span></label></div>
      <label>Motivo</label><textarea id="tTxt" rows="3" style="width:100%" placeholder="Ex.: dono viajando, volta segunda; ainda tem bastante produto…"></textarea>
      <p style="color:var(--soft);font-size:12px;margin:6px 0 0">Fica registrado no histórico do negócio.</p>
      <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="tOk">Tirar da rota</button></div>`);
-    $('#tOk').onclick = async () => { const tipo = document.querySelector('input[name=tmot]:checked').value, txt = $('#tTxt').value.trim();
+    document.querySelectorAll('input[name=tmot]').forEach(r => r.onchange = () => $('#tAte').style.display = document.querySelector('input[name=tmot]:checked').value === 'adiar' ? '' : 'none');
+    $('#tMar').onclick = () => { const a = new Date(R.data + 'T12:00'), y = a.getMonth() >= 2 ? a.getFullYear() + 1 : a.getFullYear(); $('#tData').value = `${y}-03-01`; };
+    $('#tOk').onclick = async () => { const tipo = document.querySelector('input[name=tmot]:checked').value, txt = $('#tTxt').value.trim(), ate = tipo === 'adiar' ? $('#tData').value : '';
       if (!txt) return toast('Escreva o motivo');
-      const nota = `${tipo === 'adiar' ? '🗓️ Entrega postergada' : '🚫 Cliente negou a reposição'} (rota de ${dstr(R.data + 'T12:00')}): ${txt}`;
+      if (ate && ate <= R.data) return toast('A data precisa ser depois de hoje');
+      const nota = `${tipo === 'adiar' ? '🗓️ Entrega postergada' + (ate ? ' até ' + dstr(ate + 'T12:00') : '') : '🚫 Cliente negou a reposição'} (rota de ${dstr(R.data + 'T12:00')}): ${txt}`;
       $('#tOk').disabled = true;
-      try { await db.criarNota(id, nota, S.eu.id); } catch (e) { $('#tOk').disabled = false; return erro(/pdv_notas/.test(e.message) ? new Error('Rode o 022_observacoes.sql no Supabase para guardar o motivo') : e); }
-      fecharModal(); await salvarRotaDia({ tirar: [...new Set([...R.tirar, id])], incluir: R.incluir.filter(x => x !== id), paradas: (R.paradas || []).filter(x => x.id !== id) }, 'Tirado da rota · motivo no histórico'); desenharRota(); }; });
+      if (ate) { const ad = { ...(S.base.regras.adiados || {}), [id]: ate }; try { await db.salvarRegra('adiados', ad); S.base.regras.adiados = ad; } catch (e) { $('#tOk').disabled = false; return erro(e); } }
+      try { await db.criarNota(id, nota, S.eu.id); } catch (e) { toast(/pdv_notas/.test(e.message) ? 'Saiu da rota, mas o motivo não foi guardado: rode o 022_observacoes.sql' : 'Saiu da rota, mas o motivo não foi guardado'); }
+      fecharModal(); await salvarRotaDia({ tirar: [...new Set([...R.tirar, id])], incluir: R.incluir.filter(x => x !== id), paradas: (R.paradas || []).filter(x => x.id !== id) }, ate ? `Postergado até ${dstr(ate + 'T12:00')} · motivo no histórico` : 'Tirado da rota · motivo no histórico'); desenharRota(); }; });
   document.querySelectorAll('[data-rep]').forEach(b => b.onclick = async () => { if (!R.paradas?.length) await salvarRotaDia({ paradas: fixar() }); S.contando = b.dataset.rep; irPara('reposicao'); });
   document.querySelectorAll('[data-aus]').forEach(b => b.onclick = async () => { const id = b.dataset.aus, p = S.pdvs.find(x => x.id === id);
     const ps = (R.paradas?.length ? R.paradas : fixar()).map(x => x.id === id ? { ...x, status: 'ausente' } : x);
@@ -2336,6 +2343,7 @@ async function telaPerfil() {
      <div class="badges"><span class="badge st" style="background:${etapa(p.etapa).c}">${etapa(p.etapa).n}</span>${p.classe ? `<span class="badge">Classe ${p.classe}</span>` : ''}<span class="badge">${p.regiao || '—'} · ${esc(regNome(p.regiao))}</span>${p.expositor_id ? `<span class="badge">Expositor ${esc(expo(p.expositor_id).nome)}</span>` : ''}<span class="badge">${'★'.repeat(p.potencial || 0) || 'sem potencial'}</span>${p.geo_precisao && p.geo_precisao !== 'exata' ? `<span class="badge" style="background:#F7E9DD">localização ${esc(p.geo_precisao)}</span>` : ''}</div>
      ${p.razao_social || p.cnpj ? `<p style="color:var(--soft);margin:6px 0">${esc(p.razao_social || '')}${p.cnpj ? ' · CNPJ ' + esc(p.cnpj.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5')) : ''}</p>` : ''}
      <p style="color:var(--soft);margin:6px 0">${esc(p.endereco || 'Sem endereço')}${p.condicao ? ` · Condição: <b>${esc(p.condicao)}</b>` : ''}${p.proxima_reposicao ? ` · Próxima reposição: <b>${dstr(p.proxima_reposicao)}</b> (${prazoTxt(p)})` : ''}</p>
+     ${adiadoAte(p) ? `<p style="background:#F7E9DD;padding:8px 10px;border-radius:8px;margin:8px 0 0">🗓️ Reposição postergada até <b>${dstr(adiadoAte(p) + 'T12:00')}</b>: até lá não entra sozinho na rota. <a href="#" id="pRetomar">retomar agora</a></p>` : ''}
      ${p.observacao ? `<p style="background:var(--sand);padding:8px 10px;border-radius:8px;margin:8px 0 0">${esc(p.observacao)}</p>` : ''}
      <div class="row" style="flex-wrap:wrap;margin-top:12px">
       ${repoe(p) ? '<button class="btn pri" id="pRepor">Repor (contar o expositor) →</button>' : ''}${podeComprar ? '<button class="btn car" id="pComprar">Registrar venda →</button>' : ''}
@@ -2372,6 +2380,7 @@ async function telaPerfil() {
   if (h.pedidos.length) db.itensDoCliente(p.id).then(it => { const el = $('#pProd'); if (el) el.outerHTML = maisSaem(it, h.pedidos); }).catch(() => { });
   $('#pNovaTar').onclick = $('#pTarTopo').onclick = () => modalTarefa({ data: hojeISO(), pdv_id: p.id, contato_id: p.contato_id });
   document.querySelectorAll('[data-tid]').forEach(el => el.onclick = () => modalTarefa(tars.find(t => t.id === el.dataset.tid)));
+  if ($('#pRetomar')) $('#pRetomar').onclick = async e => { e.preventDefault(); const ad = { ...(S.base.regras.adiados || {}) }; delete ad[p.id]; try { await db.salvarRegra('adiados', ad); S.base.regras.adiados = ad; toast('Reposição retomada'); abrirPerfil(p.id); } catch (er) { erro(er); } };
   if ($('#pRepor')) $('#pRepor').onclick = () => { S.contando = p.id; S.repVolta = { aba: 'perfil', id: p.id }; irPara('reposicao'); };
   if ($('#pComprar')) $('#pComprar').onclick = () => { S.abPdv = p.id; S.vendaVolta = { aba: 'perfil', id: p.id }; irPara('abertura'); };
   $('#pVisita').onclick = () => visitaRapida(p, telaPerfil);
