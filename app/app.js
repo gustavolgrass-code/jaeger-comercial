@@ -1793,14 +1793,14 @@ async function passarCliente(id, para) {
   await salvarRotaDia({ tirar: [...new Set([...R.tirar, id])], incluir: R.incluir.filter(x => x !== id), paradas: (R.paradas || []).filter(x => x.id !== id) }, `${p?.nome || 'Cliente'} foi para a rota de ${quem}`);
   desenharRota();
 }
-function linksMaps(base, ordem) {
+function linksMaps(base, ordem, de = null, pulo = 0) { // de: última parada concluída (o trajeto sai dela); pulo: quantas já foram feitas, para numerar
   const pto = p => { const hex = (String(p.link_maps || '').match(/(0x[0-9a-f]+:0x[0-9a-f]+)/i) || [])[1];
     return hex ? { seg: encodeURIComponent(p.nome || 'Parada').replace(/%20/g, '+'), blk: `!1m5!1m1!1s${hex}!2m2!1d${(+p.lng).toFixed(6)}!2d${(+p.lat).toFixed(6)}`, n: 6, ficha: true }
       : { seg: `${(+p.lat).toFixed(5)},${(+p.lng).toFixed(5)}`, blk: '!1m0', n: 1, ficha: false }; };
-  const o = pto({ lat: base.lat, lng: base.lng }), pts = ordem.map(s => pto(s.p)), out = [];
+  const o = pto({ lat: base.lat, lng: base.lng }), o0 = de ? pto(de) : o, pts = ordem.map(s => pto(s.p)), out = [];
   for (let i = 0; i < pts.length; i += 9) { const tr = pts.slice(i, i + 9), fimTr = i + 9 >= pts.length;
-    const lista = [i ? pts[i - 1] : o, ...tr, ...(fimTr ? [o] : [])], dentro = lista.reduce((a, x) => a + x.n, 0) + 1;
-    out.push({ n: `${i + 1}–${i + tr.length}`, fichas: tr.filter(x => x.ficha).length, url: `https://www.google.com/maps/dir/${lista.map(x => x.seg).join('/')}/data=!4m${dentro + 1}!4m${dentro}${lista.map(x => x.blk).join('')}!3e0` }); }
+    const lista = [i ? pts[i - 1] : o0, ...tr, ...(fimTr ? [o] : [])], dentro = lista.reduce((a, x) => a + x.n, 0) + 1;
+    out.push({ n: `${pulo + i + 1}–${pulo + i + tr.length}`, fichas: tr.filter(x => x.ficha).length, url: `https://www.google.com/maps/dir/${lista.map(x => x.seg).join('/')}/data=!4m${dentro + 1}!4m${dentro}${lista.map(x => x.blk).join('')}!3e0` }); }
   return out;
 }
 async function salvarRotaDia(patch, msg) {
@@ -1846,7 +1846,7 @@ function pintarRota(k) {
    <div class="tile"><small>🔵 Reposição</small><b>${feitosN(nRep)}/${nRep.length}</b><small>feitas</small></div>
    <div class="tile"><small>🟣 Prospecção</small><b>${feitosN(nPr)}/${nPr.length}</b><small>visitadas</small></div></div>
   <div class="rgrid"><div>
-   <div class="toolbar">${todas.length ? linksMaps(base, k.ordem).map(l => `<a class="btn car" href="${l.url}" target="_blank" rel="noopener" style="text-decoration:none">Google Maps · paradas ${l.n} ↗</a>`).join('') : ''}
+   <div class="toolbar">${k.ordem.length ? linksMaps(base, k.ordem, k.fixos.length ? k.fixos[k.fixos.length - 1].p : null, k.fixos.length).map(l => `<a class="btn car" href="${l.url}" target="_blank" rel="noopener" style="text-decoration:none">Google Maps · paradas ${l.n} ↗</a>`).join('') + (k.fixos.length ? ` <small style="color:var(--mute)">só o que falta, saindo de ${esc(k.fixos[k.fixos.length - 1].p.nome)}</small>` : '') : todas.length ? '<span class="badge" style="background:#E3F0E7">✅ Todas as paradas concluídas</span>' : ''}
     ${k.manual ? '<span class="badge" style="background:#F7E9DD">✋ ordem definida à mão</span>' : ''}<button class="btn" id="rRecalc">${k.manual ? '↻ Voltar à ordem automática' : '↻ Recalcular o resto'}</button>${R.data === hoje() ? '<button class="btn car" id="rComecar" title="Começa agora: refaz a previsão de horário a partir deste momento">▶ Começar rota agora</button>' : ''}<button class="btn pri" id="rSalvar">Salvar rota</button></div>
    <div class="stop rstop rcasa"><div class="n">🏠</div><div class="info"><div class="rhora">${R.inicio}</div><b>Saída</b> <small style="color:var(--mute)">carregar o carro (lista abaixo)</small></div></div>
    ${todas.map((s, i) => linha(s, i, i >= k.fixos.length ? hs[i - k.fixos.length] : null)).join('') || '<div class="empty">Nenhuma parada para este dia. Escolha clientes na fila abaixo.</div>'}
