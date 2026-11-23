@@ -1730,6 +1730,27 @@ function carga(ordem) {
 }
 // rota no Google Maps parando nas fichas dos estabelecimentos (código do lugar guardado em link_maps);
 // quem não tem ficha guardada entra pela coordenada. Até 9 paradas por trecho, como o Google permite.
+// carga do carro: sugestão pelo pedido esperado de cada parada (+10%), que pode ser ajustada à mão e fica salva na rota
+function cargaFinal(cg) { const aj = RT.salvo?.carga; const sug = Object.fromEntries(cg.map(x => [x.p.id, x.levar]));
+  if (!aj || !Object.keys(aj).length) return { aj: false, q: sug };
+  return { aj: true, q: Object.fromEntries(Object.entries(aj).map(([k, v]) => [k, +v]).filter(([, v]) => v > 0)) }; }
+function painelCarga(cg) {
+  const { aj, q } = cargaFinal(cg), prev = Object.fromEntries(cg.map(x => [x.p.id, x.q]));
+  const ids = [...new Set([...cg.map(x => String(x.p.id)), ...Object.keys(q)])], prods = S.base.produtos.filter(p => ids.includes(String(p.id)));
+  const nome = p => `${esc(p.linha.split(' ')[0])} · ${esc(p.sabor)}`, outros = S.base.produtos.filter(p => !ids.includes(String(p.id)));
+  return `<h3 style="margin-top:0">🚗 Carga do carro <small style="font-weight:400;color:var(--mute)">· ${aj ? '<b style="color:var(--choc)">ajustada à mão</b>' : 'sugestão: pedido esperado de cada parada + 10% para trocas'}</small></h3>
+   ${prods.length ? `<table class="rcarga"><tr><th>Produto</th><th>Previsto</th><th>Levar</th></tr>${prods.map(p => `<tr><td>${nome(p)}</td><td>${prev[p.id] || '—'}</td><td><input type="number" min="0" inputmode="numeric" class="cgq" data-cg="${p.id}" value="${q[p.id] || 0}" style="width:70px"></td></tr>`).join('')}
+    <tr><td><b>Total</b></td><td>${cg.reduce((a, x) => a + x.q, 0)}</td><td><b id="cgTot">${Object.values(q).reduce((a, b) => a + b, 0)}</b></td></tr></table>` : '<span style="color:var(--mute)">Sem reposições na rota. Dá para montar a carga à mão abaixo.</span>'}
+   <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px">${outros.length ? `<select id="cgAdd" style="max-width:220px"><option value="">+ outro produto…</option>${outros.map(p => `<option value="${p.id}">${nome(p)}</option>`).join('')}</select>` : ''}${aj ? '<button class="mini" id="cgReset">voltar à sugestão</button>' : ''}<small id="cgSalvo" style="color:var(--mute)"></small></div>`;
+}
+function ligarCarga(cg) {
+  const box = $('#rCarga'); if (!box) return; let tm = null;
+  const salvar = carga => { clearTimeout(tm); tm = setTimeout(async () => { await salvarRotaDia({ carga }); const el = $('#cgSalvo'); if (el && !RT.semTabela) el.textContent = carga ? '✓ carga salva' : ''; }, 500); };
+  const ler = () => Object.fromEntries([...box.querySelectorAll('[data-cg]')].map(i => [i.dataset.cg, Math.max(0, Math.round(+i.value || 0))]));
+  box.querySelectorAll('[data-cg]').forEach(i => i.oninput = () => { const c = ler(); $('#cgTot').textContent = Object.values(c).reduce((a, b) => a + b, 0); salvar(c); });
+  if ($('#cgAdd')) $('#cgAdd').onchange = e => { if (!e.target.value) return; const c = { ...cargaFinal(cg).q, ...ler(), [e.target.value]: 1 }; RT.salvo.carga = c; box.innerHTML = painelCarga(cg); ligarCarga(cg); salvar(c); };
+  if ($('#cgReset')) $('#cgReset').onclick = () => { RT.salvo.carga = null; box.innerHTML = painelCarga(cg); ligarCarga(cg); salvar(null); };
+}
 function linksMaps(base, ordem) {
   const pto = p => { const hex = (String(p.link_maps || '').match(/(0x[0-9a-f]+:0x[0-9a-f]+)/i) || [])[1];
     return hex ? { seg: encodeURIComponent(p.nome || 'Parada').replace(/%20/g, '+'), blk: `!1m5!1m1!1s${hex}!2m2!1d${(+p.lng).toFixed(6)}!2d${(+p.lat).toFixed(6)}`, n: 6, ficha: true }
@@ -1742,8 +1763,8 @@ function linksMaps(base, ordem) {
 }
 async function salvarRotaDia(patch, msg) {
   Object.assign(RT.salvo, patch);
-  try { const { data, motorista, tipo, inicio, fim, incluir, tirar, paradas } = RT.salvo; RT.salvo = await db.salvarRota({ data, motorista, tipo, inicio, fim, incluir, tirar, paradas }); RT.salvo.data = data; RT.semTabela = false; if (msg) toast(msg); }
-  catch (e) { RT.semTabela = true; toast(/on conflict|unique or exclusion/i.test(e.message || '') ? 'Não salvou: rode o 031_rota_por_pessoa.sql no Supabase (uma rota para cada um no mesmo dia)' : 'Não salvou: rode o 019_dia_de_rota.sql no Supabase'); }
+  try { const { data, motorista, tipo, inicio, fim, incluir, tirar, paradas, carga } = RT.salvo; RT.salvo = await db.salvarRota({ data, motorista, tipo, inicio, fim, incluir, tirar, paradas, ...(carga !== undefined ? { carga } : {}) }); RT.salvo.data = data; RT.semTabela = false; if (msg) toast(msg); }
+  catch (e) { RT.semTabela = true; if (/carga/.test(e.message || '')) { delete RT.salvo.carga; return toast('Para salvar a carga ajustada, rode o 032_carga_da_rota.sql no Supabase'); } toast(/on conflict|unique or exclusion/i.test(e.message || '') ? 'Não salvou: rode o 031_rota_por_pessoa.sql no Supabase (uma rota para cada um no mesmo dia)' : 'Não salvou: rode o 019_dia_de_rota.sql no Supabase'); }
 }
 async function desenharRota() {
   let k = calcularRota();
@@ -1786,8 +1807,7 @@ function pintarRota(k) {
    ${todas.map((s, i) => linha(s, i, i >= k.fixos.length ? hs[i - k.fixos.length] : null)).join('') || '<div class="empty">Nenhuma parada para este dia. Escolha clientes na fila abaixo.</div>'}
    ${todas.length ? `<div class="stop rstop rcasa"><div class="n">🏠</div><div class="info"><div class="rhora">${k.sim ? hhmm(k.sim.volta) : ''}</div><b>Volta</b></div></div>` : ''}
   </div><div><div id="rmap"></div>
-   <div class="panel" style="margin-top:12px"><h3 style="margin-top:0">🚗 Carga do carro <small style="font-weight:400;color:var(--mute)">· pedido esperado de cada parada + 10% para trocas</small></h3>
-    ${cg.length ? `<table class="rcarga"><tr><th>Produto</th><th>Previsto</th><th>Levar</th></tr>${cg.map(x => `<tr><td>${esc(x.p.linha.split(' ')[0])} · ${esc(x.p.sabor)}</td><td>${x.q}</td><td><b>${x.levar}</b></td></tr>`).join('')}<tr><td><b>Total</b></td><td>${cg.reduce((a, x) => a + x.q, 0)}</td><td><b>${cg.reduce((a, x) => a + x.levar, 0)}</b></td></tr></table>` : '<span style="color:var(--mute)">Sem reposições na rota.</span>'}</div></div></div>
+   <div class="panel" style="margin-top:12px" id="rCarga">${painelCarga(cg)}</div></div></div>
   ${foraLista.length ? `<div class="panel rfora"><h3 style="margin-top:0">⚠️ Urgentes que ficaram fora</h3>${foraLista.map(f => `<div class="rfila"><span>${URG[RT.prev[f.p.id]?.urg]?.i || ''} <b>${esc(f.p.nome)}</b> <small>${f.m} · próximo dia na janela: ${proximoDiaJanela(f.p, R.data)}</small></span>${f.m === 'não cabe no horário' ? `<button class="mini" data-tira="${f.p.id}">tirar de hoje</button>` : `<button class="mini" data-inc="${f.p.id}">pôr mesmo assim</button>`}</div>`).join('')}</div>` : ''}
   <div class="panel" style="margin-top:12px"><h3 style="margin-top:0">Pôr um cliente na rota</h3><div class="mbusca" style="max-width:420px"><input id="rLivre" autocomplete="off" placeholder="🔍 Qualquer cliente ou prospect pelo nome…"><div id="rLivreSug" class="sugs"></div></div>
    <small style="color:var(--mute)">Entra na rota de hoje mesmo sem reposição prevista (inclui consumidor final). Para mudar a ordem, arraste a parada pela alça ⠿.</small></div>
@@ -1798,6 +1818,7 @@ function pintarRota(k) {
   ligarRota(k, todas);
 }
 function ligarRota(k, todas) {
+  ligarCarga(carga(todas.filter(s => !k.feitos.has(s.id))));
   const R = RT.salvo, comStatus = () => (R.paradas || []).filter(x => x.status), troca = async patch => { await salvarRotaDia({ ...patch, paradas: comStatus() }); desenharRota(); };
   $('#rData').onchange = e => { RT.data = e.target.value; telaRota(); };
   $('#rMot').onchange = e => { RT.motorista = e.target.value; telaRota(); }; // troca de rota (cada um tem a sua no dia)
