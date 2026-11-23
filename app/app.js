@@ -1751,6 +1751,17 @@ function ligarCarga(cg) {
   if ($('#cgAdd')) $('#cgAdd').onchange = e => { if (!e.target.value) return; const c = { ...cargaFinal(cg).q, ...ler(), [e.target.value]: 1 }; RT.salvo.carga = c; box.innerHTML = painelCarga(cg); ligarCarga(cg); salvar(c); };
   if ($('#cgReset')) $('#cgReset').onclick = () => { RT.salvo.carga = null; box.innerHTML = painelCarga(cg); ligarCarga(cg); salvar(null); };
 }
+// as outras pessoas que podem rodar (para "jogar" um cliente para a rota delas)
+const outrosMot = () => (RT.perfis || []).filter(p => p.id !== RT.salvo?.motorista);
+async function passarCliente(id, para) {
+  const R = RT.salvo, p = S.pdvs.find(x => x.id === id), quem = RT.perfis.find(x => x.id === para)?.nome || 'outro';
+  const r = (RT.outras || []).find(x => x.motorista === para) || { data: R.data, motorista: para, tipo: 'reposicao', inicio: R.inicio, fim: R.fim, incluir: [], tirar: [], paradas: [] };
+  try { const nv = await db.salvarRota({ data: r.data, motorista: para, tipo: r.tipo, inicio: r.inicio, fim: r.fim, incluir: [...new Set([...(r.incluir || []), id])], tirar: (r.tirar || []).filter(x => x !== id), paradas: r.paradas || [] });
+    nv.data = R.data; RT.outras = [...(RT.outras || []).filter(x => x.motorista !== para), nv];
+  } catch (e) { return toast(/on conflict|unique or exclusion/i.test(e.message || '') ? 'Rode o 031_rota_por_pessoa.sql no Supabase para ter uma rota para cada um' : 'Erro: ' + e.message); }
+  await salvarRotaDia({ tirar: [...new Set([...R.tirar, id])], incluir: R.incluir.filter(x => x !== id), paradas: (R.paradas || []).filter(x => x.id !== id) }, `${p?.nome || 'Cliente'} foi para a rota de ${quem}`);
+  desenharRota();
+}
 function linksMaps(base, ordem) {
   const pto = p => { const hex = (String(p.link_maps || '').match(/(0x[0-9a-f]+:0x[0-9a-f]+)/i) || [])[1];
     return hex ? { seg: encodeURIComponent(p.nome || 'Parada').replace(/%20/g, '+'), blk: `!1m5!1m1!1s${hex}!2m2!1d${(+p.lng).toFixed(6)}!2d${(+p.lat).toFixed(6)}`, n: 6, ficha: true }
@@ -1781,7 +1792,7 @@ function pintarRota(k) {
       <b>${esc(p.nome)}</b> ${est ? '' : rep ? `<span class="badge" style="background:${u.c}22">${u.i} ${pv.dias <= 0 ? 'possível zerado' : `~${Math.round(pv.dias)} dia${Math.round(pv.dias) === 1 ? '' : 's'}`}</span>` : '<span class="badge" style="background:#7B4FC022">🟣 prospecção</span>'}
       ${p.precisa_dono !== false && (p.janela_dias?.length || p.janela_periodo) ? ' <span title="Precisa do dono">🔒</span>' : ''}${ehCanoas(p) ? ' <span class="badge">Canoas</span>' : ''}
       <br><small style="color:var(--mute)">${esc(p.bairro || '')}${janelaTxt(p) ? ' · 🕘 ' + esc(janelaTxt(p)) : ' · sem janela cadastrada'}${rep && pv.deixado != null ? ` · deixado ${pv.deixado} un. em ${dstr(pv.deixadoEm)}${pv.estoque != null ? ` · estimado ~${Math.round(pv.estoque)}` : ''}` : ''}${rep && pv.un ? ` · repor ~${pv.un} un.` : ''}${rep ? ` · previsão por ${pv.fonte}` : ''}</small></div>
-     ${est === 'feito' && rep && RT.visitas.some(v => v.pdv_id === p.id && v.tipo === 'reposicao') ? `<div class="racoes"><button class="mini reabrir" data-reab="${p.id}">reabrir reposição</button></div>` : ''}${est ? '' : `<div class="racoes">${rep ? `<button class="btn pri" data-rep="${p.id}">Repor</button>` : `<button class="btn pri" data-pv="${p.id}">Visitei</button>`}<button class="mini" data-aus="${p.id}">não estava</button><button class="mini" data-tira="${p.id}">tirar</button></div>`}</div>`; };
+     ${est === 'feito' && rep && RT.visitas.some(v => v.pdv_id === p.id && v.tipo === 'reposicao') ? `<div class="racoes"><button class="mini reabrir" data-reab="${p.id}">reabrir reposição</button></div>` : ''}${est ? '' : `<div class="racoes">${rep ? `<button class="btn pri" data-rep="${p.id}">Repor</button>` : `<button class="btn pri" data-pv="${p.id}">Visitei</button>`}<button class="mini" data-aus="${p.id}">não estava</button><button class="mini" data-tira="${p.id}">tirar</button>${outrosMot().map(m => `<button class="mini" data-passa="${p.id}" data-para="${m.id}" title="Passar para a rota de ${esc(m.nome)}">→ ${esc(m.nome)}</button>`).join('')}</div>`}</div>`; };
   const nRep = todas.filter(s => s.tipo === 'rep'), nPr = todas.filter(s => s.tipo === 'prosp');
   const feitosN = l => l.filter(s => k.feitos.has(s.id) || k.st[s.id] === 'feito').length;
   const cg = carga(todas.filter(s => !k.feitos.has(s.id)));
@@ -1812,12 +1823,13 @@ function pintarRota(k) {
   <div class="panel" style="margin-top:12px"><h3 style="margin-top:0">Pôr um cliente na rota</h3><div class="mbusca" style="max-width:420px"><input id="rLivre" autocomplete="off" placeholder="🔍 Qualquer cliente ou prospect pelo nome…"><div id="rLivreSug" class="sugs"></div></div>
    <small style="color:var(--mute)">Entra na rota de hoje mesmo sem reposição prevista (inclui consumidor final). Para mudar a ordem, arraste a parada pela alça ⠿.</small></div>
   <div class="panel" style="margin-top:12px"><h3 style="margin-top:0">Fila de urgência <small style="font-weight:400;color:var(--mute)">· clientes que não estão na rota de hoje</small></h3>
-   ${['ruptura', 'ideal', 'espera'].map(u => { const l = naFila.filter(x => x.urg === u); return l.length ? `<div class="lingrp">${URG[u].i} ${URG[u].n} · ${l.length}</div>${l.map(x => `<div class="rfila"><span><b>${esc(x.p.nome)}</b> <small>${x.dias <= 0 ? 'possível zerado' : `~${Math.round(x.dias)} dias`} · ${esc(x.p.bairro || regNome(x.p.regiao))}${ehCanoas(x.p) ? ' · Canoas (Moisés)' : ''}${janelaTxt(x.p) ? ' · 🕘 ' + esc(janelaTxt(x.p)) : ''}</small></span><button class="mini" data-inc="${x.p.id}">+ pôr na rota</button></div>`).join('')}` : ''; }).join('') || '<span style="color:var(--mute)">Todos os clientes já estão na rota.</span>'}
+   ${['ruptura', 'ideal', 'espera'].map(u => { const l = naFila.filter(x => x.urg === u); return l.length ? `<div class="lingrp">${URG[u].i} ${URG[u].n} · ${l.length}</div>${l.map(x => `<div class="rfila"><span><b>${esc(x.p.nome)}</b> <small>${x.dias <= 0 ? 'possível zerado' : `~${Math.round(x.dias)} dias`} · ${esc(x.p.bairro || regNome(x.p.regiao))}${ehCanoas(x.p) ? ' · Canoas (Moisés)' : ''}${janelaTxt(x.p) ? ' · 🕘 ' + esc(janelaTxt(x.p)) : ''}</small></span><button class="mini" data-inc="${x.p.id}">+ pôr na rota</button>${outrosMot().map(m => `<button class="mini" data-passa="${x.p.id}" data-para="${m.id}">→ ${esc(m.nome)}</button>`).join('')}</div>`).join('')}` : ''; }).join('') || '<span style="color:var(--mute)">Todos os clientes já estão na rota.</span>'}
    ${R.tipo !== 'reposicao' ? `<div class="lingrp">🟣 Prospecção ${R.tipo === 'misto' ? '· até 500 m da rota entram sozinhos; busque outros' : ''}</div><div class="mbusca" style="max-width:420px"><input id="rProsp" autocomplete="off" placeholder="🔍 Pôr um prospect na rota…"><div id="rProspSug" class="sugs"></div></div>${k.foraP.length ? `<small style="color:var(--mute)">${k.foraP.length} prospect(s) perto da rota não couberam no horário.</small>` : ''}` : ''}
   </div></div></section>`;
   ligarRota(k, todas);
 }
 function ligarRota(k, todas) {
+  document.querySelectorAll('[data-passa]').forEach(b => b.onclick = () => passarCliente(b.dataset.passa, b.dataset.para));
   ligarCarga(carga(todas.filter(s => !k.feitos.has(s.id))));
   const R = RT.salvo, comStatus = () => (R.paradas || []).filter(x => x.status), troca = async patch => { await salvarRotaDia({ ...patch, paradas: comStatus() }); desenharRota(); };
   $('#rData').onchange = e => { RT.data = e.target.value; telaRota(); };
