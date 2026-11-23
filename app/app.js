@@ -1659,9 +1659,13 @@ async function telaRota() {
   RT.data = RT.data || hoje();
   try {
     await recarregar();
-    const [raw, perfis, salvo, vis] = await Promise.all([db.dadosRota(), RT.perfis.length ? RT.perfis : db.perfisTodos().catch(() => [S.eu]), db.obterRota(RT.data).catch(e => { RT.semTabela = true; return null; }), db.visitasDoDia(RT.data)]);
+    const [raw, perfis, doDia, vis] = await Promise.all([db.dadosRota(), RT.perfis.length ? RT.perfis : db.perfisTodos().catch(() => [S.eu]), db.rotasDoDia(RT.data).catch(e => { RT.semTabela = true; return []; }), db.visitasDoDia(RT.data)]);
     RT.raw = raw; RT.perfis = perfis; RT.visitas = vis; RT.prev = prever(raw, RT.data);
-    RT.salvo = salvo || { data: RT.data, motorista: S.eu.id, tipo: 'reposicao', inicio: '08:00', fim: '18:00', incluir: [], tirar: [], paradas: [] };
+    // cada pessoa tem a sua rota no dia: abre a de quem está escolhido em "Rota de" (padrão: quem está usando o app)
+    RT.motorista = RT.motorista || S.eu.id;
+    const salvo = doDia.find(r => r.motorista === RT.motorista);
+    RT.outras = doDia.filter(r => r.motorista !== RT.motorista);
+    RT.salvo = salvo || { data: RT.data, motorista: RT.motorista, tipo: 'reposicao', inicio: '08:00', fim: '18:00', incluir: [], tirar: [], paradas: [] };
   } catch (e) { return erro(e); }
   RT.salvo.data = RT.data;
   desenharRota();
@@ -1676,13 +1680,15 @@ function calcularRota() {
   const atendeHoje = p => !p.janela_dias?.length || p.janela_dias.includes(dow);
   // fila de reposição
   const fila = S.pdvs.filter(p => repoe(p) && p.lat).map(p => ({ p, ...RT.prev[p.id] })).filter(x => x.urg).sort((a, b) => a.dias - b.dias);
-  const entra = x => { if (tira.has(x.p.id)) return false; if (incl.has(x.p.id)) return true; if (R.tipo === 'prospeccao') return false;
+  // quem já está na rota do outro no mesmo dia não entra sozinho nesta
+  const doOutro = new Set((RT.outras || []).flatMap(r => [...(r.paradas || []).map(s => s.id), ...(r.incluir || [])]));
+  const entra = x => { if (tira.has(x.p.id)) return false; if (incl.has(x.p.id)) return true; if (doOutro.has(x.p.id)) return false; if (R.tipo === 'prospeccao') return false;
     if (!atendeHoje(x.p)) return false; if (ehCanoas(x.p) && !moises && x.urg !== 'ruptura') return false; return x.urg !== 'espera'; };
   const reps = fila.filter(entra).map(x => ({ id: x.p.id, tipo: 'rep', p: x.p, urg: x.urg, jan: jan(x.p), temJan: !!x.p.janela_periodo, serv: c.tempo_rep, livre: incl.has(x.p.id) }));
   // prospecções: no misto, até 500 m de alguma parada de reposição; na prospecção, as que você escolheu
   let prosps = [];
   if (R.tipo !== 'reposicao') {
-    const perto = S.pdvs.filter(p => PROSP_ETAPAS.includes(p.etapa) && p.lat && !tira.has(p.id) && atendeHoje(p) && (incl.has(p.id) || (R.tipo === 'misto' && reps.some(r => km(r.p, p) <= 0.5))));
+    const perto = S.pdvs.filter(p => PROSP_ETAPAS.includes(p.etapa) && p.lat && !tira.has(p.id) && (incl.has(p.id) || !doOutro.has(p.id)) && atendeHoje(p) && (incl.has(p.id) || (R.tipo === 'misto' && reps.some(r => km(r.p, p) <= 0.5))));
     prosps = perto.sort((a, b) => (b.potencial || 0) - (a.potencial || 0)).slice(0, 25).map(p => ({ id: p.id, tipo: 'prosp', p, urg: 'espera', jan: jan(p), serv: c.tempo_prosp }));
   }
   // clientes colocados à mão na rota (qualquer um, mesmo sem urgência ou consumidor final)
@@ -1716,7 +1722,7 @@ function calcularRota() {
     m = { ordem, sim: simLivre(ordem), foraRep: [], foraP: [] }; }
   else m = montarOrdem(reps.filter(pend), prosps.filter(pend), ini, fim, base, t0, pos0);
   const naoHoje = fila.filter(x => R.tipo !== 'prospeccao' && !tira.has(x.p.id) && x.urg !== 'espera' && !atendeHoje(x.p) && !incl.has(x.p.id));
-  return { base, ini, fim, t0, pos0, fixos, ordem: m.ordem, sim: m.sim, foraRep: m.foraRep, foraP: m.foraP, fila, naoHoje, moises, mot, st, feitos, manual };
+  return { base, ini, fim, t0, pos0, fixos, ordem: m.ordem, sim: m.sim, foraRep: m.foraRep, foraP: m.foraP, fila: fila.filter(x => incl.has(x.p.id) || !doOutro.has(x.p.id)), naoHoje: naoHoje.filter(x => !doOutro.has(x.p.id)), moises, mot, st, feitos, manual };
 }
 function carga(ordem) {
   const tot = {}; ordem.filter(s => s.tipo === 'rep').forEach(s => Object.entries(RT.prev[s.id]?.pedido || {}).forEach(([k, q]) => tot[k] = (tot[k] || 0) + q));
@@ -1737,7 +1743,7 @@ function linksMaps(base, ordem) {
 async function salvarRotaDia(patch, msg) {
   Object.assign(RT.salvo, patch);
   try { const { data, motorista, tipo, inicio, fim, incluir, tirar, paradas } = RT.salvo; RT.salvo = await db.salvarRota({ data, motorista, tipo, inicio, fim, incluir, tirar, paradas }); RT.salvo.data = data; RT.semTabela = false; if (msg) toast(msg); }
-  catch (e) { RT.semTabela = true; toast('Não salvou: rode o 019_dia_de_rota.sql no Supabase'); }
+  catch (e) { RT.semTabela = true; toast(/on conflict|unique or exclusion/i.test(e.message || '') ? 'Não salvou: rode o 031_rota_por_pessoa.sql no Supabase (uma rota para cada um no mesmo dia)' : 'Não salvou: rode o 019_dia_de_rota.sql no Supabase'); }
 }
 async function desenharRota() {
   let k = calcularRota();
@@ -1763,11 +1769,12 @@ function pintarRota(k) {
   const base = k.base;
   $('#main').innerHTML = `<section class="view on"><div class="route rotadia">
   <div class="toolbar"><h2 style="font-family:Fraunces,Georgia,serif;margin:0 10px 0 0">Dia de rota</h2>
-   <input type="date" id="rData" value="${R.data}"><label class="rlbl">Quem roda <select id="rMot">${RT.perfis.map(p => `<option value="${p.id}" ${p.id === R.motorista ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}</select></label>
+   <input type="date" id="rData" value="${R.data}"><label class="rlbl">Rota de <select id="rMot">${RT.perfis.map(p => `<option value="${p.id}" ${p.id === R.motorista ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}</select></label>
    <div class="seg" id="rTipo">${Object.entries(TIPOS_DIA).map(([t, n]) => `<button class="${R.tipo === t ? 'on' : ''}" data-t="${t}">${n}</button>`).join('')}</div>
    <label class="rlbl">das <input type="time" id="rIni" value="${R.inicio}"></label><label class="rlbl">às <input type="time" id="rFim" value="${R.fim}"></label></div>
   <div class="toolbar"><span class="rbase">🏠 Saída e volta: <b>${base.end ? esc(base.end) : '⚠️ endereço do Moisés não cadastrado (usando o centro de Canoas)'}</b> <button class="mini" id="rBase">alterar</button></span>
-   ${RT.semTabela ? '<span class="badge" style="background:#F3D6CF">Rode o 019_dia_de_rota.sql para salvar a rota</span>' : ''}</div>
+   ${RT.semTabela ? '<span class="badge" style="background:#F3D6CF">A rota não está salvando: rode o SQL indicado no aviso</span>' : ''}
+   ${(RT.outras || []).filter(r => (r.paradas || []).length || (r.incluir || []).length).map(r => `<span class="badge" style="background:#E8EEF7">🚗 Rota de ${esc(RT.perfis.find(p => p.id === r.motorista)?.nome || 'outro')} neste dia: ${(r.paradas || []).length || (r.incluir || []).length} parada(s) <a href="#" data-verrota="${r.motorista}">ver</a></span>`).join(' ')}</div>
   <div class="tiles rtiles"><div class="tile hi"><small>Paradas</small><b>${todas.length}</b><small>${nRep.length} reposição · ${nPr.length} prospecção</small></div>
    <div class="tile"><small>Volta para casa</small><b>${k.sim ? hhmm(k.sim.volta) : '—'}</b><small id="rKm">${k.sim ? `~${Math.round(k.sim.km)} km rodados` : ''}</small></div>
    <div class="tile"><small>🔵 Reposição</small><b>${feitosN(nRep)}/${nRep.length}</b><small>feitas</small></div>
@@ -1793,7 +1800,8 @@ function pintarRota(k) {
 function ligarRota(k, todas) {
   const R = RT.salvo, comStatus = () => (R.paradas || []).filter(x => x.status), troca = async patch => { await salvarRotaDia({ ...patch, paradas: comStatus() }); desenharRota(); };
   $('#rData').onchange = e => { RT.data = e.target.value; telaRota(); };
-  $('#rMot').onchange = e => troca({ motorista: e.target.value });
+  $('#rMot').onchange = e => { RT.motorista = e.target.value; telaRota(); }; // troca de rota (cada um tem a sua no dia)
+  document.querySelectorAll('[data-verrota]').forEach(a => a.onclick = e => { e.preventDefault(); RT.motorista = a.dataset.verrota; telaRota(); });
   $('#rTipo').onclick = e => { const t = e.target.dataset.t; if (t) troca({ tipo: t }); };
   $('#rIni').onchange = e => troca({ inicio: e.target.value }); $('#rFim').onchange = e => troca({ fim: e.target.value });
   const fixar = (manual = k.manual) => [...k.fixos, ...k.ordem].map(s => ({ id: s.id, tipo: s.tipo, status: (R.paradas || []).find(x => x.id === s.id)?.status || null, ...(manual ? { manual: true } : {}) }));
@@ -1816,15 +1824,20 @@ function ligarRota(k, todas) {
       card.classList.remove('arrastando'); cards.forEach(c => c.style.transform = '');
       if (alvo === i0) return; const ids = cards.map(c => c.dataset.id); ids.splice(alvo, 0, ids.splice(i0, 1)[0]); salvarOrdem(ids); };
     g.addEventListener('pointermove', mexe); g.addEventListener('pointerup', solta); g.addEventListener('pointercancel', solta); });
+  // cliente que está na rota do outro no mesmo dia: mostra de quem é e, se for posto aqui, sai de lá
+  const outraCom = id => (RT.outras || []).find(r => (r.paradas || []).some(s => s.id === id && !s.status) || (r.incluir || []).includes(id));
+  const noOutro = id => { const r = outraCom(id); return r ? (RT.perfis.find(p => p.id === r.motorista)?.nome || 'outro') : null; };
+  const tirarDoOutro = async id => { const r = outraCom(id); if (!r) return;
+    try { const nv = await db.salvarRota({ data: r.data, motorista: r.motorista, tipo: r.tipo, inicio: r.inicio, fim: r.fim, incluir: (r.incluir || []).filter(x => x !== id), tirar: [...new Set([...(r.tirar || []), id])], paradas: (r.paradas || []).filter(s => s.id !== id || s.status) }); Object.assign(r, nv); } catch (e) { erro(e); } };
   // busca para pôr qualquer cliente na rota (mesma busca do mapa: nome, razão social, bairro, cidade)
   const ligarBusca = (inp, box, filtro) => { if (!inp) return;
     const listar = () => { const t = norm(inp.value); if (t.length < 2) { box.style.display = 'none'; box.innerHTML = ''; return; }
       const l = S.pdvs.filter(p => p.etapa !== 'fechado' && filtro(p) && !todas.some(s => s.id === p.id) && norm([p.nome, p.razao_social, p.bairro, p.cidade].filter(Boolean).join(' ')).includes(t)).slice(0, 10);
-      box.innerHTML = l.map(p => `<div data-livre="${p.id}" ${p.lat ? '' : 'style="opacity:.55"'}><b>${esc(p.nome)}</b> <small style="color:${etapa(p.etapa).c};font-weight:700">${etapa(p.etapa).n}</small>${p.consumidor_final ? ' <small>· consumidor final</small>' : ''}<br><small style="color:var(--mute)">${esc([p.bairro, p.cidade].filter(Boolean).join(' · '))}${p.lat ? '' : ' · sem localização no mapa'}</small></div>`).join('') || '<div style="color:var(--mute)">Nenhum cliente encontrado</div>';
+      box.innerHTML = l.map(p => `<div data-livre="${p.id}" ${p.lat ? '' : 'style="opacity:.55"'}><b>${esc(p.nome)}</b> <small style="color:${etapa(p.etapa).c};font-weight:700">${etapa(p.etapa).n}</small>${p.consumidor_final ? ' <small>· consumidor final</small>' : ''}${noOutro(p.id) ? ` <small style="color:#3F6FA8">· na rota de ${esc(noOutro(p.id))} (passa para esta)</small>` : ''}<br><small style="color:var(--mute)">${esc([p.bairro, p.cidade].filter(Boolean).join(' · '))}${p.lat ? '' : ' · sem localização no mapa'}</small></div>`).join('') || '<div style="color:var(--mute)">Nenhum cliente encontrado</div>';
       box.style.display = 'block';
       box.querySelectorAll('[data-livre]').forEach(d => d.onmousedown = async e => { e.preventDefault(); const id = d.dataset.livre, p = S.pdvs.find(x => x.id === id);
         if (!p.lat) return toast('Esse cliente não tem localização: abra o perfil e use Ajustar localização ou Editar endereço');
-        box.style.display = 'none'; inp.value = ''; await salvarRotaDia({ incluir: [...new Set([...R.incluir, id])], tirar: R.tirar.filter(x => x !== id) }, p.nome + ' entrou na rota'); desenharRota(); }); };
+        box.style.display = 'none'; inp.value = ''; await tirarDoOutro(id); await salvarRotaDia({ incluir: [...new Set([...R.incluir, id])], tirar: R.tirar.filter(x => x !== id) }, p.nome + ' entrou na rota'); desenharRota(); }); };
     inp.oninput = listar; inp.onfocus = listar; inp.onblur = () => setTimeout(() => { box.style.display = 'none'; }, 150);
     inp.onkeydown = e => { if (e.key === 'Enter') box.querySelector('[data-livre]')?.dispatchEvent(new MouseEvent('mousedown')); if (e.key === 'Escape') { inp.value = ''; listar(); } }; };
   ligarBusca($('#rLivre'), $('#rLivreSug'), () => true);

@@ -171,8 +171,10 @@ export async function excluirPedido(id, visitaId) {
 
 /* ---------- dia de rota ---------- */
 export async function perfisTodos() { return ok(await sb.from('perfis').select('id, nome, papel').order('nome')); }
-export async function obterRota(data) { return ok(await sb.from('rotas').select('*').eq('data', data).maybeSingle()); }
-export async function salvarRota(obj) { return ok(await sb.from('rotas').upsert({ ...obj, atualizado_em: new Date().toISOString() }).select().single()); }
+// uma rota por pessoa por dia (SQL 031): traz todas as rotas do dia
+export async function rotasDoDia(data) { return ok(await sb.from('rotas').select('*').eq('data', data)); }
+export async function obterRota(data, motorista) { return ok(await sb.from('rotas').select('*').eq('data', data).eq('motorista', motorista).maybeSingle()); }
+export async function salvarRota(obj) { return ok(await sb.from('rotas').upsert({ ...obj, atualizado_em: new Date().toISOString() }, { onConflict: 'data,motorista' }).select().single()); }
 // o que a rota precisa para prever a ruptura e montar a carga: pedidos com itens e a última contagem de cada ponto
 export async function dadosRota() {
   const desde = new Date(Date.now() - 365 * 864e5).toISOString(), desdeC = new Date(Date.now() - 180 * 864e5).toISOString();
