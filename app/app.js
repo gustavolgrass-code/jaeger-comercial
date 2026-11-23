@@ -32,7 +32,8 @@ const ROTA_ETAPAS = ['ativo', 'avaliacao', 'risco', 'revisao'];
 const repoe = p => !!p && ROTA_ETAPAS.includes(p.etapa) && !p.consumidor_final;
 const FORMAS = ['Boleto', 'Pix', 'Cartão', 'Dinheiro'];
 // kits mais pedidos (pelos pedidos do Bling): código do produto no Bling → quantidade
-const KITS = [{ n: 'Brownie 32', q: { B1: 8, B2: 8, B3: 8, B4: 8 } }, { n: 'Cookies 32', q: { C1: 8, C2: 8, C3: 8, C4: 8 } }, { n: 'Palha 45', q: { P1: 18, P2: 18, P3: 9 } }];
+// também são as caixas da carga do carro: 1 cx de brownie = 32, de cookie = 36, de palha = 45
+const KITS = [{ n: 'Brownie 32', q: { B1: 8, B2: 8, B3: 8, B4: 8 } }, { n: 'Cookies 36', q: { C1: 9, C2: 9, C3: 9, C4: 9 } }, { n: 'Palha 45', q: { P1: 18, P2: 18, P3: 9 } }];
 const prazoDias = c => { const m = /(\d+) dias/.exec(c || ''); return m ? +m[1] : 0; };
 
 /* =================== estado =================== */
@@ -1661,6 +1662,7 @@ async function telaRota() {
     await recarregar();
     const [raw, perfis, doDia, vis] = await Promise.all([db.dadosRota(), RT.perfis.length ? RT.perfis : db.perfisTodos().catch(() => [S.eu]), db.rotasDoDia(RT.data).catch(e => { RT.semTabela = true; return []; }), db.visitasDoDia(RT.data)]);
     RT.raw = raw; RT.perfis = perfis; RT.visitas = vis; RT.prev = prever(raw, RT.data);
+    RT.cont = await db.contagensDasVisitas(vis.filter(v => v.tipo === 'reposicao').map(v => v.id)).catch(() => []);
     // cada pessoa tem a sua rota no dia: abre a de quem está escolhido em "Rota de" (padrão: quem está usando o app)
     RT.motorista = RT.motorista || S.eu.id;
     const salvo = doDia.find(r => r.motorista === RT.motorista);
@@ -1682,7 +1684,8 @@ function calcularRota() {
   const fila = S.pdvs.filter(p => repoe(p) && p.lat).map(p => ({ p, ...RT.prev[p.id] })).filter(x => x.urg).sort((a, b) => a.dias - b.dias);
   // quem já está na rota do outro no mesmo dia não entra sozinho nesta
   const doOutro = new Set((RT.outras || []).flatMap(r => [...(r.paradas || []).map(s => s.id), ...(r.incluir || [])]));
-  const entra = x => { if (tira.has(x.p.id)) return false; if (incl.has(x.p.id)) return true; if (doOutro.has(x.p.id)) return false; if (R.tipo === 'prospeccao') return false;
+  const encs = S.base.regras.encomendas || {};
+  const entra = x => { if (tira.has(x.p.id)) return false; if (incl.has(x.p.id)) return true; if (doOutro.has(x.p.id)) return false; if (encs[x.p.id]) return true; if (R.tipo === 'prospeccao') return false;
     if (!atendeHoje(x.p)) return false; if (ehCanoas(x.p) && !moises && x.urg !== 'ruptura') return false; return x.urg !== 'espera'; };
   const reps = fila.filter(entra).map(x => ({ id: x.p.id, tipo: 'rep', p: x.p, urg: x.urg, jan: jan(x.p), temJan: !!x.p.janela_periodo, serv: c.tempo_rep, livre: incl.has(x.p.id) }));
   // prospecções: no misto, até 500 m de alguma parada de reposição; na prospecção, as que você escolheu
@@ -1692,7 +1695,7 @@ function calcularRota() {
     prosps = perto.sort((a, b) => (b.potencial || 0) - (a.potencial || 0)).slice(0, 25).map(p => ({ id: p.id, tipo: 'prosp', p, urg: 'espera', jan: jan(p), serv: c.tempo_prosp }));
   }
   // clientes colocados à mão na rota (qualquer um, mesmo sem urgência ou consumidor final)
-  R.incluir.forEach(id => { if (tira.has(id) || reps.some(x => x.id === id) || prosps.some(x => x.id === id)) return; const p = S.pdvs.find(q => q.id === id); if (!p || !p.lat) return;
+  [...R.incluir, ...Object.keys(encs).filter(id => !doOutro.has(id))].forEach(id => { if (tira.has(id) || reps.some(x => x.id === id) || prosps.some(x => x.id === id)) return; const p = S.pdvs.find(q => q.id === id); if (!p || !p.lat) return;
     const pr = PROSP_ETAPAS.includes(p.etapa); (pr ? prosps : reps).push({ id, tipo: pr ? 'prosp' : 'rep', p, urg: RT.prev[id]?.urg || 'espera', jan: jan(p), temJan: !!p.janela_periodo, serv: pr ? c.tempo_prosp : c.tempo_rep, livre: true }); });
   // rota já em andamento: o que foi feito fica, o resto é recalculado a partir de agora
   const st = Object.fromEntries((R.paradas || []).map(s => [s.id, s.status]));
@@ -1736,20 +1739,29 @@ function cargaFinal(cg) { const aj = RT.salvo?.carga; const sug = Object.fromEnt
   return { aj: true, q: Object.fromEntries(Object.entries(aj).map(([k, v]) => [k, +v]).filter(([, v]) => v > 0)) }; }
 function painelCarga(cg) {
   const { aj, q } = cargaFinal(cg), prev = Object.fromEntries(cg.map(x => [x.p.id, x.q]));
-  const ids = [...new Set([...cg.map(x => String(x.p.id)), ...Object.keys(q)])], prods = S.base.produtos.filter(p => ids.includes(String(p.id)));
+  const saiu = RT.saiu || {}, temSaida = Object.values(saiu).some(v => v > 0);
+  const ids = [...new Set([...cg.map(x => String(x.p.id)), ...Object.keys(q), ...Object.keys(saiu).filter(k => saiu[k] > 0)])], prods = S.base.produtos.filter(p => ids.includes(String(p.id)));
   const nome = p => `${esc(p.linha.split(' ')[0])} · ${esc(p.sabor)}`, outros = S.base.produtos.filter(p => !ids.includes(String(p.id)));
   return `<h3 style="margin-top:0">🚗 Carga do carro <small style="font-weight:400;color:var(--mute)">· ${aj ? '<b style="color:var(--choc)">ajustada à mão</b>' : 'sugestão: pedido esperado de cada parada + 10% para trocas'}</small></h3>
-   ${prods.length ? `<table class="rcarga"><tr><th>Produto</th><th>Previsto</th><th>Levar</th></tr>${prods.map(p => `<tr><td>${nome(p)}</td><td>${prev[p.id] || '—'}</td><td><input type="number" min="0" inputmode="numeric" class="cgq" data-cg="${p.id}" value="${q[p.id] || 0}" style="width:70px"></td></tr>`).join('')}
-    <tr><td><b>Total</b></td><td>${cg.reduce((a, x) => a + x.q, 0)}</td><td><b id="cgTot">${Object.values(q).reduce((a, b) => a + b, 0)}</b></td></tr></table>` : '<span style="color:var(--mute)">Sem reposições na rota. Dá para montar a carga à mão abaixo.</span>'}
+   ${prods.length ? `<table class="rcarga"><tr><th>Produto</th><th>Previsto</th><th>Levar</th>${temSaida ? '<th>Saiu</th><th>Sobra</th>' : ''}</tr>${prods.map(p => `<tr><td>${nome(p)}</td><td>${prev[p.id] || '—'}</td><td><input type="number" min="0" inputmode="numeric" class="cgq" data-cg="${p.id}" value="${q[p.id] || 0}" style="width:70px"></td>${temSaida ? `<td>${saiu[p.id] || 0}</td><td class="cgsob" data-sob="${p.id}" style="${(q[p.id] || 0) - (saiu[p.id] || 0) < 0 ? 'color:#B8402A;font-weight:700' : ''}">${(q[p.id] || 0) - (saiu[p.id] || 0)}</td>` : ''}</tr>`).join('')}
+    <tr><td><b>Total</b></td><td>${cg.reduce((a, x) => a + x.q, 0)}</td><td><b id="cgTot">${Object.values(q).reduce((a, b) => a + b, 0)}</b></td>${temSaida ? `<td>${Object.values(saiu).reduce((a, b) => a + b, 0)}</td><td></td>` : ''}</tr></table>
+    <small style="color:var(--mute)">Em caixas: ${KITS.map(kt => { const tot = Object.keys(kt.q).reduce((a, cod) => { const pr = S.base.produtos.find(x => x.bling_codigo === cod); return a + (pr ? q[pr.id] || 0 : 0); }, 0), cx = Object.values(kt.q).reduce((a, b) => a + b, 0); return `${kt.n.split(' ')[0]} ${dec(tot / cx)} cx`; }).join(' · ')}</small>` : '<span style="color:var(--mute)">Sem reposições na rota. Monte a carga com as caixas abaixo.</span>'}
+   <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px"><b style="font-size:13px">Caixas:</b>${KITS.map((kt, i) => `<span class="cxbtn"><button class="mini" data-cxm="${i}" title="Tirar 1 caixa">−</button><button class="mini" data-cx="${i}" title="Somar 1 caixa: ${Object.entries(kt.q).map(([c, n]) => n + ' ' + (S.base.produtos.find(x => x.bling_codigo === c)?.sabor || c)).join(', ')}">+1 cx ${kt.n}</button></span>`).join('')}</div>
    <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px">${outros.length ? `<select id="cgAdd" style="max-width:220px"><option value="">+ outro produto…</option>${outros.map(p => `<option value="${p.id}">${nome(p)}</option>`).join('')}</select>` : ''}${aj ? '<button class="mini" id="cgReset">voltar à sugestão</button>' : ''}<small id="cgSalvo" style="color:var(--mute)"></small></div>`;
 }
 function ligarCarga(cg) {
   const box = $('#rCarga'); if (!box) return; let tm = null;
   const salvar = carga => { clearTimeout(tm); tm = setTimeout(async () => { await salvarRotaDia({ carga }); const el = $('#cgSalvo'); if (el && !RT.semTabela) el.textContent = carga ? '✓ carga salva' : ''; }, 500); };
   const ler = () => Object.fromEntries([...box.querySelectorAll('[data-cg]')].map(i => [i.dataset.cg, Math.max(0, Math.round(+i.value || 0))]));
-  box.querySelectorAll('[data-cg]').forEach(i => i.oninput = () => { const c = ler(); $('#cgTot').textContent = Object.values(c).reduce((a, b) => a + b, 0); salvar(c); });
+  box.querySelectorAll('[data-cg]').forEach(i => i.oninput = () => { const c = ler(); $('#cgTot').textContent = Object.values(c).reduce((a, b) => a + b, 0);
+    box.querySelectorAll('[data-sob]').forEach(t => { const v = (c[t.dataset.sob] || 0) - ((RT.saiu || {})[t.dataset.sob] || 0); t.textContent = v; t.style.color = v < 0 ? '#B8402A' : ''; }); salvar(c); });
   if ($('#cgAdd')) $('#cgAdd').onchange = e => { if (!e.target.value) return; const c = { ...cargaFinal(cg).q, ...ler(), [e.target.value]: 1 }; RT.salvo.carga = c; box.innerHTML = painelCarga(cg); ligarCarga(cg); salvar(c); };
   if ($('#cgReset')) $('#cgReset').onclick = () => { RT.salvo.carga = null; box.innerHTML = painelCarga(cg); ligarCarga(cg); salvar(null); };
+  // caixa fechada: soma (ou tira) a composição da caixa em "Levar"
+  const caixa = (i, sinal) => { const c = { ...cargaFinal(cg).q, ...ler() }; Object.entries(KITS[i].q).forEach(([cod, n]) => { const pr = S.base.produtos.find(x => x.bling_codigo === cod); if (pr) c[pr.id] = Math.max(0, (c[pr.id] || 0) + sinal * n); });
+    RT.salvo.carga = c; box.innerHTML = painelCarga(cg); ligarCarga(cg); salvar(c); };
+  box.querySelectorAll('[data-cx]').forEach(b => b.onclick = () => caixa(+b.dataset.cx, 1));
+  box.querySelectorAll('[data-cxm]').forEach(b => b.onclick = () => caixa(+b.dataset.cxm, -1));
 }
 // as outras pessoas que podem rodar (para "jogar" um cliente para a rota delas)
 const outrosMot = () => (RT.perfis || []).filter(p => p.id !== RT.salvo?.motorista);
@@ -1789,13 +1801,16 @@ function pintarRota(k) {
     const u = URG[pv.urg] || URG.espera, rep = s.tipo === 'rep';
     return `<div class="stop rstop ${est ? 'done' : ''}" data-id="${p.id}">${!est && i >= k.fixos.length ? `<div class="grip" data-grip="${p.id}" title="Arraste para mudar a ordem">⠿</div>` : ''}<div class="n" style="background:${corPin(s, est)}">${est === 'feito' ? '✓' : est === 'ausente' ? '🚪' : i + 1}</div>
      <div class="info"><div class="rhora">${est === 'feito' ? '✅ feito' : est === 'ausente' ? '🚪 não estava' : h ? `${hhmm(h.comeca)}${h.espera > 4 ? ` <small>(chega ${hhmm(h.chega)}, espera ${Math.round(h.espera)} min)</small>` : ''}${h.foraJanela ? ' <small style="color:#B8402A">⚠️ fora do horário do cliente</small>' : ''}` : ''}</div>
-      <b>${esc(p.nome)}</b> ${est ? '' : rep ? `<span class="badge" style="background:${u.c}22">${u.i} ${pv.dias <= 0 ? 'possível zerado' : `~${Math.round(pv.dias)} dia${Math.round(pv.dias) === 1 ? '' : 's'}`}</span>` : '<span class="badge" style="background:#7B4FC022">🟣 prospecção</span>'}
+      <b class="lnkperfil" data-perfil="${p.id}" title="Abrir o perfil do negócio">${esc(p.nome)}</b>${(S.base.regras.encomendas || {})[p.id] && !est ? ' <span class="badge" style="background:#E3F0E7" title="Pedido já combinado">📦 encomenda feita' + ((S.base.regras.encomendas[p.id].obs || '').match(/whats/i) ? ' pelo WhatsApp' : '') + '</span>' : ''} ${est ? '' : rep ? `<span class="badge" style="background:${u.c}22">${u.i} ${pv.dias <= 0 ? 'possível zerado' : `~${Math.round(pv.dias)} dia${Math.round(pv.dias) === 1 ? '' : 's'}`}</span>` : '<span class="badge" style="background:#7B4FC022">🟣 prospecção</span>'}
       ${p.precisa_dono !== false && (p.janela_dias?.length || p.janela_periodo) ? ' <span title="Precisa do dono">🔒</span>' : ''}${ehCanoas(p) ? ' <span class="badge">Canoas</span>' : ''}
       <br><small style="color:var(--mute)">${esc(p.bairro || '')}${janelaTxt(p) ? ' · 🕘 ' + esc(janelaTxt(p)) : ' · sem janela cadastrada'}${rep && pv.deixado != null ? ` · deixado ${pv.deixado} un. em ${dstr(pv.deixadoEm)}${pv.estoque != null ? ` · estimado ~${Math.round(pv.estoque)}` : ''}` : ''}${rep && pv.un ? ` · repor ~${pv.un} un.` : ''}${rep ? ` · previsão por ${pv.fonte}` : ''}</small></div>
      ${est === 'feito' && rep && RT.visitas.some(v => v.pdv_id === p.id && v.tipo === 'reposicao') ? `<div class="racoes"><button class="mini reabrir" data-reab="${p.id}">reabrir reposição</button></div>` : ''}${est ? '' : `<div class="racoes">${rep ? `<button class="btn pri" data-rep="${p.id}">Repor</button>` : `<button class="btn pri" data-pv="${p.id}">Visitei</button>`}<button class="mini" data-aus="${p.id}">não estava</button><button class="mini" data-tira="${p.id}">tirar</button>${outrosMot().map(m => `<button class="mini" data-passa="${p.id}" data-para="${m.id}" title="Passar para a rota de ${esc(m.nome)}">→ ${esc(m.nome)}</button>`).join('')}</div>`}</div>`; };
   const nRep = todas.filter(s => s.tipo === 'rep'), nPr = todas.filter(s => s.tipo === 'prosp');
   const feitosN = l => l.filter(s => k.feitos.has(s.id) || k.st[s.id] === 'feito').length;
   const cg = carga(todas.filter(s => !k.feitos.has(s.id)));
+  // o que já saiu do carro hoje nas reposições desta rota (inclui trocas e bonificação)
+  const ids = new Set(todas.map(s => s.id)), vRota = new Set((RT.visitas || []).filter(v => v.tipo === 'reposicao' && ids.has(v.pdv_id)).map(v => v.id));
+  RT.saiu = {}; (RT.cont || []).filter(c => vRota.has(c.visita_id)).forEach(c => RT.saiu[c.produto_id] = (RT.saiu[c.produto_id] || 0) + (c.reposto || 0));
   const foraLista = [...k.foraRep.map(s => ({ p: s.p, m: 'não cabe no horário' })), ...k.naoHoje.map(x => ({ p: x.p, m: 'não atende neste dia' }))];
   const naFila = k.fila.filter(x => !todas.some(s => s.id === x.p.id) && !foraLista.some(f => f.p.id === x.p.id));
   const base = k.base;
@@ -1813,7 +1828,7 @@ function pintarRota(k) {
    <div class="tile"><small>🟣 Prospecção</small><b>${feitosN(nPr)}/${nPr.length}</b><small>visitadas</small></div></div>
   <div class="rgrid"><div>
    <div class="toolbar">${todas.length ? linksMaps(base, k.ordem).map(l => `<a class="btn car" href="${l.url}" target="_blank" rel="noopener" style="text-decoration:none">Google Maps · paradas ${l.n} ↗</a>`).join('') : ''}
-    ${k.manual ? '<span class="badge" style="background:#F7E9DD">✋ ordem definida à mão</span>' : ''}<button class="btn" id="rRecalc">${k.manual ? '↻ Voltar à ordem automática' : '↻ Recalcular o resto'}</button><button class="btn pri" id="rSalvar">${R.paradas?.length ? 'Salvar rota' : 'Começar a rota'}</button></div>
+    ${k.manual ? '<span class="badge" style="background:#F7E9DD">✋ ordem definida à mão</span>' : ''}<button class="btn" id="rRecalc">${k.manual ? '↻ Voltar à ordem automática' : '↻ Recalcular o resto'}</button>${R.data === hoje() ? '<button class="btn car" id="rComecar" title="Começa agora: refaz a previsão de horário a partir deste momento">▶ Começar rota agora</button>' : ''}<button class="btn pri" id="rSalvar">Salvar rota</button></div>
    <div class="stop rstop rcasa"><div class="n">🏠</div><div class="info"><div class="rhora">${R.inicio}</div><b>Saída</b> <small style="color:var(--mute)">carregar o carro (lista abaixo)</small></div></div>
    ${todas.map((s, i) => linha(s, i, i >= k.fixos.length ? hs[i - k.fixos.length] : null)).join('') || '<div class="empty">Nenhuma parada para este dia. Escolha clientes na fila abaixo.</div>'}
    ${todas.length ? `<div class="stop rstop rcasa"><div class="n">🏠</div><div class="info"><div class="rhora">${k.sim ? hhmm(k.sim.volta) : ''}</div><b>Volta</b></div></div>` : ''}
@@ -1839,6 +1854,9 @@ function ligarRota(k, todas) {
   $('#rIni').onchange = e => troca({ inicio: e.target.value }); $('#rFim').onchange = e => troca({ fim: e.target.value });
   const fixar = (manual = k.manual) => [...k.fixos, ...k.ordem].map(s => ({ id: s.id, tipo: s.tipo, status: (R.paradas || []).find(x => x.id === s.id)?.status || null, ...(manual ? { manual: true } : {}) }));
   $('#rSalvar').onclick = async () => { await salvarRotaDia({ paradas: fixar() }, 'Rota salva'); desenharRota(); };
+  if ($('#rComecar')) $('#rComecar').onclick = async () => { const n = new Date(), hm = `${String(n.getHours()).padStart(2, '0')}:${String(n.getMinutes()).padStart(2, '0')}`;
+    await salvarRotaDia({ inicio: hm, fim: minDe(R.fim) <= minDe(hm) ? '22:00' : R.fim, paradas: fixar() }, `Rota começou às ${hm}: horários recalculados`); desenharRota(); };
+  document.querySelectorAll('[data-perfil]').forEach(b => b.onclick = () => abrirPerfil(b.dataset.perfil));
   $('#rRecalc').onclick = async () => { await salvarRotaDia({ paradas: fixar(false) }, k.manual ? 'Voltou para a ordem automática' : 'Rota recalculada a partir de agora'); desenharRota(); };
   // arrastar a parada pela alça ⠿: solta no lugar novo e a rota (horários e links do Google Maps) é refeita nessa ordem
   const salvarOrdem = async ids => { const l = [...k.fixos, ...ids.map(id => k.ordem.find(s => s.id === id))], y = window.scrollY;
@@ -1902,7 +1920,7 @@ function ligarRota(k, todas) {
       try { const d = await db.dadosReabrir(v.id);
         if (d.pedido?.bling_id) await db.bling('excluir_pedido', { pedido_id: d.pedido.id });
         if (d.pedido) await db.excluirPedido(d.pedido.id, v.id); else await db.excluirPedido('00000000-0000-0000-0000-000000000000', v.id);
-        S.reabrir = { pdvId: p.id, contagens: d.contagens, condicao: d.pedido?.condicao, vencimento: d.pedido?.vencimento };
+        S.reabrir = { pdvId: p.id, contagens: d.contagens, condicao: d.pedido?.condicao, vencimento: d.pedido?.vencimento, bonif: Object.fromEntries((d.itens || []).filter(i => i.bonificado).map(i => [i.produto_id, i.bonificado])) };
         fecharModal(); toast(d.pedido?.bling_id ? `Pedido nº ${d.pedido.bling_pedido_id || d.pedido.bling_id} excluído do Bling` : 'Reposição reaberta'); await recarregar(); S.contando = p.id; irPara('reposicao');
       } catch (e) { fecharModal(); modal(`<h3>Não deu para reabrir</h3><p style="font-size:13px;color:#7A2414">${esc(e.message)}</p><p style="color:var(--soft)">Nada foi apagado no app. Se o Bling recusou (por exemplo, pedido já faturado), cancele por lá primeiro.</p><div class="row" style="justify-content:flex-end"><button class="btn pri" onclick="fecharModal()">Ok</button></div>`); } }; });
   $('#rBase').onclick = () => { const b = baseRota();
@@ -1945,6 +1963,57 @@ async function caminhoRuas(pts) {
     return CAM[chave] = { coords: rt.geometry.coordinates.map(([ln, la]) => [la, ln]), km: rt.distance / 1000, min: rt.duration / 60 };
   } catch { return null; } }
 
+/* =================== pagamento (mesmo jeito da Nova venda: forma, boletos, dividir, entrega) =================== */
+function blocoPag(px, forma, venc) {
+  return `<div id="${px}Pag"><div class="row" style="flex-wrap:wrap;gap:14px;align-items:flex-end"><div class="pay pgf" style="margin:0">${FORMAS.map(c => `<label><input type="radio" name="${px}c" value="${c}" ${c === forma ? 'checked' : ''}> ${c}</label>`).join('')}</div>
+   <div class="pgvb"><label class="lb">Vencimento</label><input class="pgv" type="date" value="${venc || isoDe(new Date(Date.now() + (forma === 'Dinheiro' ? 0 : 7) * DIA))}"></div>
+   <div class="pgnb"><label class="lb">Boletos</label><div class="nbol">${[1, 2, 3, 4].map(n => `<button type="button" data-nb="${n}" class="${n === 1 ? 'on' : ''}">${n}×</button>`).join('')}</div></div></div>
+  <label class="chkcomp"><input type="checkbox" class="pgdiv"> Dividir o pagamento (entrada, vários boletos, Pix + cartão…)</label>
+  <label class="chkcomp"><input type="checkbox" class="pgfr"> 🚚 Entrega terceirizada</label>
+  <div class="divpag pgfrbox" hidden><div class="row"><label class="lb" style="margin:0">Custo da entrega</label><input class="pgfrv" type="number" step="0.01" min="0" inputmode="decimal" placeholder="R$" style="width:120px"></div>
+   <div class="row frq"><label><input type="radio" name="${px}fq" value="1" checked> Cobrar do cliente <small>(soma no pedido)</small></label><label><input type="radio" name="${px}fq" value="0"> Por nossa conta <small>(só registra o custo)</small></label></div></div>
+  <div class="divpag pgdivbox" hidden><div class="pgparc"></div><div class="row" style="justify-content:space-between"><button type="button" class="mini pgadd">+ parcela</button><small class="pginfo" style="color:var(--mute)"></small></div></div></div>`;
+}
+// liga o bloco; base() devolve o total dos itens; muda() é chamado quando algo do pagamento muda. Devolve { total, ler, preencher }
+function ligarPag(px, base, muda = () => { }) {
+  const R = document.getElementById(px + 'Pag'), q = sel => R.querySelector(sel), qa = sel => [...R.querySelectorAll(sel)];
+  const cond = () => R.querySelector(`input[name=${px}c]:checked`).value;
+  const frete = () => { const on = q('.pgfr').checked, v = on ? Math.round((+q('.pgfrv').value || 0) * 100) / 100 : 0; return { v, cobrado: on && v > 0 && R.querySelector(`input[name=${px}fq]:checked`)?.value === '1' }; };
+  const total = () => { const f = frete(); return Math.round((base() + (f.cobrado ? f.v : 0)) * 100) / 100; };
+  const vencDe = (f, i) => isoDe(new Date(Date.now() + (f === 'Boleto' ? 7 * (i + 1) : 0) * DIA));
+  const linha = (f, i, v = '', d) => `<div class="row parc"><select class="pf">${FORMAS.map(x => `<option ${x === f ? 'selected' : ''}>${x}</option>`).join('')}</select><input class="pv" type="number" step="0.01" min="0" inputmode="decimal" placeholder="Valor" value="${v}"><b class="pr" hidden></b><input class="pd" type="date" value="${d || vencDe(f, i)}"><button type="button" class="mini px" title="Tirar parcela">✕</button></div>`;
+  const resto = () => { const ls = qa('.parc'); if (!ls.length) return; const tot = total(), pagos = ls.slice(0, -1).reduce((a, l) => a + (+l.querySelector('.pv').value || 0), 0), r = Math.round((tot - pagos) * 100) / 100;
+    ls[ls.length - 1].querySelector('.pr').textContent = brl(Math.max(0, r)); q('.pginfo').textContent = r < 0 ? 'as parcelas passam do total' : `${ls.length} parcelas · total ${brl(tot)}`; };
+  const ligarParc = () => { const ls = qa('.parc');
+    ls.forEach((l, i) => { const ult = i === ls.length - 1; l.querySelector('.pv').hidden = ult; l.querySelector('.pr').hidden = !ult; l.querySelector('.px').hidden = ls.length <= 2;
+      l.querySelector('.pv').oninput = () => { resto(); muda(); }; l.querySelector('.pf').onchange = e => { const nB = ls.slice(0, i).filter(x => x.querySelector('.pf').value === 'Boleto').length; l.querySelector('.pd').value = vencDe(e.target.value, nB); };
+      l.querySelector('.px').onclick = () => { l.remove(); ligarParc(); resto(); muda(); }; }); };
+  const montar = lista => { q('.pgparc').innerHTML = lista.map((x, i) => linha(x.f, i, x.v ?? '', x.d)).join(''); ligarParc(); resto(); };
+  const abrirDiv = on => { q('.pgdiv').checked = on; q('.pgdivbox').hidden = !on; q('.pgf').classList.toggle('apagado', on); q('.pgvb').classList.toggle('apagado', on); };
+  const mostraNB = () => { q('.pgnb').hidden = cond() !== 'Boleto'; };
+  q('.pgdiv').onchange = () => { abrirDiv(q('.pgdiv').checked); if (q('.pgdiv').checked && !qa('.parc').length) montar([{ f: 'Pix', v: '' }, { f: cond() === 'Boleto' ? 'Boleto' : 'Cartão' }]); muda(); };
+  q('.pgfr').onchange = () => { q('.pgfrbox').hidden = !q('.pgfr').checked; resto(); muda(); }; q('.pgfrv').oninput = () => { resto(); muda(); };
+  qa(`input[name=${px}fq]`).forEach(x => x.onchange = () => { resto(); muda(); });
+  q('.pgadd').onclick = () => { const ls = qa('.parc'); if (ls.length >= 6) return toast('Até 6 parcelas'); q('.pgparc').insertAdjacentHTML('beforeend', linha(ls[ls.length - 1]?.querySelector('.pf').value || 'Boleto', ls.length)); ligarParc(); resto(); };
+  qa('[data-nb]').forEach(b => b.onclick = () => { const n = +b.dataset.nb; qa('[data-nb]').forEach(x => x.classList.toggle('on', x === b));
+    if (n === 1) { abrirDiv(false); q('.pgparc').innerHTML = ''; muda(); return; }
+    const tot = total(), cada = tot ? Math.floor(tot / n * 100) / 100 : ''; abrirDiv(true); montar(Array.from({ length: n }, () => ({ f: 'Boleto', v: cada }))); muda(); });
+  qa(`input[name=${px}c]`).forEach(x => x.onchange = () => { mostraNB(); q('.pgv').value = isoDe(new Date(Date.now() + (cond() === 'Dinheiro' ? 0 : 7) * DIA)); muda(); });
+  mostraNB();
+  // lê o que foi escolhido: condição (ex.: "2× Boleto", "Pix + Boleto"), vencimento final e os campos extras do pedido
+  const ler = () => { const tot = total(), ls = qa('.parc'), div = q('.pgdiv').checked && ls.length > 1; let soma = 0;
+    const parc = div ? ls.map((l, i) => { const ult = i === ls.length - 1, v = ult ? Math.round((tot - soma) * 100) / 100 : Math.round((+l.querySelector('.pv').value || 0) * 100) / 100; soma += v; return { forma: l.querySelector('.pf').value, valor: v, vencimento: l.querySelector('.pd').value || null }; }) : [];
+    const fp = [...new Set(parc.map(x => x.forma))], f = frete();
+    const condicao = div ? (fp.length === 1 ? `${parc.length}× ${fp[0]}` : fp.join(' + ')) : cond();
+    return { ok: !div || parc.every(x => x.valor > 0), condicao, forma: cond(), total: tot, vencimento: div ? parc.map(x => x.vencimento).filter(Boolean).sort().pop() || null : (q('.pgv').value || null), parcelas: parc, frete: f,
+      extra: { ...(div ? { pagamentos: parc } : {}), ...(f.v ? { frete: f.v, frete_cobrado: f.cobrado } : {}) } }; };
+  // repõe um pagamento guardado (encomenda)
+  const preencher = g => { if (!g) return; const r = R.querySelector(`input[name=${px}c][value="${g.forma}"]`); if (r) r.checked = true; mostraNB(); if (g.vencimento) q('.pgv').value = g.vencimento;
+    if (g.frete?.v) { q('.pgfr').checked = true; q('.pgfrbox').hidden = false; q('.pgfrv').value = g.frete.v; const fq = R.querySelector(`input[name=${px}fq][value="${g.frete.cobrado ? 1 : 0}"]`); if (fq) fq.checked = true; }
+    if (g.parcelas?.length > 1) { abrirDiv(true); montar(g.parcelas.map(x => ({ f: x.forma, v: x.valor, d: x.vencimento }))); } };
+  return { total, ler, preencher, resto };
+}
+
 /* =================== reposição (contagem) =================== */
 function stepper(cls, v, peq, attrs = '') { return `<div class="stp ${peq ? 'sm' : ''}"><button type="button" data-d="-1" aria-label="menos">−</button><input type="number" min="0" inputmode="numeric" class="${cls}" value="${v}" ${attrs}><button type="button" data-d="1" aria-label="mais">+</button></div>`; }
 function ligarSteppers(raiz) {
@@ -1959,12 +2028,15 @@ async function telaReposicao() {
   $('#main').innerHTML = '<section class="view on"><div class="loading">Carregando a última contagem…</div></section>';
   let ant, dx, precos = {}; try { [dx, precos] = await Promise.all([db.ultimoDeixado(p.id), db.precosCliente(p.id).catch(() => ({}))]); ant = dx.por; } catch (e) { return erro(e); }
   // reabrindo uma reposição: volta com os números que foram lançados
-  const re = S.reabrir && S.reabrir.pdvId === p.id ? S.reabrir : null, reC = re ? Object.fromEntries(re.contagens.map(c => [c.produto_id, c])) : {};
+  const re = S.reabrir && S.reabrir.pdvId === p.id ? S.reabrir : null, reC = re ? Object.fromEntries(re.contagens.map(c => [c.produto_id, c])) : {}, reB = re?.bonif || {};
+  // encomenda feita antes (ex.: pelo WhatsApp): volta com o pedido e o pagamento guardados
+  const enc = !re && (S.base.regras.encomendas || {})[p.id], encL = enc?.linhas || {};
   if (re) ant = Object.fromEntries(re.contagens.map(c => [c.produto_id, c.deixado_anterior]));
   const ex = expo(p.expositor_id), cons = p.condicao === 'Consignado';
   const preco = pr => Number(precos[pr.id] ?? pr.preco);
   const formaIni = re?.condicao && FORMAS.includes(re.condicao) ? re.condicao : FORMAS.includes(p.condicao) ? p.condicao : 'Boleto';
-  let h = `<section class="view on"><div class="count"><div class="toolbar"><h2 style="font-family:Fraunces,Georgia,serif;margin:0">${esc(p.nome)}</h2><span class="badge">Expositor ${esc(ex.nome)} · ${ex.capacidade} un.</span>${re ? '<span class="badge" style="background:#FBEBD3">Reabrindo a reposição</span>' : ''}</div>
+  let h = `<section class="view on"><div class="count"><div class="toolbar"><h2 style="font-family:Fraunces,Georgia,serif;margin:0">${esc(p.nome)}</h2><span class="badge">Expositor ${esc(ex.nome)} · ${ex.capacidade} un.</span>${re ? '<span class="badge" style="background:#FBEBD3">Reabrindo a reposição</span>' : ''}${enc ? `<span class="badge" style="background:#E3F0E7">📦 Encomenda de ${dstr(enc.em)}${enc.por ? ' · ' + esc(enc.por) : ''}</span>` : ''}</div>
+  ${enc ? `<div class="esteira" style="margin-bottom:10px"><b>📦 Este cliente tem encomenda feita${enc.obs ? ': ' + esc(enc.obs) : ''}.</b><p style="margin:4px 0 0">O pedido e o pagamento já estão preenchidos. Conte o expositor e toque em <b>Fechar reposição</b> para lançar e mandar ao Bling. <a href="#" id="encDesc">descartar a encomenda</a></p></div>` : ''}
   <p style="color:var(--soft);margin-top:0">Conte o que tem de cada sabor no expositor, inclusive o que vai ser trocado. O sistema sugere quanto repor e calcula o sell-out.<br><small>Deixado: ${re ? 'o mesmo da reposição reaberta' : dx.fonte === 'contagem' ? `contagem de ${dstr(dx.em)}` : dx.fonte === 'pedido' ? `o que foi entregue no último pedido (${dstr(dx.em)}), pelo histórico` : 'sem histórico deste cliente'}${Object.keys(precos).length ? ' · preços combinados com o cliente aplicados' : ''}</small></p>
   <div id="ct" class="contagem">`;
   let l = '';
@@ -1974,28 +2046,30 @@ async function telaReposicao() {
      <div class="sab"><b>${esc(pr.sabor)}</b><small>deixado: ${a}${precos[pr.id] != null ? ` · ${brl(preco(pr))}` : ''}</small></div>
      <div class="cel"><small>Encontrado</small>${stepper('enc', rc ? rc.encontrado : a)}</div>
      <div class="cel"><small>Troca</small>${stepper('trc', rc ? rc.troca : 0, true)}</div>
-     <div class="cel"><small>Repor</small>${stepper('rep', rc ? Math.max(0, rc.reposto - rc.troca) : 0, false, rc ? 'data-mexeu="1"' : '')}</div>
+     <div class="cel"><small>Repor</small>${stepper('rep', rc ? Math.max(0, rc.reposto - rc.troca - (reB[pr.id] || 0)) : encL[pr.id] ? encL[pr.id].rep || 0 : 0, false, rc || enc ? 'data-mexeu="1"' : '')}</div>
+     <div class="cel"><small>Bonificação</small>${stepper('bon', rc ? reB[pr.id] || 0 : encL[pr.id]?.bon || 0, true)}</div>
      <div class="res"><small>sell-out</small><b class="so">0</b><small class="val">—</small></div></div>`; });
   h += `</div><div class="panel totpanel"><div class="kits"><b>Atalhos do pedido</b> <small style="color:var(--mute)">cada toque soma um kit em "Repor"</small><div class="row" style="flex-wrap:wrap;gap:6px;margin-top:6px">${KITS.map((k, i) => `<button class="btn" type="button" data-kit="${i}">+ ${k.n} <b class="kq" data-kq="${i}"></b></button>`).join('')}<button class="btn" type="button" id="kZerar">Zerar repor</button></div></div>
-  <div class="row" style="justify-content:space-between;flex-wrap:wrap;margin-top:12px"><div><b id="tUn">0 un.</b> a repor · sell-out <b id="tSo">0 un.</b> · trocas <b id="tTr">0</b> <small style="color:var(--mute)">(repostas sem cobrar)</small></div><div style="font-family:Fraunces,Georgia,serif;font-size:24px" id="tVal">R$ 0,00</div></div>
+  <div class="row" style="justify-content:space-between;flex-wrap:wrap;margin-top:12px"><div><b id="tUn">0 un.</b> a repor · sell-out <b id="tSo">0 un.</b> · trocas <b id="tTr">0</b> <small style="color:var(--mute)">(repostas sem cobrar)</small> · bonificação <b id="tBon">0</b> <small style="color:var(--mute)">(não cobra; sai do carro)</small></div><div style="font-family:Fraunces,Georgia,serif;font-size:24px" id="tVal">R$ 0,00</div></div>
   ${cons ? `<div class="esteira" style="margin-top:12px"><b>Cliente em consignado.</b><p>Cobra só o que foi vendido desde a última visita: <b id="tCons">R$ 0,00</b>.</p></div>` : ''}
-  <h3 style="margin:14px 0 6px">Pagamento</h3><div class="row" style="flex-wrap:wrap;gap:14px;align-items:flex-end"><div class="pay" style="margin:0">${FORMAS.map(c => `<label><input type="radio" name="pg" value="${c}" ${c === formaIni ? 'checked' : ''}> ${c}</label>`).join('')}</div>
-   <div><label class="lb">Vencimento</label><input id="rVenc" type="date" value="${re?.vencimento || isoDe(new Date(Date.now() + (formaIni === 'Dinheiro' ? 0 : 7) * DIA))}"></div></div>
+  <h3 style="margin:14px 0 6px">Pagamento</h3>${blocoPag('rp', formaIni, re?.vencimento)}
   <label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="rBling" checked> Criar o pedido de venda no Bling</label>
-  <div class="row" style="margin-top:12px"><button class="btn" id="bVoltar">Voltar</button><button class="btn pri" id="fechar">Fechar reposição</button></div></div></div></section>`;
+  <div class="row" style="margin-top:12px;flex-wrap:wrap;gap:8px"><button class="btn" id="bVoltar">Voltar</button><button class="btn" id="bEnc" title="Guarda o pedido para fechar quando chegar no cliente">📦 ${enc ? 'Atualizar encomenda' : 'Salvar como encomenda'}</button><button class="btn pri" id="fechar">Fechar reposição</button></div></div></div></section>`;
   $('#main').innerHTML = h;
   const linhas = () => [...document.querySelectorAll('#ct .lin[data-p]')];
   const kitsUsados = {};
-  const calc = () => { let un = 0, so = 0, tr = 0, val = 0, vc = 0;
+  let pag = null, valItens = 0;
+  const calc = () => { let un = 0, so = 0, tr = 0, val = 0, vc = 0, bo = 0;
     linhas().forEach(r => { const a = +r.dataset.ant, enc = r.querySelector('.enc').value, t = +r.querySelector('.trc').value || 0, pre = +r.dataset.pre;
       // repor = o que é vendido (cobrado); as trocas são repostas 1 a 1 sem cobrar e não entram aqui
       if (enc !== '' && !r.querySelector('.rep').dataset.mexeu) r.querySelector('.rep').value = Math.max(0, +r.dataset.alvo - +enc);
       const rep = +r.querySelector('.rep').value || 0, s = enc === '' ? null : Math.max(0, a - +enc);
       r.querySelector('.so').textContent = s === null ? '—' : s; r.querySelector('.val').textContent = rep ? 'repor ' + brl(rep * pre) : '—';
       r.classList.toggle('vendeu', (s || 0) > 0);
-      un += rep; so += s || 0; tr += t; val += rep * pre; vc += (s || 0) * pre; });
+      un += rep; so += s || 0; tr += t; val += rep * pre; vc += (s || 0) * pre; bo += +r.querySelector('.bon').value || 0; });
     if (cons) { val = vc; $('#tCons').textContent = brl(vc); }
-    $('#tUn').textContent = un + ' un.'; $('#tSo').textContent = so + ' un.'; $('#tTr').textContent = tr; $('#tVal').textContent = brl(val); return { un, so, tr, val }; };
+    valItens = val; $('#tUn').textContent = un + ' un.'; $('#tSo').textContent = so + ' un.'; $('#tTr').textContent = tr; $('#tBon').textContent = bo + ' un.';
+    const fr = pag ? pag.ler().frete : { v: 0 }; $('#tVal').textContent = brl(val + (fr.cobrado ? fr.v : 0)); pag?.resto(); return { un, so, tr, val, bo }; };
   $('#ct').addEventListener('input', e => { if (e.target.classList.contains('rep')) e.target.dataset.mexeu = 1; calc(); });
   ligarSteppers($('#ct')); calc();
   document.querySelectorAll('[data-kit]').forEach(b => b.onclick = () => { const i = +b.dataset.kit, k = KITS[i];
@@ -2004,25 +2078,37 @@ async function telaReposicao() {
       const inp = r.querySelector('.rep'); inp.value = (kitsUsados[i] ? +inp.value || 0 : 0) + q; inp.dataset.mexeu = 1; });
     kitsUsados[i] = (kitsUsados[i] || 0) + 1; document.querySelector(`[data-kq="${i}"]`).textContent = '×' + kitsUsados[i]; calc(); });
   $('#kZerar').onclick = () => { linhas().forEach(r => { const i = r.querySelector('.rep'); i.value = 0; i.dataset.mexeu = 1; }); Object.keys(kitsUsados).forEach(k => { delete kitsUsados[k]; document.querySelector(`[data-kq="${k}"]`).textContent = ''; }); calc(); };
-  document.querySelectorAll('input[name=pg]').forEach(x => x.onchange = () => { $('#rVenc').value = isoDe(new Date(Date.now() + (x.value === 'Dinheiro' ? 0 : 7) * DIA)); });
+  pag = ligarPag('rp', () => valItens, () => calc()); pag.preencher(enc?.pag); calc();
+  // encomenda: guarda o pedido (repor, bonificação) e o pagamento; aparece no Dia de rota e volta preenchido quando você abrir a reposição
+  $('#bEnc').onclick = () => { modal(`<h3>Salvar encomenda de ${esc(p.nome)}</h3><p style="color:var(--soft);margin-top:0">O pedido fica guardado e o cliente aparece no Dia de rota com 📦. Quando chegar lá, toque em Repor, confira e feche: aí vai para o Bling.</p><label>Observação</label><input id="encObs" value="${esc(enc?.obs || 'pedido pelo WhatsApp')}"><div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="encOk">Salvar encomenda</button></div>`);
+    $('#encOk').onclick = async () => { const ln = {}; linhas().forEach(r => { const rp = +r.querySelector('.rep').value || 0, bn = +r.querySelector('.bon').value || 0; if (rp || bn) ln[r.dataset.p] = { rep: rp, bon: bn }; });
+      if (!Object.keys(ln).length) return toast('Coloque os itens do pedido em Repor');
+      const g = pag.ler(), todas = { ...(S.base.regras.encomendas || {}) }; todas[p.id] = { linhas: ln, pag: { forma: g.forma, vencimento: g.vencimento, parcelas: g.parcelas, frete: g.frete }, obs: $('#encObs').value.trim(), em: new Date().toISOString(), por: S.eu.nome || '' };
+      try { await db.salvarRegra('encomendas', todas); S.base.regras.encomendas = todas; fecharModal(); toast('Encomenda salva: aparece no Dia de rota'); S.contando = null; irPara('rota'); } catch (e) { erro(e); } }; };
+  if ($('#encDesc')) $('#encDesc').onclick = async e => { e.preventDefault(); const todas = { ...(S.base.regras.encomendas || {}) }; delete todas[p.id];
+    try { await db.salvarRegra('encomendas', todas); S.base.regras.encomendas = todas; toast('Encomenda descartada'); telaReposicao(); } catch (er) { erro(er); } };
   $('#bVoltar').onclick = () => { S.reabrir = null; irPara('rota'); };
   $('#fechar').onclick = async () => {
-    const t = calc(), pg = document.querySelector('input[name=pg]:checked').value, venc = $('#rVenc').value || null, mandar = $('#rBling').checked;
+    const t = calc(), g = pag.ler(), pg = g.condicao, venc = g.vencimento, mandar = $('#rBling').checked;
+    if (!g.ok) return toast('Cada parcela precisa ter valor, e a soma não pode passar do total');
     // reposto (físico) = vendido + trocas repostas; o pedido cobra só o vendido
-    const contagens = linhas().map(r => ({ produto_id: +r.dataset.p, deixado_anterior: +r.dataset.ant, encontrado: +r.querySelector('.enc').value, troca: +r.querySelector('.trc').value || 0, reposto: (+r.querySelector('.rep').value || 0) + (+r.querySelector('.trc').value || 0) }));
-    const itens = cons ? linhas().map(r => ({ produto_id: +r.dataset.p, quantidade: Math.max(0, +r.dataset.ant - +r.querySelector('.enc').value), preco_unit: +r.dataset.pre, bonificado: 0 }))
-                       : contagens.map(c => ({ produto_id: c.produto_id, quantidade: c.reposto - c.troca, preco_unit: +linhas().find(r => +r.dataset.p === c.produto_id).dataset.pre, bonificado: 0 }));
+    // bonificação: vai para o expositor (entra no reposto e sai do carro), mas não é cobrada
+    const bonDe = r => +r.querySelector('.bon').value || 0;
+    const contagens = linhas().map(r => ({ produto_id: +r.dataset.p, deixado_anterior: +r.dataset.ant, encontrado: +r.querySelector('.enc').value, troca: +r.querySelector('.trc').value || 0, reposto: (+r.querySelector('.rep').value || 0) + (+r.querySelector('.trc').value || 0) + bonDe(r) }));
+    const itens = cons ? linhas().map(r => ({ produto_id: +r.dataset.p, quantidade: Math.max(0, +r.dataset.ant - +r.querySelector('.enc').value), preco_unit: +r.dataset.pre, bonificado: bonDe(r) }))
+                       : linhas().map(r => ({ produto_id: +r.dataset.p, quantidade: +r.querySelector('.rep').value || 0, preco_unit: +r.dataset.pre, bonificado: bonDe(r) }));
     $('#fechar').disabled = true;
     try {
       const reg = await db.registrarReposicao({ pdvId: p.id, usuarioId: S.eu.id, contagens, itens,
-        pedido: { tipo: cons ? 'reposicao_consignado' : 'reposicao', condicao: pg, unidades: cons ? t.so : t.un, valor: t.val, pago_na_hora: pg === 'Dinheiro', vencimento: venc } });
+        pedido: { tipo: cons ? 'reposicao_consignado' : 'reposicao', condicao: pg, unidades: cons ? t.so : t.un, valor: g.total, pago_na_hora: pg === 'Dinheiro', vencimento: venc, ...g.extra } });
+      if (enc) { const todas = { ...(S.base.regras.encomendas || {}) }; delete todas[p.id]; await db.salvarRegra('encomendas', todas).catch(() => { }); S.base.regras.encomendas = todas; }
       let n = await db.carregarPdv(p.id), extra = '';
       const r = regraAval();
       if (n.etapa === 'avaliacao' && (n.aval_reposicoes || 0) >= r.reposicoes) {
         const novo = Number(n.aval_media) >= r.meta_minima_sellout ? 'ativo' : 'revisao';
         await db.atualizarPdv(p.id, { etapa: novo }); extra = novo === 'ativo' ? ' Avaliação concluída: virou cliente ativo.' : ' Avaliação abaixo da meta: foi para revisão comercial.';
       } else if (n.etapa === 'avaliacao') extra = ` Avaliação: ${n.aval_reposicoes} de ${r.reposicoes}.`;
-      if (p.condicao !== pg && !cons) await db.atualizarPdv(p.id, { condicao: pg }).catch(() => { });
+      if (p.condicao !== g.forma && !cons && !g.parcelas.length) await db.atualizarPdv(p.id, { condicao: g.forma }).catch(() => { });
       S.reabrir = null; await recarregar(); await avaliarRisco(); toast('Reposição registrada.' + extra); S.contando = null; irPara('rota');
       if (mandar && reg.pedido && (cons ? t.so : t.un) > 0) enviarAoBling(reg.pedido.id, p.nome);
     } catch (e) { erro(e); $('#fechar').disabled = false; }

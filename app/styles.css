@@ -515,3 +515,7 @@ section:fullscreen #mapa{height:100vh}
 .rstop .grip:active{cursor:grabbing}
 .rstop{transition:transform .15s}
 .rstop.arrastando{transition:none;position:relative;z-index:30;box-shadow:0 10px 24px rgba(0,0,0,.18);opacity:.95}
+
+.lnkperfil{cursor:pointer;text-decoration:underline;text-decoration-color:rgba(0,0,0,.25);text-underline-offset:3px}
+.lnkperfil:hover{text-decoration-color:currentColor}
+.cxbtn{display:inline-flex;gap:2px}

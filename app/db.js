@@ -75,7 +75,7 @@ async function gravarContagemEPedido({ pdvId, tipoVisita, usuarioId, contagens, 
   let ped = null;
   if (pedido) {
     ped = ok(await sb.from('pedidos').insert({ ...pedido, pdv_id: pdvId, visita_id: visita.id, criado_por: usuarioId }).select().single());
-    const its = itens.filter(i => i.quantidade > 0);
+    const its = itens.filter(i => i.quantidade > 0 || i.bonificado > 0); // bonificação entra no pedido com quantidade 0 (não é cobrada)
     if (its.length) ok(await sb.from('pedido_itens').insert(its.map(i => ({ ...i, pedido_id: ped.id }))));
   }
   return { visita, pedido: ped };
@@ -125,6 +125,8 @@ export async function pedidosEntre(de, ate, tipo) { return ok(await sb.from('ped
 /* ---------- plano do dia (modo prospecção) ---------- */
 export async function obterPlano(dono, data) { return ok(await sb.from('planos').select('*').eq('dono', dono).eq('data', data).maybeSingle()); }
 export async function salvarPlano(dono, data, paradas) { return ok(await sb.from('planos').upsert({ dono, data, paradas, atualizado_em: new Date().toISOString() }).select().single()); }
+// o que saiu do carro em cada reposição (reposto = vendido + trocas + bonificação)
+export async function contagensDasVisitas(ids) { if (!ids.length) return []; return ok(await sb.from('contagens').select('visita_id, produto_id, reposto').in('visita_id', ids)); }
 export async function visitasDoDia(dia) { const de = new Date(dia + 'T00:00:00'); return ok(await sb.from('visitas').select('id, pdv_id, em, resultado, tipo').gte('em', de.toISOString()).lt('em', new Date(+de + 864e5).toISOString())); }
 export async function criarPdvs(lista) { const out = []; for (let i = 0; i < lista.length; i += 300) out.push(...ok(await sb.from('pdvs').insert(lista.slice(i, i + 300)).select('id'))); return out; }
 export async function ultimosPedidos(pdvId, n = 5) { return ok(await sb.from('pedidos').select('numero, bling_pedido_id, tipo, valor, unidades, criado_em').eq('pdv_id', pdvId).order('criado_em', { ascending: false }).limit(n)); }
@@ -192,7 +194,8 @@ export async function dadosReabrir(visitaId) {
     sb.from('contagens').select('produto_id, deixado_anterior, encontrado, troca, reposto').eq('visita_id', visitaId).then(ok),
     sb.from('pedidos').select('id, condicao, vencimento, bling_id, bling_pedido_id').eq('visita_id', visitaId).then(ok),
   ]);
-  return { contagens, pedido: peds[0] || null };
+  const itens = peds[0] ? ok(await sb.from('pedido_itens').select('produto_id, bonificado').eq('pedido_id', peds[0].id)) : [];
+  return { contagens, pedido: peds[0] || null, itens };
 }
 // itens de todos os pedidos de um cliente (do app e do Bling), para ver o que mais sai
 export async function itensDoCliente(pdvId) {
