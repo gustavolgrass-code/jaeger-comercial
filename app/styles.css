@@ -510,3 +510,8 @@ section:fullscreen #mapa{height:100vh}
 .ambar i{display:block;height:100%}
 .amleg{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--soft);margin:4px 0 6px}
 .amleg i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+
+.rstop .grip{cursor:grab;touch-action:none;user-select:none;font-size:20px;line-height:1;color:var(--mute);padding:6px 2px;margin:-6px -4px -6px -6px;flex:none}
+.rstop .grip:active{cursor:grabbing}
+.rstop{transition:transform .15s}
+.rstop.arrastando{transition:none;position:relative;z-index:30;box-shadow:0 10px 24px rgba(0,0,0,.18);opacity:.95}

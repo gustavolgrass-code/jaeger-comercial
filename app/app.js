@@ -1749,12 +1749,12 @@ function pintarRota(k) {
   const todas = [...k.fixos, ...k.ordem], hs = k.sim ? k.sim.hs : [];
   const linha = (s, i, h) => { const p = s.p, pv = RT.prev[p.id] || {}, est = k.feitos.has(p.id) || k.st[p.id] === 'feito' ? 'feito' : k.st[p.id] === 'ausente' ? 'ausente' : null;
     const u = URG[pv.urg] || URG.espera, rep = s.tipo === 'rep';
-    return `<div class="stop rstop ${est ? 'done' : ''}" data-id="${p.id}"><div class="n" style="background:${corPin(s, est)}">${est === 'feito' ? '✓' : est === 'ausente' ? '🚪' : i + 1}</div>
+    return `<div class="stop rstop ${est ? 'done' : ''}" data-id="${p.id}">${!est && i >= k.fixos.length ? `<div class="grip" data-grip="${p.id}" title="Arraste para mudar a ordem">⠿</div>` : ''}<div class="n" style="background:${corPin(s, est)}">${est === 'feito' ? '✓' : est === 'ausente' ? '🚪' : i + 1}</div>
      <div class="info"><div class="rhora">${est === 'feito' ? '✅ feito' : est === 'ausente' ? '🚪 não estava' : h ? `${hhmm(h.comeca)}${h.espera > 4 ? ` <small>(chega ${hhmm(h.chega)}, espera ${Math.round(h.espera)} min)</small>` : ''}${h.foraJanela ? ' <small style="color:#B8402A">⚠️ fora do horário do cliente</small>' : ''}` : ''}</div>
       <b>${esc(p.nome)}</b> ${est ? '' : rep ? `<span class="badge" style="background:${u.c}22">${u.i} ${pv.dias <= 0 ? 'possível zerado' : `~${Math.round(pv.dias)} dia${Math.round(pv.dias) === 1 ? '' : 's'}`}</span>` : '<span class="badge" style="background:#7B4FC022">🟣 prospecção</span>'}
       ${p.precisa_dono !== false && (p.janela_dias?.length || p.janela_periodo) ? ' <span title="Precisa do dono">🔒</span>' : ''}${ehCanoas(p) ? ' <span class="badge">Canoas</span>' : ''}
       <br><small style="color:var(--mute)">${esc(p.bairro || '')}${janelaTxt(p) ? ' · 🕘 ' + esc(janelaTxt(p)) : ' · sem janela cadastrada'}${rep && pv.deixado != null ? ` · deixado ${pv.deixado} un. em ${dstr(pv.deixadoEm)}${pv.estoque != null ? ` · estimado ~${Math.round(pv.estoque)}` : ''}` : ''}${rep && pv.un ? ` · repor ~${pv.un} un.` : ''}${rep ? ` · previsão por ${pv.fonte}` : ''}</small></div>
-     ${est === 'feito' && rep && RT.visitas.some(v => v.pdv_id === p.id && v.tipo === 'reposicao') ? `<div class="racoes"><button class="mini reabrir" data-reab="${p.id}">reabrir reposição</button></div>` : ''}${est ? '' : `<div class="racoes">${rep ? `<button class="btn pri" data-rep="${p.id}">Repor</button>` : `<button class="btn pri" data-pv="${p.id}">Visitei</button>`}<button class="mini" data-aus="${p.id}">não estava</button><button class="mini" data-tira="${p.id}">tirar</button>${i >= k.fixos.length ? `<button class="mini" data-up="${p.id}" title="Subir na ordem" ${i === k.fixos.length ? 'disabled' : ''}>↑</button><button class="mini" data-dn="${p.id}" title="Descer na ordem" ${i === k.fixos.length + k.ordem.length - 1 ? 'disabled' : ''}>↓</button>` : ''}</div>`}</div>`; };
+     ${est === 'feito' && rep && RT.visitas.some(v => v.pdv_id === p.id && v.tipo === 'reposicao') ? `<div class="racoes"><button class="mini reabrir" data-reab="${p.id}">reabrir reposição</button></div>` : ''}${est ? '' : `<div class="racoes">${rep ? `<button class="btn pri" data-rep="${p.id}">Repor</button>` : `<button class="btn pri" data-pv="${p.id}">Visitei</button>`}<button class="mini" data-aus="${p.id}">não estava</button><button class="mini" data-tira="${p.id}">tirar</button></div>`}</div>`; };
   const nRep = todas.filter(s => s.tipo === 'rep'), nPr = todas.filter(s => s.tipo === 'prosp');
   const feitosN = l => l.filter(s => k.feitos.has(s.id) || k.st[s.id] === 'feito').length;
   const cg = carga(todas.filter(s => !k.feitos.has(s.id)));
@@ -1783,7 +1783,7 @@ function pintarRota(k) {
     ${cg.length ? `<table class="rcarga"><tr><th>Produto</th><th>Previsto</th><th>Levar</th></tr>${cg.map(x => `<tr><td>${esc(x.p.linha.split(' ')[0])} · ${esc(x.p.sabor)}</td><td>${x.q}</td><td><b>${x.levar}</b></td></tr>`).join('')}<tr><td><b>Total</b></td><td>${cg.reduce((a, x) => a + x.q, 0)}</td><td><b>${cg.reduce((a, x) => a + x.levar, 0)}</b></td></tr></table>` : '<span style="color:var(--mute)">Sem reposições na rota.</span>'}</div></div></div>
   ${foraLista.length ? `<div class="panel rfora"><h3 style="margin-top:0">⚠️ Urgentes que ficaram fora</h3>${foraLista.map(f => `<div class="rfila"><span>${URG[RT.prev[f.p.id]?.urg]?.i || ''} <b>${esc(f.p.nome)}</b> <small>${f.m} · próximo dia na janela: ${proximoDiaJanela(f.p, R.data)}</small></span>${f.m === 'não cabe no horário' ? `<button class="mini" data-tira="${f.p.id}">tirar de hoje</button>` : `<button class="mini" data-inc="${f.p.id}">pôr mesmo assim</button>`}</div>`).join('')}</div>` : ''}
   <div class="panel" style="margin-top:12px"><h3 style="margin-top:0">Pôr um cliente na rota</h3><div class="mbusca" style="max-width:420px"><input id="rLivre" autocomplete="off" placeholder="🔍 Qualquer cliente ou prospect pelo nome…"><div id="rLivreSug" class="sugs"></div></div>
-   <small style="color:var(--mute)">Entra na rota de hoje mesmo sem reposição prevista (inclui consumidor final). Depois use ↑ ↓ para mudar a ordem.</small></div>
+   <small style="color:var(--mute)">Entra na rota de hoje mesmo sem reposição prevista (inclui consumidor final). Para mudar a ordem, arraste a parada pela alça ⠿.</small></div>
   <div class="panel" style="margin-top:12px"><h3 style="margin-top:0">Fila de urgência <small style="font-weight:400;color:var(--mute)">· clientes que não estão na rota de hoje</small></h3>
    ${['ruptura', 'ideal', 'espera'].map(u => { const l = naFila.filter(x => x.urg === u); return l.length ? `<div class="lingrp">${URG[u].i} ${URG[u].n} · ${l.length}</div>${l.map(x => `<div class="rfila"><span><b>${esc(x.p.nome)}</b> <small>${x.dias <= 0 ? 'possível zerado' : `~${Math.round(x.dias)} dias`} · ${esc(x.p.bairro || regNome(x.p.regiao))}${ehCanoas(x.p) ? ' · Canoas (Moisés)' : ''}${janelaTxt(x.p) ? ' · 🕘 ' + esc(janelaTxt(x.p)) : ''}</small></span><button class="mini" data-inc="${x.p.id}">+ pôr na rota</button></div>`).join('')}` : ''; }).join('') || '<span style="color:var(--mute)">Todos os clientes já estão na rota.</span>'}
    ${R.tipo !== 'reposicao' ? `<div class="lingrp">🟣 Prospecção ${R.tipo === 'misto' ? '· até 500 m da rota entram sozinhos; busque outros' : ''}</div><div class="mbusca" style="max-width:420px"><input id="rProsp" autocomplete="off" placeholder="🔍 Pôr um prospect na rota…"><div id="rProspSug" class="sugs"></div></div>${k.foraP.length ? `<small style="color:var(--mute)">${k.foraP.length} prospect(s) perto da rota não couberam no horário.</small>` : ''}` : ''}
@@ -1799,11 +1799,23 @@ function ligarRota(k, todas) {
   const fixar = (manual = k.manual) => [...k.fixos, ...k.ordem].map(s => ({ id: s.id, tipo: s.tipo, status: (R.paradas || []).find(x => x.id === s.id)?.status || null, ...(manual ? { manual: true } : {}) }));
   $('#rSalvar').onclick = async () => { await salvarRotaDia({ paradas: fixar() }, 'Rota salva'); desenharRota(); };
   $('#rRecalc').onclick = async () => { await salvarRotaDia({ paradas: fixar(false) }, k.manual ? 'Voltou para a ordem automática' : 'Rota recalculada a partir de agora'); desenharRota(); };
-  // ↑ ↓: troca a parada de lugar e a rota (horários e links do Google Maps) é refeita na hora nessa ordem
-  const mover = async (id, d) => { const l = [...k.fixos, ...k.ordem], i = l.findIndex(s => s.id === id), j = i + d; if (i < 0 || j < k.fixos.length || j >= l.length) return;
-    [l[i], l[j]] = [l[j], l[i]]; await salvarRotaDia({ paradas: l.map(s => ({ id: s.id, tipo: s.tipo, status: (R.paradas || []).find(x => x.id === s.id)?.status || null, manual: true })) }); desenharRota(); };
-  document.querySelectorAll('[data-up]').forEach(b => b.onclick = () => mover(b.dataset.up, -1));
-  document.querySelectorAll('[data-dn]').forEach(b => b.onclick = () => mover(b.dataset.dn, 1));
+  // arrastar a parada pela alça ⠿: solta no lugar novo e a rota (horários e links do Google Maps) é refeita nessa ordem
+  const salvarOrdem = async ids => { const l = [...k.fixos, ...ids.map(id => k.ordem.find(s => s.id === id))];
+    await salvarRotaDia({ paradas: l.map(s => ({ id: s.id, tipo: s.tipo, status: (R.paradas || []).find(x => x.id === s.id)?.status || null, manual: true })) }); desenharRota(); };
+  document.querySelectorAll('[data-grip]').forEach(g => g.onpointerdown = e => {
+    if (e.button > 0) return; e.preventDefault();
+    const cards = [...document.querySelectorAll('.rstop[data-id]')].filter(c => c.querySelector('[data-grip]')), card = g.closest('.rstop'), i0 = cards.indexOf(card);
+    const tops = cards.map(c => c.getBoundingClientRect().top + window.scrollY), passo = cards.length > 1 ? tops[1] - tops[0] : card.offsetHeight + 8;
+    const y0 = e.clientY + window.scrollY; let alvo = i0;
+    card.classList.add('arrastando'); try { g.setPointerCapture(e.pointerId); } catch { }
+    const mexe = ev => { const y = ev.clientY + window.scrollY, dy = y - y0; card.style.transform = `translateY(${dy}px)`;
+      const centro = tops[i0] + card.offsetHeight / 2 + dy; alvo = Math.max(0, Math.min(cards.length - 1, cards.filter((c, j) => j !== i0 && tops[j] + c.offsetHeight / 2 < centro).length));
+      cards.forEach((c, j) => { if (j === i0) return; c.style.transform = i0 < alvo && j > i0 && j <= alvo ? `translateY(${-passo}px)` : alvo < i0 && j >= alvo && j < i0 ? `translateY(${passo}px)` : ''; });
+      if (ev.clientY < 60) window.scrollBy(0, -12); else if (ev.clientY > innerHeight - 60) window.scrollBy(0, 12); };
+    const solta = () => { g.removeEventListener('pointermove', mexe); g.removeEventListener('pointerup', solta); g.removeEventListener('pointercancel', solta);
+      card.classList.remove('arrastando'); cards.forEach(c => c.style.transform = '');
+      if (alvo === i0) return; const ids = cards.map(c => c.dataset.id); ids.splice(alvo, 0, ids.splice(i0, 1)[0]); salvarOrdem(ids); };
+    g.addEventListener('pointermove', mexe); g.addEventListener('pointerup', solta); g.addEventListener('pointercancel', solta); });
   // busca para pôr qualquer cliente na rota (mesma busca do mapa: nome, razão social, bairro, cidade)
   const ligarBusca = (inp, box, filtro) => { if (!inp) return;
     const listar = () => { const t = norm(inp.value); if (t.length < 2) { box.style.display = 'none'; box.innerHTML = ''; return; }
