@@ -1696,10 +1696,16 @@ function carga(ordem) {
   const tot = {}; ordem.filter(s => s.tipo === 'rep').forEach(s => Object.entries(RT.prev[s.id]?.pedido || {}).forEach(([k, q]) => tot[k] = (tot[k] || 0) + q));
   return S.base.produtos.filter(p => tot[p.id]).map(p => ({ p, q: tot[p.id], levar: Math.ceil(tot[p.id] * 1.1) }));
 }
+// rota no Google Maps parando nas fichas dos estabelecimentos (código do lugar guardado em link_maps);
+// quem não tem ficha guardada entra pela coordenada. Até 9 paradas por trecho, como o Google permite.
 function linksMaps(base, ordem) {
-  const pts = ordem.map(s => `${s.p.lat.toFixed(5)},${s.p.lng.toFixed(5)}`), o = `${base.lat.toFixed(5)},${base.lng.toFixed(5)}`, out = [];
+  const pto = p => { const hex = (String(p.link_maps || '').match(/(0x[0-9a-f]+:0x[0-9a-f]+)/i) || [])[1];
+    return hex ? { seg: encodeURIComponent(p.nome || 'Parada').replace(/%20/g, '+'), blk: `!1m5!1m1!1s${hex}!2m2!1d${(+p.lng).toFixed(6)}!2d${(+p.lat).toFixed(6)}`, n: 6, ficha: true }
+      : { seg: `${(+p.lat).toFixed(5)},${(+p.lng).toFixed(5)}`, blk: '!1m0', n: 1, ficha: false }; };
+  const o = pto({ lat: base.lat, lng: base.lng }), pts = ordem.map(s => pto(s.p)), out = [];
   for (let i = 0; i < pts.length; i += 9) { const tr = pts.slice(i, i + 9), fimTr = i + 9 >= pts.length;
-    out.push({ n: `${i + 1}–${i + tr.length}`, url: `https://www.google.com/maps/dir/?api=1&origin=${i ? pts[i - 1] : o}&destination=${fimTr ? o : tr[tr.length - 1]}&waypoints=${(fimTr ? tr : tr.slice(0, -1)).join('%7C')}&travelmode=driving` }); }
+    const lista = [i ? pts[i - 1] : o, ...tr, ...(fimTr ? [o] : [])], dentro = lista.reduce((a, x) => a + x.n, 0) + 1;
+    out.push({ n: `${i + 1}–${i + tr.length}`, fichas: tr.filter(x => x.ficha).length, url: `https://www.google.com/maps/dir/${lista.map(x => x.seg).join('/')}/data=!4m${dentro + 1}!4m${dentro}${lista.map(x => x.blk).join('')}!3e0` }); }
   return out;
 }
 async function salvarRotaDia(patch, msg) {
