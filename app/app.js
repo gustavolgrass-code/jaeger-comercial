@@ -152,7 +152,7 @@ function telaPrimeiroAcesso(user) {
 
 /* =================== estrutura =================== */
 const ABAS = {
-  comercial: [['mapa', 'Mapa'], ['funil', 'Funil'], ['agenda', 'Agenda'], ['carteira', 'Negócios'], ['contatos', 'Contatos'], ['abertura', 'Abertura de cliente'], ['painel', 'Painel'], ['uploads', 'Uploads'], ['regras', 'Regras e metas']],
+  comercial: [['mapa', 'Mapa'], ['funil', 'Funil'], ['agenda', 'Agenda'], ['carteira', 'Negócios'], ['contatos', 'Contatos'], ['abertura', 'Cadastrar venda'], ['painel', 'Painel'], ['uploads', 'Uploads'], ['regras', 'Regras e metas']],
   operacao: [['rota', 'Dia de rota'], ['reposicao', 'Reposição'], ['resumo', 'Resumo do dia']] };
 let lado = 'comercial';
 // menu lateral: grupos (CRM, Reposição, Ajustes) com ícones; recolhe para só os ícones e lembra a escolha
@@ -1109,8 +1109,8 @@ function telaAbertura() {
   const p = S.pdvs.find(x => x.id === S.abPdv);
   const jaCliente = p && ['avaliacao', 'ativo', 'risco', 'revisao'].includes(p.etapa);
   const ex = S.base.expositores;
-  $('#main').innerHTML = `<section class="view on"><div class="dash"><div class="panel" style="max-width:980px">
-  <div class="row" style="justify-content:space-between;flex-wrap:wrap"><h3 style="font-family:var(--fh);font-size:22px;font-weight:600;margin:0">${jaCliente ? 'Nova venda' : 'Abertura de cliente'}</h3><button class="btn" id="oCad">+ Cadastrar ponto</button></div>
+  $('#main').innerHTML = `<section class="view on"><div class="dash"><div class="panel">
+  <div class="row" style="justify-content:space-between;flex-wrap:wrap"><h3 style="font-family:var(--fh);font-size:22px;font-weight:600;margin:0">${jaCliente ? 'Nova venda' : 'Cadastrar venda'}</h3><button class="btn" id="oCad">+ Cadastrar ponto</button></div>
   ${p ? '' : '<p class="empty">Nenhum PDV disponível. Cadastre um ponto no mapa primeiro.</p>'}
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
    <div style="position:relative"><label class="lb">Cliente</label><input id="oBusca" autocomplete="off" placeholder="Digite o nome, razão social ou bairro…" value="${p ? esc(p.nome) + ' · ' + etapa(p.etapa).n : ''}" style="width:100%"><div id="oSug" class="sugs"></div></div>
@@ -1613,12 +1613,12 @@ function telaRegras() {
   const r = regraAval(), cp = cadPadrao();
   setTimeout(painelBling, 0);
   $('#main').innerHTML = `<section class="view on"><div class="dash">
-  <div class="panel" style="max-width:900px" id="blingPanel"><h3>Integração com o Bling</h3><small style="color:var(--mute)">verificando…</small></div>
-  <div class="panel" style="max-width:900px"><h3>Metas do comercial</h3><p style="color:var(--soft);margin-top:0">Aparecem no topo do CRM, com barra de progresso. Os dias de trabalho contam de segunda a sábado.</p>
+  <div class="panel" id="blingPanel"><h3>Integração com o Bling</h3><small style="color:var(--mute)">verificando…</small></div>
+  <div class="panel"><h3>Metas do comercial</h3><p style="color:var(--soft);margin-top:0">Aparecem no topo do CRM, com barra de progresso. Os dias de trabalho contam de segunda a sábado.</p>
    <div class="metas">${[['visitas_dia', 'Visitas de prospecção por dia', 'visitas'], ['vendas_dia', 'Vendas (novos clientes) por dia', 'vendas'], ['valor_mes', 'Valor em vendas novas por mês', 'R$'], ['cadastros_semana', 'Novos pontos cadastrados por semana', 'pontos']].map(([k, n, u]) => `<label><span>${n}</span><span class="row" style="gap:6px"><input type="number" min="0" class="rMeta" data-k="${k}" value="${metas()[k]}" style="width:110px"> <small>${u}</small></span></label>`).join('')}</div></div>
-  <div class="panel" style="max-width:900px"><h3>Esteira de avaliação</h3><div class="row" style="flex-wrap:wrap;gap:10px">Avaliação de <input type="number" id="rRep" value="${r.reposicoes}" style="width:70px"> reposições. Aprova com sell-out médio de pelo menos <input type="number" id="rMin" value="${r.meta_minima_sellout}" style="width:70px"> un. por reposição.</div></div>
-  <div class="panel" style="max-width:900px"><h3>Frequência padrão de reposição por etapa</h3><table><tr><th>Etapa</th><th>Repor a cada</th><th>PDVs</th></tr>${['avaliacao', 'ativo', 'risco', 'revisao'].map(k => `<tr><td><i class="dot" style="background:${etapa(k).c}"></i> ${etapa(k).n}</td><td><input type="number" class="rCad" data-k="${k}" value="${cp[k] || ''}" style="width:70px"> dias</td><td>${S.pdvs.filter(p => p.etapa === k).length}</td></tr>`).join('')}</table></div>
-  <div class="panel" style="max-width:900px"><h3>Dia de rota por região</h3><table><tr><th>Região</th><th>Dia</th><th>PDVs com reposição</th></tr>${S.base.regioes.map(g => `<tr><td><b style="color:${g.cor}">${g.codigo}</b> · ${esc(g.nome)}</td><td><select class="rDia" data-c="${g.codigo}"><option value="" ${g.dia_rota == null ? 'selected' : ''}>Sem dia fixo</option>${DIAS.map((d, i) => `<option value="${i}" ${g.dia_rota === i ? 'selected' : ''}>${d}</option>`).join('')}</select></td><td>${S.pdvs.filter(p => p.regiao === g.codigo && ROTA_ETAPAS.includes(p.etapa)).length}</td></tr>`).join('')}</table></div></div></section>`;
+  <div class="panel"><h3>Esteira de avaliação</h3><div class="row" style="flex-wrap:wrap;gap:10px">Avaliação de <input type="number" id="rRep" value="${r.reposicoes}" style="width:70px"> reposições. Aprova com sell-out médio de pelo menos <input type="number" id="rMin" value="${r.meta_minima_sellout}" style="width:70px"> un. por reposição.</div></div>
+  <div class="panel"><h3>Frequência padrão de reposição por etapa</h3><table><tr><th>Etapa</th><th>Repor a cada</th><th>PDVs</th></tr>${['avaliacao', 'ativo', 'risco', 'revisao'].map(k => `<tr><td><i class="dot" style="background:${etapa(k).c}"></i> ${etapa(k).n}</td><td><input type="number" class="rCad" data-k="${k}" value="${cp[k] || ''}" style="width:70px"> dias</td><td>${S.pdvs.filter(p => p.etapa === k).length}</td></tr>`).join('')}</table></div>
+  <div class="panel"><h3>Dia de rota por região</h3><table><tr><th>Região</th><th>Dia</th><th>PDVs com reposição</th></tr>${S.base.regioes.map(g => `<tr><td><b style="color:${g.cor}">${g.codigo}</b> · ${esc(g.nome)}</td><td><select class="rDia" data-c="${g.codigo}"><option value="" ${g.dia_rota == null ? 'selected' : ''}>Sem dia fixo</option>${DIAS.map((d, i) => `<option value="${i}" ${g.dia_rota === i ? 'selected' : ''}>${d}</option>`).join('')}</select></td><td>${S.pdvs.filter(p => p.regiao === g.codigo && ROTA_ETAPAS.includes(p.etapa)).length}</td></tr>`).join('')}</table></div></div></section>`;
   const salvarAval = async () => { const v = { reposicoes: +$('#rRep').value || 13, meta_minima_sellout: +$('#rMin').value || 6 }; try { await db.salvarRegra('avaliacao', v); S.base.regras.avaliacao = v; toast('Regra da avaliação salva'); } catch (e) { erro(e); } };
   $('#rRep').onchange = $('#rMin').onchange = salvarAval;
   document.querySelectorAll('.rMeta').forEach(i => i.onchange = async () => { const v = { ...metas(), [i.dataset.k]: +i.value || 0 }; try { await db.salvarRegra('metas', v); S.base.regras.metas = v; toast('Meta salva'); } catch (e) { erro(e); } });
@@ -2428,7 +2428,7 @@ async function telaPerfil() {
   notas.forEach(n => ev.push({ em: n.em, cor: '#7B4FC0', t: `📝 <b>Observação</b>`, quem: n.perfis?.nome, obs: n.texto, nota: n.id }));
   ev.sort((a, b) => new Date(b.em) - new Date(a.em));
   const podeComprar = p.etapa !== 'perdido';
-  $('#main').innerHTML = `<section class="view on"><div class="dash" style="max-width:1100px">
+  $('#main').innerHTML = `<section class="view on"><div class="dash" style="">
   <div class="row" style="gap:8px"><button class="btn" id="pVoltar">← ${esc(rotuloVoltar('Negócios'))}</button><span style="color:var(--mute)">Perfil do negócio</span></div>
   <div style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:16px;align-items:start">
    <div style="display:flex;flex-direction:column;gap:16px">
@@ -2723,7 +2723,7 @@ async function telaContato() {
   const c = S.contatos.find(x => x.id === S.contatoId); if (!c) return irPara('contatos');
   let tars = [], secDe = []; try { [tars, secDe] = await Promise.all([db.tarefasDoContato(c.id), db.vinculosDoContato(c.id).catch(() => [])]); } catch (e) { }
   const negs = S.pdvs.filter(p => p.contato_id === c.id || secDe.includes(p.id)), w = linkWpp(c.whatsapp || c.telefone);
-  $('#main').innerHTML = `<section class="view on"><div class="dash" style="max-width:900px"><div class="row"><button class="btn" id="cVoltar">← ${esc(rotuloVoltar('Contatos'))}</button></div>
+  $('#main').innerHTML = `<section class="view on"><div class="dash" style=""><div class="row"><button class="btn" id="cVoltar">← ${esc(rotuloVoltar('Contatos'))}</button></div>
   <div class="panel"><small style="color:var(--mute)">Contato</small><h2 style="font-family:var(--fh);margin:4px 0">${esc(c.nome)} ${c.comprador ? '<span class="badge comp" style="font-family:inherit;font-size:13px;vertical-align:middle">🛒 Comprador</span>' : ''}</h2><div style="color:var(--soft)">${esc([c.cargo, c.empresa].filter(Boolean).join(' · '))}</div>
    <div class="kv"><div><small>Telefone</small><b>${esc(c.telefone || '—')}</b></div><div><small>WhatsApp</small><b>${esc(c.whatsapp || '—')}</b></div><div style="grid-column:1/-1"><small>E-mail</small><b style="font-size:14px">${esc(c.email || '—')}</b></div></div>
    ${c.observacao ? `<p style="color:var(--soft)">${esc(c.observacao)}</p>` : ''}
@@ -2902,7 +2902,7 @@ const canalDe = t => CANAIS.find(c => norm(c) === norm(t)) || (t ? t.trim() : nu
 const cargoDe = t => CARGOS.find(c => norm(c) === norm(t)) || (t ? t.trim() : null);
 let pendentes = [];
 function telaUploads() {
-  $('#main').innerHTML = `<section class="view on"><div class="dash" style="max-width:1000px">
+  $('#main').innerHTML = `<section class="view on"><div class="dash" style="">
   <div class="panel"><h3>Como funciona</h3><p style="color:var(--soft);margin:0">Baixe o modelo, preencha no Excel ou Google Planilhas e salve como <b>CSV</b>. Pode ser separado por ponto e vírgula (padrão do Excel no Brasil) ou por vírgula. A coluna <b>localizacao</b> segue o padrão <i>RUA JOAO WOBETO, 350 - MATO GRANDE - Canoas/RS - 92320-160</i>. A busca de endereço faz cerca de 1 por segundo, então 100 linhas levam uns 2 a 4 minutos.</p></div>
   ${(() => { const sem = S.pdvs.filter(x => !x.lat); return sem.length ? `<div class="panel"><div class="row" style="justify-content:space-between;flex-wrap:wrap"><h3 style="margin:0">Negócios sem localização no mapa (${sem.length})</h3></div>
    <p style="color:var(--soft)"><b>Pelo Outscraper (recomendado):</b> 1) baixe a lista de buscas; 2) cole no Outscraper (Google Maps Scraper) com <b>limite de 1 resultado por busca</b> e exporte em CSV; 3) suba o CSV aqui. Cada linha volta para o negócio certo com a posição exata do Google.</p>
