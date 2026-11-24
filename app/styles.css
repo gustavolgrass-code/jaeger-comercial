@@ -336,8 +336,6 @@ table.peds tr:last-child td{border-bottom:0}
 .item-v .preco{display:inline-flex;align-items:center;gap:3px;font-size:11px;color:var(--mute);margin:0}
 .item-v .preco input{width:62px;padding:2px 5px;font-size:12px;border:1px solid var(--line);border-radius:6px;background:var(--card)}
 .item-v .preco.custom input{border-color:var(--car);background:var(--bg-warn);color:var(--car-d);font-weight:700}
-.mbusca{position:relative;width:250px}
-.mbusca input{width:100%;height:100%;min-height:38px;border-radius:10px;border:1px solid var(--line);background:var(--card);padding:8px 12px;font-size:14px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
 .linha-h{grid-column:1/-1;display:flex;align-items:center;gap:10px;margin-top:8px;font-weight:700;color:var(--car-d)}
 .linha-h .preco{display:inline-flex;align-items:center;gap:3px;font-size:12px;color:var(--mute);margin:0;font-weight:400}
 .linha-h .preco input{width:70px;padding:3px 6px;font-size:13px;border:1px solid var(--line);border-radius:6px;background:var(--card)}
@@ -585,3 +583,31 @@ section:fullscreen #mapa{height:100vh}
 .lnkperfil{cursor:pointer;text-decoration:underline;text-decoration-color:rgba(0,0,0,.25);text-underline-offset:3px}
 .lnkperfil:hover{text-decoration-color:currentColor}
 .cxbtn{display:inline-flex;gap:2px}
+
+/* mapa: controles na faixa de cima */
+.tacoes{flex:1;min-width:0;display:flex;justify-content:flex-end}
+.mbar{display:flex;align-items:center;gap:6px}
+.ticon{width:34px;height:34px;flex:none;border:1px solid transparent;background:transparent;color:var(--soft);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;padding:0;opacity:.75}
+.ticon:hover,.ticon.pri{opacity:1;background:var(--sand);color:var(--choc)}
+.ticon.pri{color:var(--car-d)}
+.ticon svg,.tbtn svg{width:17px;height:17px;flex:none}
+.tbtn{height:34px;display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:var(--card);color:var(--choc);border-radius:8px;padding:0 11px;font:500 13px var(--fb);white-space:nowrap}
+.tbtn:hover{background:var(--sand)}
+.tbtn.pri{background:var(--choc);color:var(--cream);border-color:var(--choc)}
+.tbtn b{font-weight:600;color:var(--car-d)}
+.tbtn b:empty{display:none}
+.mbusca{position:relative;display:flex;align-items:center}
+.mbusca input{width:0;padding:0;border:0;opacity:0;height:34px;transition:width .18s ease,opacity .18s;background:var(--input);border-radius:8px;font-size:13.5px}
+.mbusca.aberta input{width:230px;opacity:1;padding:0 10px;border:1px solid var(--line);margin-left:4px}
+.mbusca .sugs{left:auto;right:0;width:300px}
+.mfiltro{position:relative}
+.mfpanel{position:absolute;right:0;top:calc(100% + 6px);z-index:1500;width:270px;background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.18);padding:12px;display:flex;flex-direction:column;gap:6px}
+.mfpanel[hidden]{display:none}
+.mfpanel>small{font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--mute);margin-top:6px}
+.mfpanel>small:first-child{margin-top:0}
+.mfpanel select,.mfpanel .msbtn{width:100%}
+.mfpanel .btn{text-align:left;font-weight:500}
+.mfpanel .regchk{background:none;border:0;padding:4px 2px;font-weight:500}
+.mfpanel .msmenu{left:0;right:0;min-width:0}
+@media (max-width:820px){.tbtn span{display:none}.tbtn{padding:0 9px}.mbusca.aberta input{width:150px}.topo h1{display:none}.topo .trilha{display:none}}
+.tbtn.car{background:var(--car);border-color:var(--car);color:#18181B}.tbtn.car b{color:#18181B}

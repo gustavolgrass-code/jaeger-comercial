@@ -172,7 +172,8 @@ const ICO = {
   menu: '<path d="M3 6h18M3 12h18M3 18h18"/>', lua: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>',
   sol: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   recolher: '<rect x="3" y="3" width="18" height="18"/><path d="M9 3v18M15 9l-3 3 3 3"/>', abrir: '<rect x="3" y="3" width="18" height="18"/><path d="M9 3v18M13 9l3 3-3 3"/>',
-  seta: '<path d="m6 9 6 6 6-6"/>' };
+  seta: '<path d="m6 9 6 6 6-6"/>', lupa: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>', filtro: '<path d="M4 6h16M7 12h10M10 18h4"/>',
+  pino: '<path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.5"/>' };
 const ico = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" stroke-linejoin="miter">${ICO[k] || ''}</svg>`;
 const MENU = [{ g: 'CRM', lado: 'comercial', it: ['funil', 'mapa', 'agenda', 'carteira', 'contatos', 'abertura', 'painel', 'uploads'] },
   { g: 'Reposição', lado: 'operacao', it: ['rota', 'reposicao', 'resumo'] }, { g: 'Ajustes', lado: 'comercial', it: ['regras'] }];
@@ -190,7 +191,7 @@ function montar() {
     <div class="sb-nav" id="nav"></div>
     <div class="sb-bot"><div class="sb-user" title="${esc(S.eu.nome)}"><span class="sb-av">${esc(ini)}</span><b>${esc(S.eu.nome)}</b><button id="bSair">Sair</button></div></div></div>
    <div class="sb-veu" id="sbVeu"></div>
-   <div class="corpo"><div class="topo"><button class="sb-ic mob" id="sbMob" title="Menu">${ico('menu')}</button><span class="trilha" id="tTri"></span><h1 id="tTit"></h1>
+   <div class="corpo"><div class="topo"><button class="sb-ic mob" id="sbMob" title="Menu">${ico('menu')}</button><span class="trilha" id="tTri"></span><h1 id="tTit"></h1><div class="tacoes" id="tAcoes"></div>
     <div class="dir"><button class="sb-ic" id="bTema"></button></div></div><main id="main"></main></div></div>`;
   aplicarTema(document.documentElement.dataset.tema || 'claro'); aplicarSb(document.documentElement.dataset.sb || 'aberta');
   $('#bTema').onclick = () => aplicarTema(document.documentElement.dataset.tema === 'escuro' ? 'claro' : 'escuro');
@@ -207,7 +208,7 @@ function pintarMenu() {
   const a = S.aba, ativo = grupoDe(a)?.g, fech = JSON.parse(lerG('jg-grupos') || '{}');
   $('#nav').innerHTML = MENU.map(m => `<button class="sb-g ${fech[m.g] && m.g !== ativo ? 'fech' : ''}" data-g="${m.g}"><span>${m.g}</span><span class="sb-car">${ico('seta')}</span></button>
     <div class="sb-grp" ${fech[m.g] && m.g !== ativo ? 'style="display:none"' : ''}>${m.it.map(k => `<button class="sb-it ${k === a ? 'on' : ''}" data-a="${k}" title="${esc(nomeAba(k))}">${ico(k)}<span class="sb-lbl">${esc(nomeAba(k))}</span></button>`).join('')}</div>`).join('');
-  const g = grupoDe(a); if (g) lado = g.lado;
+  const g = grupoDe(a); if (g) lado = g.lado; $('#tAcoes').innerHTML = '';
   $('#tTri').textContent = g ? g.g : (lado === 'operacao' ? 'Reposição' : 'CRM');
   $('#tTit').textContent = a === 'perfil' ? 'Perfil do negócio' : a === 'contato' ? 'Contato' : a === 'pedcli' ? 'Detalhes dos pedidos' : nomeAba(a);
 }
@@ -296,15 +297,33 @@ let camadaTraco = null, aoMarcar = null, mapa = null, camada = null, camadaSug =
 function telaMapa() {
   if (S.prosp) return telaProspeccao();
   $('#main').innerHTML = `<section class="view on" style="display:flex;height:100%"><div id="mapa"><div id="lmap"></div>
-   <div class="maptools"><div class="mbusca"><input id="bBusca" autocomplete="off" placeholder="🔍 Buscar cliente…"><div id="bSug" class="sugs"></div></div><button class="btn pri" id="bAdd">+ Cadastrar ponto</button><button class="btn" id="bPend">Reposições pendentes <b id="nPend"></b></button><button class="btn" id="bLoc">📍 Minha localização</button>
-   <div class="msel" id="fEt"><button type="button" class="msbtn" id="fEtBtn"></button><div class="msmenu" id="fEtMenu" hidden>
-    <div class="msatalhos"><button type="button" data-ms="todas">Todas</button><button type="button" data-ms="nenhuma">Nenhuma</button><button type="button" data-ms="carteira">Carteira</button><button type="button" data-ms="prosp">Prospecção</button></div>
-    ${ETAPAS.filter(NO_MAPA).map(e => `<label><input type="checkbox" value="${e.k}" ${S.etapasMapa.has(e.k) ? 'checked' : ''}><i class="dot" style="background:${e.c}"></i>${e.n}</label>`).join('')}</div></div>
-   <select id="fReg"><option value="">Todas as regiões</option>${S.base.regioes.map(r => `<option value="${r.codigo}">${r.codigo} · ${esc(r.nome)}</option>`).join('')}</select>
-   <label class="regchk"><input type="checkbox" id="tReg" ${mostrarReg ? 'checked' : ''}> Regiões</label><button class="btn ${S.nuvens ? 'car' : ''}" id="bNuvem">☁️ Nuvens de potencial</button><button class="btn ${S.quad ? 'car' : ''}" id="bQuad">▦ Quadrantes</button><button class="btn ${S.areasOn ? 'car' : ''}" id="bAreas">🗺 Áreas mapeadas</button></div>
    <div class="hint" id="hint">Toque no mapa onde fica o ponto</div>
    <div class="rotabox" id="rotaBox" hidden></div>
    <div class="legend ${S.legOculta ? 'oculta' : ''}" id="legend"></div><button class="legdot" id="legDot" title="${S.legOculta ? 'Mostrar legenda' : 'Esconder legenda'}"></button></div><aside id="side"></aside></section>`;
+  // controles na faixa de cima: lupa que abre a busca, ações e um botão de filtros com o resto
+  $('#tAcoes').innerHTML = `<div class="mbar">
+   <div class="mbusca" id="mBusca"><button class="ticon" id="bBuscaIc" title="Buscar cliente">${ico('lupa')}</button><input id="bBusca" autocomplete="off" placeholder="Buscar cliente…"><div id="bSug" class="sugs"></div></div>
+   <button class="tbtn pri" id="bAdd" title="Cadastrar ponto">${ico('abertura')}<span>Cadastrar ponto</span></button>
+   <button class="tbtn" id="bPend" title="Reposições pendentes">${ico('reposicao')}<span>Pendentes</span> <b id="nPend"></b></button>
+   <button class="ticon" id="bLoc" title="Minha localização">${ico('pino')}</button>
+   <div class="mfiltro"><button class="tbtn" id="bFiltro" title="Filtros e camadas">${ico('filtro')}<span>Filtros</span> <b id="nFil"></b></button>
+    <div class="mfpanel" id="fPanel" hidden>
+     <small>Status</small><div class="msel" id="fEt"><button type="button" class="msbtn" id="fEtBtn"></button><div class="msmenu" id="fEtMenu" hidden>
+      <div class="msatalhos"><button type="button" data-ms="todas">Todas</button><button type="button" data-ms="nenhuma">Nenhuma</button><button type="button" data-ms="carteira">Carteira</button><button type="button" data-ms="prosp">Prospecção</button></div>
+      ${ETAPAS.filter(NO_MAPA).map(e => `<label><input type="checkbox" value="${e.k}" ${S.etapasMapa.has(e.k) ? 'checked' : ''}><i class="dot" style="background:${e.c}"></i>${e.n}</label>`).join('')}</div></div>
+     <small>Região</small><select id="fReg"><option value="">Todas as regiões</option>${S.base.regioes.map(r => `<option value="${r.codigo}">${r.codigo} · ${esc(r.nome)}</option>`).join('')}</select>
+     <small>Camadas</small><label class="regchk"><input type="checkbox" id="tReg" ${mostrarReg ? 'checked' : ''}> Contorno das regiões</label>
+     <button class="btn ${S.nuvens ? 'car' : ''}" id="bNuvem">☁️ Nuvens de potencial</button><button class="btn ${S.quad ? 'car' : ''}" id="bQuad">▦ Quadrantes</button><button class="btn ${S.areasOn ? 'car' : ''}" id="bAreas">🗺 Áreas mapeadas</button>
+    </div></div></div>`;
+  { const mb = $('#mBusca'), inp = $('#bBusca');
+    $('#bBuscaIc').onclick = () => { mb.classList.toggle('aberta'); if (mb.classList.contains('aberta')) inp.focus(); };
+    inp.addEventListener('blur', () => setTimeout(() => { if (!inp.value) mb.classList.remove('aberta'); }, 200));
+    inp.addEventListener('keydown', e => { if (e.key === 'Escape') { inp.value = ''; inp.blur(); mb.classList.remove('aberta'); } });
+    const contaFil = () => { const n = ($('#fReg').value ? 1 : 0) + (S.nuvens ? 1 : 0) + (S.quad ? 1 : 0) + (S.areasOn ? 1 : 0); $('#nFil').textContent = n ? n : ''; };
+    $('#bFiltro').onclick = e => { e.stopPropagation(); $('#fPanel').hidden = !$('#fPanel').hidden; contaFil(); };
+    $('#fPanel').addEventListener('click', e => { e.stopPropagation(); const m = $('#fEtMenu'); if (m && !e.target.closest('#fEt')) m.hidden = true; setTimeout(contaFil, 50); }); $('#fPanel').addEventListener('change', () => setTimeout(contaFil, 50));
+    if (!S.fechaFp) { S.fechaFp = true; document.addEventListener('click', () => { const p = $('#fPanel'); if (p) p.hidden = true; }); }
+    setTimeout(contaFil, 0); }
   if (mapa) { mapa.remove(); mapa = null; }
   mapa = L.map('lmap', { zoomControl: false }).setView([-29.98, -51.18], 12);
   const Cheia = L.Control.extend({ options: { position: 'bottomright' }, onAdd() { const d = L.DomUtil.create('div', 'leaflet-bar'); d.innerHTML = '<a href="#" class="bt-cheia" title="Tela cheia" role="button">⛶</a>'; L.DomEvent.disableClickPropagation(d); d.firstChild.onclick = e => { e.preventDefault(); const sec = $('#mapa').parentElement; if (document.fullscreenElement) document.exitFullscreen(); else (sec.requestFullscreen || sec.webkitRequestFullscreen)?.call(sec); }; return d; } });
