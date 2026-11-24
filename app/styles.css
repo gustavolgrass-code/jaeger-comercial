@@ -586,7 +586,7 @@ section:fullscreen #mapa{height:100vh}
 
 /* mapa: controles na faixa de cima */
 .tacoes{flex:1;min-width:0;display:flex;justify-content:flex-end}
-.mbar{display:flex;align-items:center;gap:6px}
+.tmbar{display:flex;align-items:center;gap:6px}
 .ticon{width:34px;height:34px;flex:none;border:1px solid transparent;background:transparent;color:var(--soft);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;padding:0;opacity:.75}
 .ticon:hover,.ticon.pri{opacity:1;background:var(--sand);color:var(--choc)}
 .ticon.pri{color:var(--car-d)}

@@ -301,7 +301,7 @@ function telaMapa() {
    <div class="rotabox" id="rotaBox" hidden></div>
    <div class="legend ${S.legOculta ? 'oculta' : ''}" id="legend"></div><button class="legdot" id="legDot" title="${S.legOculta ? 'Mostrar legenda' : 'Esconder legenda'}"></button></div><aside id="side"></aside></section>`;
   // controles na faixa de cima: lupa que abre a busca, ações e um botão de filtros com o resto
-  $('#tAcoes').innerHTML = `<div class="mbar">
+  $('#tAcoes').innerHTML = `<div class="tmbar">
    <div class="mbusca" id="mBusca"><button class="ticon" id="bBuscaIc" title="Buscar cliente">${ico('lupa')}</button><input id="bBusca" autocomplete="off" placeholder="Buscar cliente…"><div id="bSug" class="sugs"></div></div>
    <button class="tbtn pri" id="bAdd" title="Cadastrar ponto">${ico('abertura')}<span>Cadastrar ponto</span></button>
    <button class="tbtn" id="bPend" title="Reposições pendentes">${ico('reposicao')}<span>Pendentes</span> <b id="nPend"></b></button>
