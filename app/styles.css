@@ -1,5 +1,5 @@
 /* ===== tema: claro (padrão) e escuro, guardado no navegador ===== */
-:root{--fb:'Inter',system-ui,Arial,sans-serif;--fh:'Space Grotesk','Inter',system-ui,sans-serif;--fm:'JetBrains Mono',ui-monospace,monospace;
+:root{--fb:'Open Sans','Helvetica Neue',Helvetica,Arial,sans-serif;--fh:'Open Sans','Helvetica Neue',Helvetica,Arial,sans-serif;--fm:'Open Sans',Helvetica,Arial,sans-serif;
 --choc:#18181B;--cream:#F4F4F5;--card:#FFFFFF;--input:#FFFFFF;--sand:#F0F0F2;--sand2:#E4E4E7;--line:#E4E4E7;--soft:#52525B;--mute:#71717A;
 --car:#F5A524;--car-d:#B45309;--grid:#ECECEF;--neutro:#A1A1AA;
 --bg-ok:#E8F5EC;--bg-warn:#FDF3E3;--bg-bad:#FCEBEA;--bg-info:#EBF1FB;--bg-vio:#F1ECF8;--t-bad:#B42318;--t-ok:#15803D;
@@ -10,12 +10,12 @@
 --bg-ok:#10261A;--bg-warn:#2A1F0E;--bg-bad:#2C1414;--bg-info:#111D30;--bg-vio:#1E1530;--t-bad:#F87171;--t-ok:#4ADE80;
 --sb:#0B0B0D;--sb-line:#1C1C20;color-scheme:dark}
 html,body{background:var(--cream)}
-h1,h2,h3,h4{font-family:var(--fh);letter-spacing:-.01em}
+h1,h2,h3,h4{font-family:var(--fh);letter-spacing:0}
 /* ===== estrutura: barra lateral recolhível + topo ===== */
 .shell{display:flex;height:100vh;overflow:hidden}
 .sb{width:232px;flex:none;background:var(--sb);color:var(--sb-tx);display:flex;flex-direction:column;border-right:1px solid var(--sb-line);transition:width .18s ease;z-index:2000;overflow:hidden}
 .sb-top{display:flex;align-items:center;gap:10px;height:56px;padding:0 12px;border-bottom:1px solid var(--sb-line);flex:none}
-.sb-brand{font-family:var(--fh);font-weight:700;font-size:17px;color:#fff;white-space:nowrap;letter-spacing:-.02em}
+.sb-brand{font-family:var(--fh);font-weight:600;font-size:17px;color:#fff;white-space:nowrap}
 .sb-brand small{display:block;font:500 10.5px var(--fb);color:var(--sb-tx);letter-spacing:.08em;text-transform:uppercase}
 .sb-ic{width:36px;height:36px;flex:none;border:0;background:transparent;color:var(--sb-tx);border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0}
 .sb-ic:hover{background:var(--sb-hv);color:#fff}
