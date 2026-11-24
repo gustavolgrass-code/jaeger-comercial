@@ -4,7 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Jaeger's Administração</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@500;600&display=swap">
+<script>/* tema e barra lateral antes de pintar: recarregar não pisca nem volta ao claro */
+try{var t=localStorage.getItem('jg-tema')||(matchMedia('(prefers-color-scheme: dark)').matches?'escuro':'claro');document.documentElement.dataset.tema=t;document.documentElement.dataset.sb=localStorage.getItem('jg-sb')||'aberta';}catch(e){document.documentElement.dataset.tema='claro';document.documentElement.dataset.sb='aberta';}</script>
+<meta name="theme-color" content="#0E0E10">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@500&display=swap">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="styles.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
