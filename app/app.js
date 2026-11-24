@@ -1749,31 +1749,36 @@ function diasUteisEntre(ini, fim) { const fer = new Set(metasV2().feriados || []
 function baldes(ini, fim) { const dias = Math.round((fim - ini) / DIA), sem = dias > 62, passo = sem ? 7 : 1, out = [];
   for (let a = new Date(ini); a < fim; a = new Date(+a + passo * DIA)) { const b = new Date(Math.min(+fim, +a + passo * DIA)); out.push({ a, b, lab: sem ? ddmm(a) : dias <= 7 ? DIAS_SEM[a.getDay()] + ' ' + a.getDate() : String(a.getDate()) }); }
   out.semanal = sem; return out; }
-// calendário: 1º clique escolhe o dia inicial, 2º o final
+// calendário: 1º clique escolhe o dia inicial, 2º o final (um mês por vez; o hover só repinta as classes, sem refazer os botões)
 function calendarioFaixa(ancora, de, ate, ok) {
   document.getElementById('calFx')?.remove();
-  let a = de ? new Date(de + 'T12:00') : null, b = ate ? new Date(ate + 'T12:00') : null, hov = null, ver = new Date((b || new Date()).getFullYear(), (b || new Date()).getMonth() - 1, 1);
+  let a = de ? new Date(de + 'T12:00') : null, b = ate ? new Date(ate + 'T12:00') : null, ver = new Date((b || new Date()).getFullYear(), (b || new Date()).getMonth(), 1);
   const el = document.createElement('div'); el.id = 'calFx'; el.className = 'calfx'; document.body.appendChild(el);
-  const r = ancora.getBoundingClientRect(); el.style.top = (r.bottom + 6) + 'px'; el.style.left = Math.max(8, Math.min(r.left, innerWidth - 580)) + 'px';
-  const mesH = m => { const pri = new Date(m.getFullYear(), m.getMonth(), 1), off = (pri.getDay() + 6) % 7, n = new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate(), fimR = b || (a && hov) || null;
-    let h = `<div class="calm"><b>${pri.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</b><div class="calg">${['S', 'T', 'Q', 'Q', 'S', 'S', 'D'].map(x => `<i>${x}</i>`).join('')}${'<span></span>'.repeat(off)}`;
-    for (let d = 1; d <= n; d++) { const dt = new Date(m.getFullYear(), m.getMonth(), d, 12), iso = isoDe(dt), lo = a && fimR ? (a < fimR ? a : fimR) : a, hi = a && fimR ? (a < fimR ? fimR : a) : a;
-      const cls = [lo && isoDe(lo) === iso ? 'ini' : '', hi && isoDe(hi) === iso ? 'fim' : '', lo && hi && dt > lo && dt < hi ? 'meio' : '', iso === hojeISO() ? 'hj' : ''].join(' ');
-      h += `<button type="button" data-d="${iso}" class="${cls}">${d}</button>`; }
-    return h + '</div></div>'; };
-  const pinta = () => { el.innerHTML = `<div class="calhd"><button type="button" data-n="-1">‹</button><small>${!a || b ? 'Clique no dia inicial' : 'Agora clique no dia final'}</small><button type="button" data-n="1">›</button></div>
-    <div class="calms">${mesH(ver)}${mesH(new Date(ver.getFullYear(), ver.getMonth() + 1, 1))}</div>
-    <div class="calft"><small>${a ? ddmm(a) + (b ? ' – ' + ddmm(b) : ' – …') : ''}</small><span><button type="button" class="mini" data-x>Cancelar</button> <button type="button" class="mini on" data-ok ${a && b ? '' : 'disabled'}>Aplicar</button></span></div>`; };
+  const r = ancora.getBoundingClientRect(); el.style.top = (r.bottom + 6) + 'px'; el.style.left = Math.max(8, Math.min(r.left, innerWidth - 300)) + 'px';
+  const marca = (hov = null) => { const fimR = b || (a && hov) || null, lo = a && fimR ? (a < fimR ? a : fimR) : a, hi = a && fimR ? (a < fimR ? fimR : a) : a;
+    el.querySelectorAll('[data-d]').forEach(x => { const dt = new Date(x.dataset.d + 'T12:00'), iso = x.dataset.d;
+      x.classList.toggle('ini', !!lo && isoDe(lo) === iso); x.classList.toggle('fim', !!hi && isoDe(hi) === iso); x.classList.toggle('meio', !!(lo && hi && dt > lo && dt < hi)); });
+    const m = el.querySelector('.calmsg'); if (m) m.textContent = !a || b ? 'Clique no dia inicial' : 'Agora clique no dia final';
+    el.querySelector('.calft small').textContent = a ? ddmm(a) + (b ? ' – ' + ddmm(b) : ' – …') : ''; el.querySelector('[data-ok]').disabled = !(a && b); };
+  const pinta = () => { const pri = new Date(ver.getFullYear(), ver.getMonth(), 1), off = (pri.getDay() + 6) % 7, n = new Date(ver.getFullYear(), ver.getMonth() + 1, 0).getDate();
+    let g = ''; for (let d = 1; d <= n; d++) { const iso = isoDe(new Date(ver.getFullYear(), ver.getMonth(), d, 12)); g += `<button type="button" data-d="${iso}" class="${iso === hojeISO() ? 'hj' : ''}">${d}</button>`; }
+    el.innerHTML = `<div class="calhd"><button type="button" data-n="-1">‹</button><b>${pri.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</b><button type="button" data-n="1">›</button></div><small class="calmsg"></small>
+     <div class="calg">${['S', 'T', 'Q', 'Q', 'S', 'S', 'D'].map(x => `<i>${x}</i>`).join('')}${'<span></span>'.repeat(off)}${g}</div>
+     <div class="calft"><small></small><span><button type="button" class="mini" data-x>Cancelar</button> <button type="button" class="mini on" data-ok>Aplicar</button></span></div>`;
+    marca(); };
+  // a mensagem fica numa linha própria
+  const msg = () => el.querySelector('.calmsg');
   pinta();
+  const marcaMsg = () => { if (msg()) msg().textContent = !a || b ? 'Clique no dia inicial' : 'Agora clique no dia final'; };
   el.addEventListener('click', e => { e.stopPropagation(); const t = e.target.closest('button'); if (!t) return;
-    if (t.dataset.n) { ver = new Date(ver.getFullYear(), ver.getMonth() + +t.dataset.n, 1); return pinta(); }
-    if (t.dataset.d) { const d = new Date(t.dataset.d + 'T12:00'); if (!a || b) { a = d; b = null; } else { b = d; if (b < a) [a, b] = [b, a]; } return pinta(); }
+    if (t.dataset.n) { ver = new Date(ver.getFullYear(), ver.getMonth() + +t.dataset.n, 1); pinta(); return marcaMsg(); }
+    if (t.dataset.d) { const d = new Date(t.dataset.d + 'T12:00'); if (!a || b) { a = d; b = null; } else { b = d; if (b < a) [a, b] = [b, a]; } marca(); return marcaMsg(); }
     if ('x' in t.dataset) return el.remove();
     if ('ok' in t.dataset && a && b) { el.remove(); ok(isoDe(a), isoDe(b)); } });
-  el.addEventListener('mouseover', e => { const t = e.target.closest('[data-d]'); if (!t || !a || b) return; hov = new Date(t.dataset.d + 'T12:00'); pinta(); });
-  setTimeout(() => document.addEventListener('click', function fora(ev) { if (!el.contains(ev.target)) { el.remove(); document.removeEventListener('click', fora); } }), 0);
+  el.addEventListener('mouseover', e => { const t = e.target.closest('[data-d]'); if (t && a && !b) marca(new Date(t.dataset.d + 'T12:00')); });
+  marcaMsg();
+  setTimeout(() => document.addEventListener('click', function fora(ev) { if (!document.body.contains(el)) return document.removeEventListener('click', fora); if (!el.contains(ev.target)) { el.remove(); document.removeEventListener('click', fora); } }), 0);
 }
-
 function ponte(B) {
   const passos = [['Ativos no início', B.ativosIni, 'tot'], ['Novos', B.novos, 'mais'], ['Recuperados', B.recup, 'mais'], ['Perdidos', -B.perdidos, 'menos'], ['Ativos agora', B.ativosFim, 'tot']];
   const W = 640, H = 220, L = 20, R = 20, T = 22, Bm = 40, iw = W - L - R, ih = H - T - Bm, max = Math.max(B.ativosIni + B.novos + B.recup, B.ativosFim, 1), Y = v => T + ih - v / max * ih, gw = iw / passos.length, bw = Math.min(70, gw - 18);
