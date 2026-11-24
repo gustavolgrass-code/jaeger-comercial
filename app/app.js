@@ -153,7 +153,8 @@ function telaPrimeiroAcesso(user) {
 /* =================== estrutura =================== */
 const ABAS = {
   comercial: [['mapa', 'Mapa'], ['funil', 'Funil'], ['agenda', 'Agenda'], ['carteira', 'Negócios'], ['contatos', 'Contatos'], ['abertura', 'Cadastrar venda'], ['painel', 'Painel'], ['uploads', 'Uploads'], ['regras', 'Regras e metas']],
-  operacao: [['rota', 'Dia de rota'], ['reposicao', 'Reposição'], ['resumo', 'Resumo do dia'], ['estoque', 'Estoque']] };
+  operacao: [['rota', 'Dia de rota'], ['reposicao', 'Reposição'], ['resumo', 'Resumo do dia'], ['estoque', 'Estoque']],
+  financeiro: [['freceber', 'Contas a receber'], ['fpagar', 'Contas a pagar'], ['fcaixa', 'Caixas e bancos']] };
 let lado = 'comercial';
 // menu lateral: grupos (CRM, Reposição, Ajustes) com ícones; recolhe para só os ícones e lembra a escolha
 const ICO = {
@@ -172,11 +173,11 @@ const ICO = {
   menu: '<path d="M3 6h18M3 12h18M3 18h18"/>', lua: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>',
   sol: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   recolher: '<rect x="3" y="3" width="18" height="18"/><path d="M9 3v18M15 9l-3 3 3 3"/>', abrir: '<rect x="3" y="3" width="18" height="18"/><path d="M9 3v18M13 9l3 3-3 3"/>',
-  seta: '<path d="m6 9 6 6 6-6"/>', estoque: '<path d="M3 21V9l9-6 9 6v12"/><path d="M7 21v-8h10v8M7 17h10"/>', lupa: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>', filtro: '<path d="M4 6h16M7 12h10M10 18h4"/>',
+  seta: '<path d="m6 9 6 6 6-6"/>', estoque: '<path d="M3 21V9l9-6 9 6v12"/><path d="M7 21v-8h10v8M7 17h10"/>', freceber: '<path d="M12 3v14M6 11l6 6 6-6M4 21h16"/>', fpagar: '<path d="M12 17V3M6 9l6-6 6 6M4 21h16"/>', fcaixa: '<rect x="3" y="6" width="18" height="13"/><path d="M3 10h18M7 15h4"/>', lupa: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>', filtro: '<path d="M4 6h16M7 12h10M10 18h4"/>',
   pino: '<path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.5"/>' };
 const ico = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" stroke-linejoin="miter">${ICO[k] || ''}</svg>`;
 const MENU = [{ g: 'CRM', lado: 'comercial', it: ['funil', 'mapa', 'agenda', 'carteira', 'contatos', 'abertura', 'painel', 'uploads'] },
-  { g: 'Reposição', lado: 'operacao', it: ['rota', 'reposicao', 'resumo'] }, { g: 'Estoque', lado: 'operacao', it: ['estoque'] }, { g: 'Ajustes', lado: 'comercial', it: ['regras'] }];
+  { g: 'Reposição', lado: 'operacao', it: ['rota', 'reposicao', 'resumo'] }, { g: 'Estoque', lado: 'operacao', it: ['estoque'] }, { g: 'Financeiro', lado: 'comercial', it: ['freceber', 'fpagar', 'fcaixa'] }, { g: 'Ajustes', lado: 'comercial', it: ['regras'] }];
 const nomeAba = k => (Object.values(ABAS).flat().find(([x]) => x === k) || [, k])[1];
 const grupoDe = k => MENU.find(m => m.it.includes(k));
 const guardar = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { } };
@@ -221,7 +222,7 @@ function irPara(a, semHist) {
   else if (!semHist && S.aba && !mesmo) { S.hist.push({ aba: S.aba, ...(S.histEnt || {}) }); if (S.hist.length > 40) S.hist.shift(); }
   S.aba = a; S.histEnt = ctx;
   pintarMenu();
-  ({ agenda: telaAgenda, perfil: telaPerfil, contato: telaContato, contatos: telaContatos, uploads: telaUploads, mapa: telaMapa, funil: telaFunil, carteira: telaCarteira, abertura: telaAbertura, painel: telaPainel, regras: telaRegras, rota: telaRota, reposicao: telaReposicao, pedcli: telaPedidosCliente, resumo: telaResumo, carteiramet: telaCarteiraMet, estoque: telaEstoque })[a]();
+  ({ agenda: telaAgenda, perfil: telaPerfil, contato: telaContato, contatos: telaContatos, uploads: telaUploads, mapa: telaMapa, funil: telaFunil, carteira: telaCarteira, abertura: telaAbertura, painel: telaPainel, regras: telaRegras, rota: telaRota, reposicao: telaReposicao, pedcli: telaPedidosCliente, resumo: telaResumo, carteiramet: telaCarteiraMet, estoque: telaEstoque, freceber: () => telaContas('receber'), fpagar: () => telaContas('pagar'), fcaixa: telaCaixas })[a]();
 }
 window.irPara = irPara;
 // texto do botão Voltar: diz para onde vai (ex.: "← Almeida 68" quando veio do perfil do negócio)
@@ -2958,6 +2959,144 @@ async function verPedido(id, p) {
       if (cs.length && d.visita?.tipo === 'reposicao') { S.reabrir = { pdvId: p.id, contagens: cs, condicao: o.condicao, vencimento: o.vencimento, bonif: bon }; S.contando = p.id; S.repVolta = { aba: 'perfil', id: p.id }; irPara('reposicao'); }
       else { S.prefillVenda = { pdv: p.id, q: Object.fromEntries(d.itens.filter(i => +i.quantidade > 0).map(i => [i.produto_id, +i.quantidade])) }; S.abPdv = p.id; S.vendaVolta = { aba: 'perfil', id: p.id }; irPara('abertura'); } }; };
   $('#vpExc').onclick = () => excluir(false); $('#vpRef').onclick = () => excluir(true);
+}
+
+/* =================== financeiro (integrado ao Bling) =================== */
+// contas a receber, contas a pagar e caixas e bancos: leitura direto do Bling; criar conta, baixa total e lançamento no caixa gravam lá
+const FIN = { nomes: (() => { try { return JSON.parse(localStorage.getItem('jg-fin-nomes') || '{}'); } catch (e) { return {}; } })() };
+const SIT_FIN = { receber: { 1: 'Em aberto', 2: 'Recebido', 3: 'Parcial', 4: 'Devolvido', 5: 'Cancelado' }, pagar: { 1: 'Em aberto', 2: 'Pago', 3: 'Parcial', 4: 'Cancelado', 5: 'Cancelado' } };
+const finLer = (caminho, paginas) => db.bling('fin_listar', { caminho, paginas }).then(r => r?.data || []);
+const finUm = caminho => db.bling('ler', { caminho }).then(r => r?.data || r);
+const finEsc = (metodo, caminho, corpo) => db.bling('fin_escrever', { metodo, caminho, corpo });
+const val = x => +(x ?? 0) || 0;
+const nomeContato = c => { if (!c) return '—'; if (c.nome) return c.nome; const p = S.pdvs.find(x => String(x.bling_contato_id) === String(c.id)); return p?.nome || FIN.nomes[c.id] || 'Contato #' + c.id; };
+async function resolverNomes(ls) {
+  const faltam = [...new Set(ls.map(x => x.contato?.id).filter(id => id && !ls.find(y => y.contato?.id === id && y.contato?.nome) && !S.pdvs.some(p => String(p.bling_contato_id) === String(id)) && !FIN.nomes[id]))].slice(0, 25);
+  for (const id of faltam) { try { const c = await finUm('/contatos/' + id); if (c?.nome) FIN.nomes[id] = c.nome; } catch (e) { } }
+  try { localStorage.setItem('jg-fin-nomes', JSON.stringify(FIN.nomes)); } catch (e) { }
+}
+async function finCadastros() {
+  if (!FIN.contas) FIN.contas = await finLer('/contas-contabeis', 3).catch(() => []);
+  if (!FIN.cats) FIN.cats = await finLer('/categorias/receitas-despesas', 5).catch(() => []);
+  if (!FIN.formas) FIN.formas = await finLer('/formas-pagamentos', 3).catch(() => []);
+}
+const erroFin = e => { const m = String(e.message || e); if (/não permitido|desconhecida/.test(m)) return `<div class="panel"><h3>Falta publicar a função do Bling</h3><p>Para o financeiro funcionar, a função <b>bling-oauth</b> no Supabase precisa ser atualizada com a versão nova (Edge Functions → bling-oauth → colar o código → Deploy).</p><small style="color:var(--mute)">${esc(m)}</small></div>`; return `<div class="panel"><h3>Não consegui ler do Bling</h3><p style="color:var(--t-bad)">${esc(m)}</p></div>`; };
+function finPeriodo(k) { const h = new Date(), iso = d => isoDe(d); FIN[k] = FIN[k] || { de: iso(new Date(h.getFullYear(), h.getMonth() - 2, 1)), ate: iso(new Date(h.getFullYear(), h.getMonth() + 2, 0)), sit: 'abertos' }; return FIN[k]; }
+async function telaContas(tipo) { // tipo: 'receber' | 'pagar'
+  const F = finPeriodo(tipo), rec = tipo === 'receber';
+  $('#main').innerHTML = `<section class="view on"><div class="dash pnl"><div class="loading">Lendo as contas a ${tipo} no Bling…</div></div></section>`;
+  let ls; try { ls = await finLer(`/contas/${tipo}?dataVencimentoInicial=${F.de}&dataVencimentoFinal=${F.ate}`, 20); await resolverNomes(ls); } catch (e) { return $('#main .dash').innerHTML = erroFin(e); }
+  FIN['ls_' + tipo] = ls;
+  const hoje0 = hojeISO(), aberto = x => [1, 3].includes(+x.situacao), em7 = isoDe(new Date(Date.now() + 7 * DIA));
+  const desenha = () => {
+    const q = (FIN['q_' + tipo] || '').toLowerCase();
+    const f = ls.filter(x => (F.sit === 'todos' || (F.sit === 'abertos' ? aberto(x) : F.sit === 'vencidos' ? aberto(x) && x.vencimento < hoje0 : !aberto(x) && [2].includes(+x.situacao))) && (!q || nomeContato(x.contato).toLowerCase().includes(q)))
+      .sort((a, b) => a.vencimento < b.vencimento ? -1 : 1);
+    const soma = a => a.reduce((s, x) => s + val(x.saldo ?? x.valor), 0), abertos = ls.filter(aberto);
+    const venc = abertos.filter(x => x.vencimento < hoje0), prox = abertos.filter(x => x.vencimento >= hoje0 && x.vencimento <= em7), quit = ls.filter(x => +x.situacao === 2);
+    $('#finCorpo').innerHTML = `<div class="kpis"><div class="kpi"><small>Em aberto</small><b>${brl(soma(abertos))}</b><small class="sub">${abertos.length} contas no período</small></div>
+      <div class="kpi"><small>Vencido</small><b style="color:${venc.length ? 'var(--t-bad)' : 'inherit'}">${brl(soma(venc))}</b><small class="sub">${venc.length} conta${venc.length === 1 ? '' : 's'}</small></div>
+      <div class="kpi"><small>Vence em 7 dias</small><b>${brl(soma(prox))}</b><small class="sub">${prox.length} conta${prox.length === 1 ? '' : 's'}</small></div>
+      <div class="kpi"><small>${rec ? 'Recebido' : 'Pago'} no período</small><b>${brl(quit.reduce((s, x) => s + val(x.valor), 0))}</b><small class="sub">${quit.length} conta${quit.length === 1 ? '' : 's'}</small></div></div>
+     <div class="panel" style="overflow-x:auto">${f.length ? `<table class="dped"><tr><th>Vencimento</th><th>${rec ? 'Cliente' : 'Fornecedor'}</th><th>Valor</th><th>Situação</th><th></th></tr>${f.map(x => { const atr = aberto(x) && x.vencimento < hoje0;
+       return `<tr class="lnk" data-fid="${x.id}"><td style="${atr ? 'color:var(--t-bad);font-weight:600' : ''}">${dstr(x.vencimento + 'T12:00')}${atr ? `<br><small>${Math.floor((new Date(hoje0) - new Date(x.vencimento)) / DIA)} dias atrasado</small>` : ''}</td><td>${esc(nomeContato(x.contato))}</td><td><b>${brl(val(x.valor))}</b></td>
+        <td><span class="badge" style="background:${+x.situacao === 2 ? 'var(--bg-ok)' : atr ? 'var(--bg-bad)' : aberto(x) ? 'var(--bg-warn)' : 'var(--sand)'}">${SIT_FIN[tipo][x.situacao] || x.situacao}</span></td>
+        <td>${aberto(x) ? `<button class="mini" data-baixa="${x.id}">${rec ? 'Receber' : 'Pagar'}</button>` : ''}</td></tr>`; }).join('')}</table>` : '<p class="empty">Nenhuma conta com esses filtros.</p>'}</div>`;
+    document.querySelectorAll('[data-fid]').forEach(tr => tr.onclick = e => { if (e.target.closest('[data-baixa]')) return; detalheConta(tipo, tr.dataset.fid); });
+    document.querySelectorAll('[data-baixa]').forEach(b => b.onclick = () => baixarConta(tipo, b.dataset.baixa));
+  };
+  $('#main').innerHTML = `<section class="view on"><div class="dash pnl">
+   <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
+    <div><label class="lb">Vencimento de</label><input type="date" id="fDe" value="${F.de}"></div><div><label class="lb">até</label><input type="date" id="fAte" value="${F.ate}"></div>
+    <div><label class="lb">Mostrar</label><select id="fSit">${[['abertos', 'Em aberto'], ['vencidos', 'Vencidos'], ['quitados', rec ? 'Recebidos' : 'Pagos'], ['todos', 'Todos']].map(([k, n]) => `<option value="${k}" ${F.sit === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+    <div><label class="lb">Buscar</label><input id="fQ" placeholder="${rec ? 'Cliente' : 'Fornecedor'}…" value="${esc(FIN['q_' + tipo] || '')}"></div>
+    <button class="btn" id="fRec" title="Ler de novo do Bling">↻</button><button class="btn pri" id="fNova" style="margin-left:auto">+ Nova conta a ${tipo}</button></div>
+   <div id="finCorpo"></div><small style="color:var(--mute)">Dados lidos do Bling agora. Toque numa conta para ver os detalhes.</small></div></section>`;
+  $('#fDe').onchange = $('#fAte').onchange = () => { F.de = $('#fDe').value; F.ate = $('#fAte').value; telaContas(tipo); };
+  $('#fSit').onchange = e => { F.sit = e.target.value; desenha(); }; $('#fQ').oninput = e => { FIN['q_' + tipo] = e.target.value; desenha(); };
+  $('#fRec').onclick = () => telaContas(tipo); $('#fNova').onclick = () => novaConta(tipo);
+  desenha();
+}
+async function detalheConta(tipo, id) {
+  modal('<div class="loading">Abrindo a conta no Bling…</div>');
+  let c; try { c = await finUm(`/contas/${tipo}/${id}`); await finCadastros(); } catch (e) { fecharModal(); return erro(e); }
+  const nm = (ls, x) => x?.id ? (ls.find(y => String(y.id) === String(x.id))?.descricao || ls.find(y => String(y.id) === String(x.id))?.nome || '#' + x.id) : '—';
+  const lin = (n, v) => v == null || v === '' ? '' : `<tr><td style="color:var(--mute)">${n}</td><td>${v}</td></tr>`;
+  modal(`<h3 style="margin-top:0">Conta a ${tipo} · ${esc(nomeContato(c.contato))}</h3><table class="dped">
+   ${lin('Situação', SIT_FIN[tipo][c.situacao] || c.situacao)}${lin('Valor', brl(val(c.valor)))}${c.saldo != null ? lin('Saldo', brl(val(c.saldo))) : ''}${lin('Vencimento', c.vencimento ? dstr(c.vencimento + 'T12:00') : '')}
+   ${lin('Emissão', c.dataEmissao ? dstr(c.dataEmissao + 'T12:00') : '')}${lin('Competência', c.competencia ? dstr(c.competencia + 'T12:00') : '')}${lin('Documento', esc(c.numeroDocumento || ''))}${lin('Histórico', esc(c.historico || ''))}
+   ${lin('Categoria', esc(nm(FIN.cats, c.categoria)))}${lin('Conta financeira (portador)', esc(nm(FIN.contas, c.portador)))}${lin('Forma de pagamento', esc(nm(FIN.formas, c.formaPagamento)))}${c.origem?.numero ? lin('Origem', esc((c.origem.tipoOrigem || '') + ' ' + c.origem.numero)) : ''}</table>
+   <div class="row" style="margin-top:14px;justify-content:space-between"><span>${[1, 3].includes(+c.situacao) ? `<button class="btn car" id="dcBaixa">${tipo === 'receber' ? 'Receber' : 'Pagar'} (baixa total)</button>` : ''}</span><button class="btn pri" onclick="fecharModal()">Fechar</button></div>`);
+  if ($('#dcBaixa')) $('#dcBaixa').onclick = () => baixarConta(tipo, id, c);
+}
+const opcoes = (ls, sel, vazio) => `<option value="">${vazio}</option>` + ls.map(x => `<option value="${x.id}" ${String(sel) === String(x.id) ? 'selected' : ''}>${esc(x.descricao || x.nome || '#' + x.id)}</option>`).join('');
+const catsDo = tipo => (FIN.cats || []).filter(c => !c.tipo || (tipo === 'receber' ? [1, 'R', 'receita'].includes(c.tipo) || /receita/i.test(c.tipo) : [2, 'D', 'despesa'].includes(c.tipo) || /despesa/i.test(c.tipo)));
+async function baixarConta(tipo, id, c) {
+  modal('<div class="loading">Preparando a baixa…</div>');
+  try { c = c || await finUm(`/contas/${tipo}/${id}`); await finCadastros(); } catch (e) { fecharModal(); return erro(e); }
+  const saldo = val(c.saldo ?? c.valor), rec = tipo === 'receber';
+  modal(`<h3 style="margin-top:0">${rec ? 'Receber' : 'Pagar'} · ${esc(nomeContato(c.contato))}</h3>
+   <p style="margin:0">Baixa <b>total</b> de <b>${brl(saldo)}</b> (vencimento ${c.vencimento ? dstr(c.vencimento + 'T12:00') : '—'}).</p>
+   <div class="row" style="gap:10px;flex-wrap:wrap"><div><label>Data do ${rec ? 'recebimento' : 'pagamento'}</label><input type="date" id="bxD" value="${hojeISO()}"></div>
+    <div style="flex:1;min-width:200px"><label>Conta financeira</label><select id="bxC">${opcoes(FIN.contas || [], c.portador?.id, '— escolha —')}</select></div></div>
+   <label>Categoria</label><select id="bxCat">${opcoes(catsDo(tipo), c.categoria?.id, '— sem categoria —')}</select>
+   <label>Histórico</label><input id="bxH" value="${esc(c.historico || '')}" style="width:100%">
+   <p style="font-size:12px;color:var(--mute)">Baixa parcial: faça direto no Bling (a API do Bling já quitou contas inteiras quando recebeu valor parcial).</p>
+   <div class="row" style="margin-top:12px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="bxOk">Confirmar ${rec ? 'recebimento' : 'pagamento'} de ${brl(saldo)}</button></div>`);
+  $('#bxOk').onclick = async () => { if (!$('#bxC').value) return toast('Escolha a conta financeira'); $('#bxOk').disabled = true;
+    const corpo = { data: $('#bxD').value, valor: saldo, valorPago: saldo, valorRecebido: saldo, portador: { id: +$('#bxC').value }, ...($('#bxCat').value ? { categoria: { id: +$('#bxCat').value } } : {}), historico: $('#bxH').value.trim() || undefined };
+    try { await finEsc('POST', `/contas/${tipo}/${id}/baixar`, corpo); fecharModal(); toast(`${rec ? 'Recebimento' : 'Pagamento'} de ${brl(saldo)} baixado no Bling`); telaContas(tipo); }
+    catch (e) { $('#bxOk').disabled = false; modal(`<h3>O Bling recusou a baixa</h3><p style="font-size:13px;color:var(--t-bad)">${esc(e.message)}</p><div class="row" style="justify-content:flex-end"><button class="btn pri" onclick="fecharModal()">Ok</button></div>`); } };
+}
+async function novaConta(tipo) {
+  modal('<div class="loading">Carregando cadastros do Bling…</div>'); try { await finCadastros(); } catch (e) { } const rec = tipo === 'receber';
+  modal(`<h3 style="margin-top:0">Nova conta a ${tipo}</h3>
+   <label>${rec ? 'Cliente' : 'Fornecedor'} (cadastro no Bling)</label><div class="mbusca"><input id="ncQ" placeholder="Digite o nome e escolha" autocomplete="off"><div class="sugs" id="ncS"></div></div><input type="hidden" id="ncId">
+   <div class="row" style="gap:10px;flex-wrap:wrap"><div><label>Valor</label><input type="number" step="0.01" min="0" id="ncV" style="width:120px"></div><div><label>Vencimento</label><input type="date" id="ncVen" value="${hojeISO()}"></div><div><label>Competência</label><input type="date" id="ncComp" value="${hojeISO()}"></div><div><label>Nº documento</label><input id="ncDoc" style="width:120px"></div></div>
+   <label>Categoria</label><select id="ncCat">${opcoes(catsDo(tipo), '', '— escolha —')}</select>
+   <div class="row" style="gap:10px;flex-wrap:wrap"><div style="flex:1"><label>Conta financeira</label><select id="ncPort">${opcoes(FIN.contas || [], '', '— opcional —')}</select></div><div style="flex:1"><label>Forma de pagamento</label><select id="ncForma">${opcoes(FIN.formas || [], '', '— opcional —')}</select></div></div>
+   <label>Histórico</label><input id="ncH" style="width:100%" placeholder="${rec ? 'Ex.: venda balcão' : 'Ex.: compra Baccaro, aluguel, combustível'}">
+   <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="ncOk">Lançar no Bling</button></div>`);
+  let tmr; $('#ncQ').oninput = () => { clearTimeout(tmr); $('#ncId').value = ''; const q = $('#ncQ').value.trim(); if (q.length < 2) { $('#ncS').style.display = 'none'; return; }
+    const loc = rec ? S.pdvs.filter(p => p.bling_contato_id && p.nome.toLowerCase().includes(q.toLowerCase())).slice(0, 6).map(p => ({ id: p.bling_contato_id, nome: p.nome })) : [];
+    const pinta = ls => { $('#ncS').innerHTML = ls.map(c => `<div data-ci="${c.id}" data-cn="${esc(c.nome)}"><b>${esc(c.nome)}</b>${c.numeroDocumento ? ' <small>' + esc(c.numeroDocumento) + '</small>' : ''}</div>`).join('') || '<div><small>Nada encontrado</small></div>'; $('#ncS').style.display = 'block';
+      $('#ncS').querySelectorAll('[data-ci]').forEach(d => d.onmousedown = () => { $('#ncId').value = d.dataset.ci; $('#ncQ').value = d.dataset.cn; $('#ncS').style.display = 'none'; }); };
+    pinta(loc); tmr = setTimeout(async () => { try { const r = await finUm('/contatos?pesquisa=' + encodeURIComponent(q) + '&limite=10'); const ls = [...loc, ...(Array.isArray(r) ? r : []).filter(c => !loc.some(l => String(l.id) === String(c.id)))]; if ($('#ncQ')?.value.trim() === q) pinta(ls); } catch (e) { } }, 450); };
+  $('#ncOk').onclick = async () => { const v = +$('#ncV').value; if (!$('#ncId').value) return toast('Escolha o ' + (rec ? 'cliente' : 'fornecedor') + ' na lista'); if (!(v > 0)) return toast('Coloque o valor');
+    const corpo = { contato: { id: +$('#ncId').value }, valor: v, vencimento: $('#ncVen').value, competencia: $('#ncComp').value || undefined, dataEmissao: hojeISO(), numeroDocumento: $('#ncDoc').value.trim() || undefined, historico: $('#ncH').value.trim() || undefined,
+      ...($('#ncCat').value ? { categoria: { id: +$('#ncCat').value } } : {}), ...($('#ncPort').value ? { portador: { id: +$('#ncPort').value } } : {}), ...($('#ncForma').value ? { formaPagamento: { id: +$('#ncForma').value } } : {}) };
+    $('#ncOk').disabled = true;
+    try { await finEsc('POST', `/contas/${tipo}`, corpo); fecharModal(); toast(`Conta a ${tipo} de ${brl(v)} lançada no Bling`); telaContas(tipo); }
+    catch (e) { $('#ncOk').disabled = false; toast('O Bling recusou: ' + e.message.slice(0, 160)); } };
+}
+async function telaCaixas() {
+  const F = FIN.cx = FIN.cx || { de: isoDe(new Date(Date.now() - 30 * DIA)), ate: hojeISO(), conta: '' };
+  $('#main').innerHTML = `<section class="view on"><div class="dash pnl"><div class="loading">Lendo caixas e bancos no Bling…</div></div></section>`;
+  let ls; try { await finCadastros(); ls = await finLer(`/caixas?dataInicial=${F.de}&dataFinal=${F.ate}${F.conta ? '&idContaFinanceira=' + F.conta : ''}`, 20); } catch (e) { return $('#main .dash').innerHTML = erroFin(e); }
+  const sinal = x => { const t = String(x.debitoCredito ?? x.tipo ?? '').toUpperCase(); return t.startsWith('D') || t === '2' || t === 'S' ? -1 : 1; };
+  const contaDe = x => x.contaFinanceira?.id ?? x.contaContabil?.id ?? x.portador?.id;
+  const f = ls.filter(x => !F.conta || String(contaDe(x)) === String(F.conta)).sort((a, b) => String(b.data).localeCompare(String(a.data)));
+  const ent = f.filter(x => sinal(x) > 0).reduce((s, x) => s + val(x.valor), 0), sai = f.filter(x => sinal(x) < 0).reduce((s, x) => s + val(x.valor), 0);
+  const porConta = {}; f.forEach(x => { const k = contaDe(x) || '-'; porConta[k] = (porConta[k] || 0) + sinal(x) * val(x.valor); });
+  const nmC = id => (FIN.contas || []).find(c => String(c.id) === String(id))?.descricao || (id === '-' ? 'Sem conta' : '#' + id);
+  $('#main').innerHTML = `<section class="view on"><div class="dash pnl">
+   <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end"><div><label class="lb">De</label><input type="date" id="cxDe" value="${F.de}"></div><div><label class="lb">até</label><input type="date" id="cxAte" value="${F.ate}"></div>
+    <div><label class="lb">Conta</label><select id="cxConta">${opcoes(FIN.contas || [], F.conta, 'Todas as contas')}</select></div><button class="btn" id="cxRec">↻</button><button class="btn pri" id="cxNovo" style="margin-left:auto">+ Lançamento</button></div>
+   <div class="kpis"><div class="kpi"><small>Entradas</small><b style="color:var(--t-ok)">${brl(ent)}</b></div><div class="kpi"><small>Saídas</small><b style="color:var(--t-bad)">${brl(sai)}</b></div><div class="kpi"><small>Resultado do período</small><b>${brl(ent - sai)}</b></div><div class="kpi"><small>Lançamentos</small><b>${f.length}</b></div></div>
+   ${Object.keys(porConta).length > 1 ? `<div class="panel"><h3>Movimento por conta</h3>${ranking(Object.entries(porConta).map(([k, v]) => ({ n: nmC(k), v, c: v >= 0 ? COR.bom : COR.ruim })), 'R$')}</div>` : ''}
+   <div class="panel" style="overflow-x:auto">${f.length ? `<table class="dped"><tr><th>Data</th><th>Histórico</th><th>Conta</th><th>Categoria</th><th style="text-align:right">Valor</th></tr>${f.map(x => `<tr><td>${x.data ? dstr(String(x.data).slice(0, 10) + 'T12:00') : '—'}</td><td>${esc(x.historico || x.descricao || '')}</td><td>${esc(nmC(contaDe(x) || '-'))}</td><td>${esc((FIN.cats || []).find(c => String(c.id) === String(x.categoria?.id))?.descricao || '')}</td><td style="text-align:right;font-weight:600;color:${sinal(x) > 0 ? 'var(--t-ok)' : 'var(--t-bad)'}">${sinal(x) > 0 ? '+' : '−'} ${brl(val(x.valor))}</td></tr>`).join('')}</table>` : '<p class="empty">Nenhum lançamento no período.</p>'}</div>
+   <small style="color:var(--mute)">Lido do Bling agora (Financeiro → Caixas e bancos).</small></div></section>`;
+  $('#cxDe').onchange = $('#cxAte').onchange = () => { F.de = $('#cxDe').value; F.ate = $('#cxAte').value; telaCaixas(); }; $('#cxConta').onchange = e => { F.conta = e.target.value; telaCaixas(); };
+  $('#cxRec').onclick = () => telaCaixas();
+  $('#cxNovo').onclick = () => { modal(`<h3 style="margin-top:0">Novo lançamento no caixa</h3><div class="nbol" id="lxT"><button type="button" data-t="C" class="on">Entrada</button><button type="button" data-t="D">Saída</button></div>
+    <div class="row" style="gap:10px;flex-wrap:wrap"><div><label>Data</label><input type="date" id="lxD" value="${hojeISO()}"></div><div><label>Valor</label><input type="number" step="0.01" min="0" id="lxV" style="width:120px"></div><div style="flex:1;min-width:180px"><label>Conta</label><select id="lxC">${opcoes(FIN.contas || [], F.conta, '— escolha —')}</select></div></div>
+    <label>Categoria</label><select id="lxCat">${opcoes(FIN.cats || [], '', '— sem categoria —')}</select><label>Histórico</label><input id="lxH" style="width:100%">
+    <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="lxOk">Lançar no Bling</button></div>`);
+    document.querySelectorAll('#lxT [data-t]').forEach(b => b.onclick = () => document.querySelectorAll('#lxT [data-t]').forEach(x => x.classList.toggle('on', x === b)));
+    $('#lxOk').onclick = async () => { const v = +$('#lxV').value; if (!(v > 0)) return toast('Coloque o valor'); if (!$('#lxC').value) return toast('Escolha a conta'); if (!$('#lxH').value.trim()) return toast('Escreva o histórico');
+      const t = document.querySelector('#lxT .on').dataset.t; $('#lxOk').disabled = true;
+      try { await finEsc('POST', '/caixas', { data: $('#lxD').value, valor: v, debitoCredito: t, contaFinanceira: { id: +$('#lxC').value }, contaContabil: { id: +$('#lxC').value }, historico: $('#lxH').value.trim(), ...($('#lxCat').value ? { categoria: { id: +$('#lxCat').value } } : {}) });
+        fecharModal(); toast('Lançamento feito no Bling'); telaCaixas(); } catch (e) { $('#lxOk').disabled = false; toast('O Bling recusou: ' + e.message.slice(0, 160)); } }; };
 }
 
 /* =================== estoque =================== */

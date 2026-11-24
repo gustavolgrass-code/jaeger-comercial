@@ -179,10 +179,27 @@ async function puxarContatos(inicio: number) {
 }
 
 // leitura de consulta (só GET, só estes caminhos) para analisar os cadastros do Bling
-const LEITURA_OK = /^\/(pedidos\/vendas(\/\d+)?|produtos(\/\d+)?|formas-pagamentos(\/\d+)?|naturezas-operacoes|vendedores(\/\d+)?|contatos\/\d+|situacoes\/modulos(\/\d+)?|situacoes\/\d+|categorias\/receitas-despesas|lojas?|canais-venda|depositos|empresas\/me\/dados-basicos)(\?.*)?$/;
+const LEITURA_OK = /^\/(pedidos\/vendas(\/\d+)?|produtos(\/\d+)?|formas-pagamentos(\/\d+)?|naturezas-operacoes|vendedores(\/\d+)?|contatos\/\d+|situacoes\/modulos(\/\d+)?|situacoes\/\d+|categorias\/receitas-despesas(\/\d+)?|lojas?|canais-venda|depositos|empresas\/me\/dados-basicos|contas\/(receber|pagar)(\/\d+)?|contas-contabeis(\/\d+)?|caixas(\/\d+)?|borderos(\/\d+)?|contatos|estoques\/saldos)(\?.*)?$/;
 async function ler(caminho: string) {
   if (!LEITURA_OK.test(caminho)) throw new Error('caminho de leitura não permitido');
   return chamar(caminho, await tokenValido());
+}
+
+// financeiro: lista paginada (contas a receber/pagar, caixas) e escritas permitidas (criar conta, baixa total, lançamento no caixa)
+async function listarTudo(caminho: string, maxPaginas = 20) {
+  if (!LEITURA_OK.test(caminho)) throw new Error('caminho de leitura não permitido');
+  const token = await tokenValido(), out: unknown[] = [], sep = caminho.includes('?') ? '&' : '?';
+  for (let p = 1; p <= maxPaginas; p++) { const r = await chamar(`${caminho}${sep}pagina=${p}&limite=100`, token); const d = (r as { data?: unknown[] }).data ?? []; out.push(...d); if (d.length < 100) break; }
+  return { data: out };
+}
+const ESCRITA_OK: [string, RegExp][] = [['POST', /^\/contas\/(receber|pagar)$/], ['POST', /^\/contas\/(receber|pagar)\/\d+\/baixar$/], ['DELETE', /^\/contas\/(receber|pagar)\/\d+$/], ['POST', /^\/caixas$/]];
+async function escreverFin(metodo: string, caminho: string, corpo: unknown) {
+  if (!ESCRITA_OK.some(([m, re]) => m === metodo && re.test(caminho))) throw new Error('escrita não permitida');
+  const token = await tokenValido();
+  const r = await fetch(`${API}${caminho}`, { method: metodo, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json', 'enable-jwt': '1' }, ...(metodo === 'DELETE' ? {} : { body: JSON.stringify(corpo ?? {}) }) });
+  const txt = await r.text(); let j: unknown = {}; try { j = txt ? JSON.parse(txt) : {}; } catch { j = { texto: txt }; }
+  if (!r.ok) throw new Error(`Bling ${caminho} (${r.status}): ${JSON.stringify(j).slice(0, 600)}`);
+  return j;
 }
 
 // envia um pedido do app para o Bling (configuração em regras.chave = 'bling')
@@ -350,7 +367,7 @@ Deno.serve(async (req) => {
   const jwt = (req.headers.get('Authorization') ?? '').replace('Bearer ', '');
   const { data: u } = await db.auth.getUser(jwt);
   if (!u?.user) return json({ erro: 'não autorizado' }, 401);
-  const { acao, inicio, caminho, pedido_id, contato_id } = await req.json().catch(() => ({}));
+  const { acao, inicio, caminho, pedido_id, contato_id, metodo, corpo, paginas } = await req.json().catch(() => ({}));
   try {
     if (acao === 'status') {
       const { data } = await db.from('bling_conexao').select('conectado_em, ultima_sync, ultimo_resultado, ultimo_erro, refresh_token').eq('id', 1).maybeSingle();
@@ -367,6 +384,8 @@ Deno.serve(async (req) => {
     if (acao === 'sincronizar') return json(await sincronizar());
     if (acao === 'contatos') return json(await puxarContatos(Number(inicio) || 0));
     if (acao === 'ler') return json(await ler(String(caminho || '')));
+    if (acao === 'fin_listar') return json(await listarTudo(String(caminho || ''), Math.min(50, Number(paginas) || 20)));
+    if (acao === 'fin_escrever') return json(await escreverFin(String(metodo || ''), String(caminho || ''), corpo));
     if (acao === 'itens') return json(await puxarItens());
     if (acao === 'enviar_pedido') return json(await enviarPedido(String(pedido_id || '')));
     if (acao === 'excluir_pedido') return json(await excluirPedido(String(pedido_id || '')));
