@@ -708,7 +708,7 @@ function painel() {
   if (!p && S.nuvens && S.zonas) return painelZonas(s);
   if (!p) { s.classList.remove('open'); s.innerHTML = `<div class="empty"><b>Selecione um ponto no mapa.</b><br>A cor mostra a etapa do funil.<br><br><b>+ Cadastrar ponto</b>: pela sua localização, marcando no mapa ou colando o link do Google Maps.<br><b>Reposições pendentes</b>: mostra quem precisa de reposição hoje ou está atrasado.</div>`; return; }
   s.classList.add('open');
-  const podeComprar = p.etapa !== 'perdido';
+  const podeComprar = p.etapa !== 'perdido' && !repoe(p);
   // abre a ficha do lugar no Google (nome + endereço, buscando em volta da coordenada), não só o ponto
   const gm = /^https?:\/\/(www\.)?(google\.[a-z.]+\/maps|maps\.app\.goo\.gl|goo\.gl\/maps)/.test(p.link_maps || '') ? p.link_maps
     : p.lat ? `https://www.google.com/maps/search/${encodeURIComponent([p.nome, p.endereco ? limparRua(p.endereco) : null, p.cidade].filter(Boolean).join(', '))}/@${p.lat},${p.lng},18z` : null;
@@ -1106,9 +1106,12 @@ function telaCarteira() {
 const encVenda = id => { const e = (S.base.regras.encomendas || {})[id]; return e?.tipo === 'venda' ? e : null; };
 function telaAbertura() {
   const elig = S.pdvs.filter(p => p.etapa !== 'perdido' && p.etapa !== 'fechado').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
-  if (!S.abPdv || !elig.some(p => p.id === S.abPdv)) S.abPdv = (elig.find(p => p.id === S.sel) || elig.find(p => p.etapa === 'negociacao') || elig[0] || {}).id;
+  const ehCli = x => ['avaliacao', 'ativo', 'risco', 'revisao'].includes(x.etapa);
+  if (!S.abPdv || !elig.some(p => p.id === S.abPdv)) S.abPdv = (elig.find(p => p.id === S.sel && !ehCli(p)) || elig.find(p => p.etapa === 'negociacao') || elig.find(p => !ehCli(p)) || {}).id;
   const p = S.pdvs.find(x => x.id === S.abPdv);
-  const jaCliente = p && ['avaliacao', 'ativo', 'risco', 'revisao'].includes(p.etapa);
+  const jaCliente = p && ehCli(p);
+  // cliente que já compra: a venda é feita no mesmo checkout da reposição (conta o expositor, registra a saída do produto)
+  if (jaCliente && !encVenda(p.id)) { const v = S.vendaVolta; S.vendaVolta = null; S.abPdv = null; S.contando = p.id; S.repVolta = v?.aba ? { aba: v.aba, id: p.id } : { aba: 'abertura' }; return irPara('reposicao'); }
   const ex = S.base.expositores;
   $('#main').innerHTML = `<section class="view on"><div class="dash"><div class="panel">
   <div class="row" style="justify-content:space-between;flex-wrap:wrap"><h3 style="font-family:var(--fh);font-size:22px;font-weight:600;margin:0">${jaCliente ? 'Nova venda' : 'Cadastrar venda'}</h3><button class="btn" id="oCad">+ Cadastrar ponto</button></div>
@@ -2196,7 +2199,7 @@ document.addEventListener('click', e => { const b = e.target.closest('[data-copi
 // expositor de cada cliente: histórico (entregue na 1ª venda e trocas), para o custo de aquisição no financeiro
 async function registrarExpositor(pdvId, expId, tipo) { const h = { ...(S.base.regras.expositores_hist || {}) }; h[pdvId] = [...(h[pdvId] || []), { expositor_id: expId, tipo, em: new Date().toISOString(), por: S.eu.nome || '' }];
   try { await db.salvarRegra('expositores_hist', h); S.base.regras.expositores_hist = h; } catch (e) { } }
-function voltarDaRep() { const v = S.repVolta; S.repVolta = null; S.contando = null; if (v?.aba === 'perfil') abrirPerfil(v.id); else if (v?.aba === 'mapa') { S.sel = v.id; irPara('mapa'); } else irPara('rota'); }
+function voltarDaRep() { const v = S.repVolta; S.repVolta = null; S.contando = null; if (v?.aba === 'abertura') irPara('abertura'); else if (v?.aba === 'perfil') abrirPerfil(v.id); else if (v?.aba === 'mapa') { S.sel = v.id; irPara('mapa'); } else irPara('rota'); }
 async function telaReposicao() {
   const p = S.pdvs.find(x => x.id === S.contando);
   if (!p) { $('#main').innerHTML = '<section class="view on"><div class="empty">Escolha um cliente no <b>Dia de rota</b> para começar.</div></section>'; return; }
@@ -2487,7 +2490,7 @@ async function telaPerfil() {
     ev.push({ em: v.em, cor: v.tipo === 'prospeccao' ? '#3F6FA8' : '#D08A3C', t, quem: v.perfis?.nome, obs: v.observacao }); });
   notas.forEach(n => ev.push({ em: n.em, cor: '#7B4FC0', t: `📝 <b>Observação</b>`, quem: n.perfis?.nome, obs: n.texto, nota: n.id }));
   ev.sort((a, b) => new Date(b.em) - new Date(a.em));
-  const podeComprar = p.etapa !== 'perdido';
+  const podeComprar = p.etapa !== 'perdido' && !repoe(p);
   $('#main').innerHTML = `<section class="view on"><div class="dash" style="">
   <div class="row" style="gap:8px"><button class="btn" id="pVoltar">← ${esc(rotuloVoltar('Negócios'))}</button><span style="color:var(--mute)">Perfil do negócio</span></div>
   <div style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:16px;align-items:start">
