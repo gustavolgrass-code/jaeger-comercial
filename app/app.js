@@ -1543,7 +1543,7 @@ function painelDia(D, vends) {
   const fds = ini.getDay() === 0 || ini.getDay() === 6;
   $('#main').innerHTML = `<section class="view on"><div class="dash pnl">
   <div class="pfiltros"><div><h2>Painel</h2><small>${DIAS[ini.getDay()]}, ${dataLonga(ini)}${PV.dia === hojeI ? ' · hoje, até agora' : ''} · ${PV.vend === 'todos' ? 'todos os vendedores' : esc(nomeVend(PV.vend))}</small></div>
-   <div class="row" style="gap:8px;flex-wrap:wrap"><select id="pvPer"><option value="dia" selected>Por dia</option><option value="mes">Por mês</option><option value="ano">Por ano</option></select>
+   <div class="row" style="gap:8px;flex-wrap:wrap"><select id="pvPer">${[['dia', 'Por dia'], ['semana', 'Por semana'], ['mes', 'Por mês'], ['3m', 'Últimos 3 meses'], ['6m', 'Últimos 6 meses'], ['ano', 'Por ano'], ['custom', 'Personalizado']].map(([k, n]) => `<option value="${k}" ${k === 'dia' ? 'selected' : ''}>${n}</option>`).join('')}</select>
    <button class="btn" id="pvDiaAnt" title="Dia anterior">◀</button><input type="date" id="pvDia" value="${PV.dia}" max="${hojeI}"><button class="btn" id="pvDiaProx" title="Próximo dia" ${PV.dia >= hojeI ? 'disabled' : ''}>▶</button>
    <select id="pvCmpDia"><option value="sem" ${PV.cmpDia === 'sem' ? 'selected' : ''}>vs mesmo dia da semana passada</option><option value="ant" ${PV.cmpDia === 'ant' ? 'selected' : ''}>vs dia anterior</option></select>
    <select id="pvVend"><option value="todos">Todos os vendedores</option>${vends.map(v => `<option value="${v}" ${PV.vend === v ? 'selected' : ''}>${esc(nomeVend(v))}</option>`).join('')}</select>
@@ -1579,18 +1579,21 @@ async function telaPainel(recarregarDados) {
   const meses = [...new Set([mesKey(hoje), ...D.pedidos.map(o => o.mes)])].sort().reverse(), anos = [...new Set(meses.map(m => m.slice(0, 4)))];
   const vends = [...new Set(D.pedidos.map(o => o.vend))];
   if (PV.per === 'dia') return painelDia(D, vends);
-  const porAno = PV.per === 'ano', mes = porAno ? PV.ano + '-12' : PV.mes, mesC = PV.cmp === 'ano' ? mesSoma(mes, -12) : mesSoma(mes, -1);
+  // períodos: mês, ano ou uma faixa de datas (semana, últimos 3 ou 6 meses, personalizado), sempre comparada com a faixa anterior do mesmo tamanho
+  const FX = ['semana', '3m', '6m', 'custom'].includes(PV.per), porAno = PV.per === 'ano', fx = FX ? faixaPainel(hoje) : null;
+  const mes = FX ? mesKey(new Date(+fx.fim - DIA)) : porAno ? PV.ano + '-12' : PV.mes, mesC = PV.cmp === 'ano' ? mesSoma(mes, -12) : mesSoma(mes, -1);
   const mesesPer = porAno ? Array.from({ length: 12 }, (_, i) => PV.ano + '-' + String(i + 1).padStart(2, '0')) : [mes];
-  const ini = porAno ? new Date(+PV.ano, 0, 1) : mesIni(mes), fim = porAno ? new Date(+PV.ano + 1, 0, 1) : mesFim(mes), atual = hoje >= ini && hoje < fim, corte = atual ? hoje : fim;
-  const rot = porAno ? 'Ano de ' + PV.ano : mesNome(mes), rotC = porAno ? String(+PV.ano - 1) : mesNome(mes, true), unid = porAno ? 'ano' : 'mês';
-  const N = numeros(pedidosDe(D, ini, fim)), duTot = mesesPer.flatMap(k => diasUteis(k)), duPass = duTot.filter(d => d <= isoDe(corte)).length;
+  const ini = FX ? fx.ini : porAno ? new Date(+PV.ano, 0, 1) : mesIni(mes), fim = FX ? fx.fim : porAno ? new Date(+PV.ano + 1, 0, 1) : mesFim(mes), atual = hoje >= ini && hoje < fim, corte = atual ? hoje : fim;
+  const rot = FX ? fx.rot : porAno ? 'Ano de ' + PV.ano : mesNome(mes), rotC = FX ? 'período anterior' : porAno ? String(+PV.ano - 1) : mesNome(mes, true), unid = FX ? (PV.per === 'semana' ? 'semana' : 'período') : porAno ? 'ano' : 'mês';
+  const rotCurto = FX ? fx.curto : porAno ? PV.ano : mesNome(mes, true), doU = unid === 'semana' ? 'da semana' : 'do ' + unid, noU = unid === 'semana' ? 'na semana' : 'no ' + unid;
+  const N = numeros(pedidosDe(D, ini, fim)), duTot = FX ? diasUteisEntre(ini, fim) : mesesPer.flatMap(k => diasUteis(k)), duPass = duTot.filter(d => d <= isoDe(corte)).length;
   // comparação no mesmo ponto do período (se for o atual)
-  const iniC = porAno ? new Date(+PV.ano - 1, 0, 1) : mesIni(mesC), fimC0 = porAno ? new Date(+PV.ano, 0, 1) : mesFim(mesC);
+  const lenFx = +fim - +ini, iniC = FX ? new Date(+ini - lenFx) : porAno ? new Date(+PV.ano - 1, 0, 1) : mesIni(mesC), fimC0 = FX ? new Date(+ini) : porAno ? new Date(+PV.ano, 0, 1) : mesFim(mesC);
   const fimCmp = atual ? new Date(Math.min(+fimC0, +iniC + (+corte - +ini))) : fimC0, NC = numeros(pedidosDe(D, iniC, fimCmp));
-  const iniAnt = porAno ? new Date(+PV.ano - 1, 0, 1) : mesIni(mesSoma(mes, -1));
-  const B = base(D, ini, fim, iniAnt), BC = base(D, iniC, fimC0, porAno ? new Date(+PV.ano - 2, 0, 1) : mesIni(mesSoma(mesC, -1)));
+  const iniAnt = FX ? iniC : porAno ? new Date(+PV.ano - 1, 0, 1) : mesIni(mesSoma(mes, -1));
+  const B = base(D, ini, fim, iniAnt), BC = base(D, iniC, fimC0, FX ? new Date(+iniC - lenFx) : porAno ? new Date(+PV.ano - 2, 0, 1) : mesIni(mesSoma(mesC, -1)));
   // meta do período: no ano, soma dos meses (indicadores de soma) ou média dos meses com meta
-  const metaPer = (k) => { if (!porAno) return metaDe(mes, PV.vend, k); const vs = mesesPer.map(m => metaDe(m, PV.vend, k)).filter(v => v != null); if (!vs.length) return null; if (IND.find(i => i[0] === k)[3]) return vs.length === 12 ? vs.reduce((a, b) => a + b, 0) : null; return vs.reduce((a, b) => a + b, 0) / vs.length; };
+  const metaPer = (k) => { if (FX) return null; if (!porAno) return metaDe(mes, PV.vend, k); const vs = mesesPer.map(m => metaDe(m, PV.vend, k)).filter(v => v != null); if (!vs.length) return null; if (IND.find(i => i[0] === k)[3]) return vs.length === 12 ? vs.reduce((a, b) => a + b, 0) : null; return vs.reduce((a, b) => a + b, 0) / vs.length; };
   const proj = (v) => atual && duPass ? v / duPass * duTot.length : v;
   const vals = { fat: N.fat, margem: N.margem, compradores: N.compradores, ticket: N.ticket, un: N.un, novos: B.novos, segundo: B.segundo, retencao: B.retencao };
   const valsC = { fat: NC.fat, margem: NC.margem, compradores: NC.compradores, ticket: NC.ticket, un: NC.un, novos: BC.novos, segundo: BC.segundo, retencao: BC.retencao };
@@ -1598,15 +1601,16 @@ async function telaPainel(recarregarDados) {
     return `<div class="kpi"><small>${n}</small><b>${fmtV(v, u)}</b>${extra}
       ${m != null ? `<div class="kbar"><i style="width:${Math.min(100, (v / m) * 100)}%;background:${f?.c || COR.s1}"></i>${atual && aditivo ? `<em style="left:${Math.min(100, pr / m * 100)}%"></em>` : ''}</div>
       <div class="kmeta"><span>Meta ${fmtV(m, u)}</span>${f ? `<span class="st" style="--c:${f.c}">${f.ic} ${f.n} · ${Math.round(r * 100)}%</span>` : ''}</div>` : `<div class="kmeta"><span style="color:var(--mute)">sem meta · <a href="#" data-bo>definir</a></span></div>`}
-      ${atual && aditivo ? `<div class="kmeta"><span>Projeção do ${unid}</span><b>${fmtV(pr, u)}</b></div>` : ''}
-      <div class="kmeta"><span>vs ${porAno ? 'ano anterior' : PV.cmp === 'ano' ? 'mesmo mês do ano passado' : 'mês anterior'}${atual ? ' (mesmo ponto)' : ''}</span>${dv == null ? '<span>—</span>' : `<span class="${dv >= 0 ? 'up' : 'dn'}">${dv >= 0 ? '▲' : '▼'} ${Math.abs(Math.round(dv * 100))}${u === '%' ? ' p.p.' : '%'}</span>`}</div></div>`; };
+      ${atual && aditivo ? `<div class="kmeta"><span>Projeção ${doU}</span><b>${fmtV(pr, u)}</b></div>` : ''}
+      <div class="kmeta"><span>vs ${FX ? 'período anterior' : porAno ? 'ano anterior' : PV.cmp === 'ano' ? 'mesmo mês do ano passado' : 'mês anterior'}${atual ? ' (mesmo ponto)' : ''}</span>${dv == null ? '<span>—</span>' : `<span class="${dv >= 0 ? 'up' : 'dn'}">${dv >= 0 ? '▲' : '▼'} ${Math.abs(Math.round(dv * 100))}${u === '%' ? ' p.p.' : '%'}</span>`}</div></div>`; };
 
   // ritmo do mês: acumulado dia a dia
-  const nd = porAno ? 12 : new Date(fim - DIA).getDate(), xsD = porAno ? mesesPer.map(k => mesNome(k, true).split('/')[0]) : Array.from({ length: nd }, (_, i) => String(i + 1));
-  const acum = (de, peds, ate) => { let s = 0; return xsD.map((_, i) => { const d = porAno ? new Date(de.getFullYear(), i, 1) : new Date(+de + i * DIA); if (d > ate) return null; s += peds.filter(o => porAno ? o.data.getMonth() === i : o.data.getDate() === i + 1).reduce((a, o) => a + o.valor, 0); return s; }); };
+  const bk = FX ? baldes(ini, fim) : null;
+  const nd = FX ? bk.length : porAno ? 12 : new Date(fim - DIA).getDate(), xsD = FX ? bk.map(b => b.lab) : porAno ? mesesPer.map(k => mesNome(k, true).split('/')[0]) : Array.from({ length: nd }, (_, i) => String(i + 1));
+  const acum = FX ? (de, peds, ate) => { let s = 0; return bk.map(b => { const a = new Date(+de + (b.a - ini)), z = new Date(+de + (b.b - ini)); if (a > ate) return null; s += peds.filter(o => o.data >= a && o.data < z).reduce((x, o) => x + o.valor, 0); return s; }); } : (de, peds, ate) => { let s = 0; return xsD.map((_, i) => { const d = porAno ? new Date(de.getFullYear(), i, 1) : new Date(+de + i * DIA); if (d > ate) return null; s += peds.filter(o => porAno ? o.data.getMonth() === i : o.data.getDate() === i + 1).reduce((a, o) => a + o.valor, 0); return s; }); };
   const pedM = pedidosDe(D, ini, fim), pedC = pedidosDe(D, iniC, fimC0), mFat = metaPer('fat');
   const serieMeta = mFat ? (porAno ? (() => { let s = 0, alguma = false; const v = mesesPer.map(k => { const m = metaDe(k, PV.vend, 'fat'); if (m != null) alguma = true; s += m || 0; return s; }); return alguma ? v : null; })() : (() => { let k = 0; return xsD.map((_, i) => { const d = isoDe(new Date(+ini + i * DIA)); if (duTot.includes(d)) k++; return mFat * k / duTot.length; }); })()) : null;
-  const sRitmo = [{ nome: 'Realizado', cor: COR.s1, vals: acum(ini, pedM, corte) }, { nome: porAno ? 'Ano anterior' : PV.cmp === 'ano' ? mesNome(mesC, true) : 'Mês anterior', cor: COR.s2, vals: acum(iniC, pedC, fimC0).slice(0, nd), tracejado: true }, ...(serieMeta ? [{ nome: 'Meta', cor: '#5A463B', vals: serieMeta, tracejado: true }] : [])];
+  const sRitmo = [{ nome: 'Realizado', cor: COR.s1, vals: acum(ini, pedM, corte) }, { nome: FX ? 'Período anterior' : porAno ? 'Ano anterior' : PV.cmp === 'ano' ? mesNome(mesC, true) : 'Mês anterior', cor: COR.s2, vals: acum(iniC, pedC, fimC0).slice(0, nd), tracejado: true }, ...(serieMeta ? [{ nome: 'Meta', cor: '#5A463B', vals: serieMeta, tracejado: true }] : [])];
   const falta = mFat ? Math.max(0, mFat - N.fat) : null, duRest = duTot.length - duPass;
 
   // 12 meses
@@ -1641,30 +1645,32 @@ async function telaPainel(recarregarDados) {
   const MT = metas(), visMeta = (MT.visitas_dia || 0) * duTot.length, conv = vis.length ? B.novos / new Set(vis.map(v => v.pdv_id)).size : null;
 
   $('#main').innerHTML = `<section class="view on"><div class="dash pnl">
-  <div class="pfiltros"><div><h2>Painel</h2><small>${rot}${atual ? ` · ${duPass} de ${duTot.length} dias úteis` : ''} · ${PV.vend === 'todos' ? 'todos os vendedores' : esc(nomeVend(PV.vend))}</small></div>
-   <div class="row" style="gap:8px;flex-wrap:wrap"><select id="pvPer"><option value="dia">Por dia</option><option value="mes" ${!porAno ? 'selected' : ''}>Por mês</option><option value="ano" ${porAno ? 'selected' : ''}>Por ano</option></select>
-   ${porAno ? `<select id="pvAno">${anos.map(a => `<option ${a === PV.ano ? 'selected' : ''}>${a}</option>`).join('')}</select>` : `<select id="pvMes">${meses.map(k => `<option value="${k}" ${k === mes ? 'selected' : ''}>${mesNome(k)}</option>`).join('')}</select>`}
-   ${porAno ? '<span class="pcmp">vs ano anterior</span>' : `<select id="pvCmp"><option value="ant" ${PV.cmp === 'ant' ? 'selected' : ''}>vs mês anterior</option><option value="ano" ${PV.cmp === 'ano' ? 'selected' : ''}>vs mesmo mês do ano passado</option></select>`}
+  <div class="pfiltros"><div><h2>Painel</h2><small>${rot}${atual && (!FX || PV.per === 'semana') ? ` · ${duPass} de ${duTot.length} dias úteis` : ''} · ${PV.vend === 'todos' ? 'todos os vendedores' : esc(nomeVend(PV.vend))}</small></div>
+   <div class="row" style="gap:8px;flex-wrap:wrap"><select id="pvPer">${[['dia', 'Por dia'], ['semana', 'Por semana'], ['mes', 'Por mês'], ['3m', 'Últimos 3 meses'], ['6m', 'Últimos 6 meses'], ['ano', 'Por ano'], ['custom', 'Personalizado']].map(([k, n]) => `<option value="${k}" ${PV.per === k ? 'selected' : ''}>${n}</option>`).join('')}</select>
+   ${PV.per === 'semana' ? `<select id="pvSem">${semanasPainel(hoje).map(w => `<option value="${w.v}" ${w.v === PV.sem ? 'selected' : ''}>${w.n}</option>`).join('')}</select>` : PV.per === 'custom' ? `<button class="btn" id="pvCal">📅 ${esc(fx.curto)}</button>` : ''}
+   ${FX ? '' : porAno ? `<select id="pvAno">${anos.map(a => `<option ${a === PV.ano ? 'selected' : ''}>${a}</option>`).join('')}</select>` : `<select id="pvMes">${meses.map(k => `<option value="${k}" ${k === mes ? 'selected' : ''}>${mesNome(k)}</option>`).join('')}</select>`}
+   ${FX ? '<span class="pcmp">vs período anterior</span>' : porAno ? '<span class="pcmp">vs ano anterior</span>' : `<select id="pvCmp"><option value="ant" ${PV.cmp === 'ant' ? 'selected' : ''}>vs mês anterior</option><option value="ano" ${PV.cmp === 'ano' ? 'selected' : ''}>vs mesmo mês do ano passado</option></select>`}
    <select id="pvVend"><option value="todos">Todos os vendedores</option>${vends.map(v => `<option value="${v}" ${PV.vend === v ? 'selected' : ''}>${esc(nomeVend(v))}</option>`).join('')}</select>
    <button class="btn" id="pvAtual" title="Recarregar os dados">↻</button><button class="btn pri" id="pvBO">⚙️ Metas</button></div></div>
 
   <div class="kpis">${card('fat')}${card('margem', `<small class="sub">${N.margemP != null ? Math.round(N.margemP * 100) + '% de margem' : ''}${pedM.some(o => o.estimado) ? ' · parte estimada' : ''}</small>`)}${card('compradores', `<small class="sub">${N.pedidos} pedidos</small>`)}${card('ticket', `<small class="sub">${fmt(Math.round(N.un))} unidades</small>`)}</div>
 
   <div class="pgrid">
-   <div class="panel"><h3>Ritmo do ${unid}</h3><p class="psub">Faturamento acumulado ${porAno ? 'mês a mês' : 'dia a dia'}${mFat ? ', contra a meta' : ''}</p>${grafLinhas('gRitmo', xsD, sRitmo, 'R$')}${legenda(sRitmo)}
-    <div class="pnota">${mFat ? (atual ? (falta > 0 ? `Faltam <b>${brl(falta)}</b> em ${duRest} dias úteis: <b>${brl(duRest ? falta / duRest : falta)} por dia útil</b>.` : `<b>Meta do ${unid} batida.</b>`) : `Fechou em ${Math.round(N.fat / mFat * 100)}% da meta.`) : 'Defina a meta de faturamento em ⚙️ Metas para ver a linha da meta.'}</div></div>
+   <div class="panel"><h3>Ritmo ${doU}</h3><p class="psub">Faturamento acumulado ${FX ? (bk.semanal ? 'semana a semana' : 'dia a dia') : porAno ? 'mês a mês' : 'dia a dia'}${mFat ? ', contra a meta' : ''}</p>${grafLinhas('gRitmo', xsD, sRitmo, 'R$')}${legenda(sRitmo)}
+    <div class="pnota">${mFat ? (atual ? (falta > 0 ? `Faltam <b>${brl(falta)}</b> em ${duRest} dias úteis: <b>${brl(duRest ? falta / duRest : falta)} por dia útil</b>.` : `<b>Meta ${doU} batida.</b>`) : `Fechou em ${Math.round(N.fat / mFat * 100)}% da meta.`) : 'Defina a meta de faturamento em ⚙️ Metas para ver a linha da meta.'}</div></div>
    ${porAno ? `<div class="panel"><h3>Faturamento · meses de ${PV.ano}</h3><p class="psub">Barras: faturamento · traço: meta de cada mês</p>${grafBarras('g12', m12.map(k => mesNome(k, true)), [{ nome: 'Faturamento', cor: COR.s1, vals: fat12.map(n => n.fat) }], 'R$', { metas: m12.map(k => metaDe(k, PV.vend, 'fat')) })}</div>`
+     : FX ? `<div class="panel"><h3>Faturamento por ${bk.semanal ? 'semana' : 'dia'} · ${rotCurto}</h3><p class="psub">Quanto entrou em cada ${bk.semanal ? 'semana' : 'dia'} do período</p>${grafBarras('g12', xsD, [{ nome: 'Faturamento', cor: COR.s1, vals: bk.map(b => b.a > corte ? null : numeros(pedidosDe(D, b.a, b.b)).fat) }], 'R$')}</div>`
      : `<div class="panel"><h3>Faturamento por dia · ${mesNome(mes, true)}</h3><p class="psub">Quanto entrou em cada dia do mês${mFat ? ` · meta do mês ${fmtV(mFat, 'R$')}` : ''}</p>${grafBarras('g12', xsD, [{ nome: 'Faturamento', cor: COR.s1, vals: xsD.map((_, i) => { const d0 = new Date(+ini + i * DIA); return d0 > corte ? null : numeros(pedidosDe(D, d0, new Date(+d0 + DIA))).fat; }) }], 'R$')}</div>`}
   </div>
 
   <h2 class="psec">Saída de produtos</h2>
   ${temItens ? `<div class="pgrid">
    <div class="panel"><h3>Unidades por linha · ${porAno ? 'meses de ' + PV.ano : '12 meses'}</h3>${(() => { const ss = LINHAS.map(l => ({ nome: l.n, cor: l.c, vals: m12.map(k => k > mesKey(hoje) ? null : unLinhaMes(k, l.k)) })); return grafLinhas('gLinhas', m12.map(k => mesNome(k, true)), ss, 'n') + legenda(ss); })()}</div>
-   <div class="panel"><h3>Ranking de sabores · ${porAno ? PV.ano : mesNome(mes, true)}</h3><p class="psub">Unidades no ${unid} e variação ${porAno || PV.cmp === 'ano' ? 'contra o ano anterior' : 'contra o mês anterior'}</p>${rankSab.length ? ranking(rankSab, 'n') + legenda(LINHAS.map(l => ({ nome: l.n, cor: l.c }))) : '<p class="empty">Sem itens neste mês.</p>'}</div>
-   <div class="panel"><h3>Mix por cliente · ${porAno ? PV.ano : mesNome(mes, true)}</h3><p class="psub">Clientes que compraram no ${unid}${PV.vend === 'todos' ? '' : ' (' + esc(nomeVend(PV.vend)) + ')'}, por quantas linhas levam</p>
+   <div class="panel"><h3>Ranking de sabores · ${rotCurto}</h3><p class="psub">Unidades ${noU} e variação ${FX ? 'contra o período anterior' : porAno || PV.cmp === 'ano' ? 'contra o ano anterior' : 'contra o mês anterior'}</p>${rankSab.length ? ranking(rankSab, 'n') + legenda(LINHAS.map(l => ({ nome: l.n, cor: l.c }))) : '<p class="empty">Sem itens neste mês.</p>'}</div>
+   <div class="panel"><h3>Mix por cliente · ${rotCurto}</h3><p class="psub">Clientes que compraram ${noU}${PV.vend === 'todos' ? '' : ' (' + esc(nomeVend(PV.vend)) + ')'}, por quantas linhas levam</p>
     <div class="mixn">${mixN.map((n, i) => `<div><b>${n}</b><small>${i + 1} linha${i ? 's' : ''}</small></div>`).join('')}</div>
     ${soUma.length ? `<p class="psub" style="margin-top:10px">Compram só uma linha: oportunidade de oferecer as outras</p><div class="lst">${soUma.slice(0, 8).map(x => `<div class="trow" data-ab="${x.p.id}"><i style="background:${LINHAS.find(l => l.k === x.l)?.c}"></i><div style="flex:1">${esc(x.p.nome)}</div><small>só ${esc(LINHAS.find(l => l.k === x.l)?.n || '')}</small></div>`).join('')}</div>` : ''}</div>
-   <div class="panel"><h3>Faturamento por linha · ${porAno ? PV.ano : mesNome(mes, true)}</h3>${ranking(LINHAS.map(l => ({ n: l.n, v: pedM.reduce((a, o) => a + o.itens.filter(i => i.l === l.k).reduce((b, i) => b + i.rec, 0), 0), c: l.c })), 'R$')}<p class="psub" style="margin-top:8px">Margem média dos itens: <b>${Math.round(D.margemMedia * 100)}%</b> (preço praticado menos custo da Baccaro)</p></div>
+   <div class="panel"><h3>Faturamento por linha · ${rotCurto}</h3>${ranking(LINHAS.map(l => ({ n: l.n, v: pedM.reduce((a, o) => a + o.itens.filter(i => i.l === l.k).reduce((b, i) => b + i.rec, 0), 0), c: l.c })), 'R$')}<p class="psub" style="margin-top:8px">Margem média dos itens: <b>${Math.round(D.margemMedia * 100)}%</b> (preço praticado menos custo da Baccaro)</p></div>
   </div>` : `<div class="panel"><p class="empty">Os itens dos pedidos ainda não foram puxados do Bling. Vá em <b>Regras e metas → Puxar itens dos pedidos</b>.</p></div>`}
 
   <h2 class="psec">Trocas e impacto financeiro</h2>
@@ -1675,8 +1681,8 @@ async function telaPainel(recarregarDados) {
 
   <h2 class="psec">Base de clientes</h2>
   <div class="pgrid">
-   <div class="panel"><h3>Movimento da base · ${porAno ? PV.ano : mesNome(mes, true)}</h3><p class="psub">Cliente ativo = comprou nos últimos 90 dias</p>${ponte(B)}</div>
-   <div class="panel"><h3>Saúde da base</h3><div class="kpis k2">${card('retencao', `<small class="sub">de quem comprou no ${unid} anterior</small>`)}${card('segundo', `<small class="sub">${B.coorte} clientes abertos nos últimos 6 meses</small>`)}${card('novos')}
+   <div class="panel"><h3>Movimento da base · ${rotCurto}</h3><p class="psub">Cliente ativo = comprou nos últimos 90 dias</p>${ponte(B)}</div>
+   <div class="panel"><h3>Saúde da base</h3><div class="kpis k2">${card('retencao', `<small class="sub">de quem comprou ${noU} anterior</small>`)}${card('segundo', `<small class="sub">${B.coorte} clientes abertos nos últimos 6 meses</small>`)}${card('novos')}
     <div class="kpi"><small>Base ativa ÷ potencial</small><b>${potencial ? Math.round(fat90 / potencial * 100) + '%' : '—'}</b><small class="sub">${brl(fat90)}/mês faturados de ${brl(potencial)}/mês possíveis se todos comprassem no seu ritmo</small></div></div></div>
   </div>
   <div class="pgrid">
@@ -1686,25 +1692,27 @@ async function telaPainel(recarregarDados) {
     <table class="coh"><tr><th>Abertura</th><th>Clientes</th>${Array.from({ length: 7 }, (_, j) => `<th>M${j}</th>`).join('')}</tr>${turmas.map(t => `<tr><td>${mesNome(t.k, true)}</td><td>${t.n}</td>${t.ret.map(v => `<td style="background:${azul(v)};color:${v != null && v > .55 ? '#fff' : 'var(--choc)'}" data-tip="${v == null ? '' : `${mesNome(t.k, true)}: ${Math.round(v * 100)}% compraram`}">${v == null ? '' : Math.round(v * 100) + '%'}</td>`).join('')}</tr>`).join('')}</table></div>
   </div>
 
-  <h2 class="psec">Composição · ${porAno ? PV.ano : mesNome(mes, true)}</h2>
+  <h2 class="psec">Composição · ${rotCurto}</h2>
   <div class="pgrid">
    <div class="panel"><h3>Por região</h3>${ranking(Object.entries(porReg).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ n: k + (regNome(k) !== 'sem região' ? ' · ' + regNome(k) : ''), v, c: COR.s1 })), 'R$')}</div>
    <div class="panel"><h3>Por canal</h3>${ranking(Object.entries(porCanal).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => ({ n: k, v, c: COR.s1 })), 'R$')}<p class="psub" style="margin-top:8px">Os 10 maiores clientes fizeram <b>${N.fat ? Math.round(top10 / N.fat * 100) : 0}%</b> do faturamento do ${unid}.</p></div>
   </div>
 
-  <h2 class="psec">Atividade comercial · ${porAno ? PV.ano : mesNome(mes, true)}</h2>
+  <h2 class="psec">Atividade comercial · ${rotCurto}</h2>
   <div class="kpis"><div class="kpi"><small>Visitas de prospecção</small><b>${vis.length}</b>${visMeta ? `<div class="kbar"><i style="width:${Math.min(100, vis.length / visMeta * 100)}%;background:${faixa(vis.length / visMeta).c}"></i></div><div class="kmeta"><span>Meta ${visMeta}</span></div>` : ''}</div>
    <div class="kpi"><small>Conversão visita → cliente</small><b>${conv == null ? '—' : Math.round(conv * 100) + '%'}</b><small class="sub">${B.novos} novos de ${new Set(vis.map(v => v.pdv_id)).size} pontos visitados</small></div>
-   <div class="kpi"><small>Pontos cadastrados</small><b>${cads}</b><small class="sub">meta ${(MT.cadastros_semana || 0) * Math.round(duTot.length / 6)} no ${unid}</small></div>
+   <div class="kpi"><small>Pontos cadastrados</small><b>${cads}</b><small class="sub">meta ${(MT.cadastros_semana || 0) * Math.round(duTot.length / 6)} ${noU}</small></div>
    <div class="kpi"><small>Tarefas atrasadas</small><b>${S.pdvs.filter(p => p.acao_data && ymd(p.acao_data) < hojeISO()).length}</b></div></div>
 
-  ${blocoCarteira(D, ini, fim, porAno ? PV.ano : mesNome(mes, true))}
+  ${blocoCarteira(D, ini, fim, rotCurto)}
   <div id="orfaosBling"></div>
   ${(() => { const al = alertasProsp(); return al.length ? `<div class="panel alertas"><h3>Alertas de prospecção (${al.length}) · visitados sem próxima ação</h3>${al.slice(0, 30).map(p => `<div class="trow" style="cursor:default"><i style="background:${p.ultimo_resultado === 'nao_estava' ? '#3F6FA8' : etapa(p.etapa).c}"></i><div style="flex:1"><b>${esc(p.nome)}</b><br><small style="color:var(--mute)">${RESULTADOS[p.ultimo_resultado]?.n || 'Visitado'} em ${dstr(p.ultima_prospeccao)}${p.melhor_horario ? ' · melhor horário: ' + esc(p.melhor_horario) : ''}</small></div><button class="mini" data-altar="${p.id}">+ tarefa</button><button class="mini" data-alab="${p.id}">abrir</button></div>`).join('')}</div>` : ''; })()}
   </div></section>`;
 
   const sec = $('#main section'); ligarGraficos(sec);
-  $('#pvPer').onchange = e => { PV.per = e.target.value; telaPainel(); };
+  $('#pvPer').onchange = e => { PV.per = e.target.value; if (PV.per === 'custom' && !PV.de) { PV.de = isoDe(new Date(Date.now() - 29 * DIA)); PV.ate = hojeISO(); } telaPainel(); if (PV.per === 'custom') setTimeout(() => $('#pvCal')?.click(), 50); };
+  if ($('#pvSem')) $('#pvSem').onchange = e => { PV.sem = e.target.value; telaPainel(); };
+  if ($('#pvCal')) $('#pvCal').onclick = e => { e.stopPropagation(); calendarioFaixa($('#pvCal'), PV.de, PV.ate, (de, ate) => { PV.de = de; PV.ate = ate; telaPainel(); }); };
   if ($('#pvMes')) $('#pvMes').onchange = e => { PV.mes = e.target.value; telaPainel(); };
   if ($('#pvAno')) $('#pvAno').onchange = e => { PV.ano = e.target.value; telaPainel(); };
   if ($('#pvCmp')) $('#pvCmp').onchange = e => { PV.cmp = e.target.value; telaPainel(); };
@@ -1724,6 +1732,48 @@ async function telaPainel(recarregarDados) {
   }).catch(() => { });
 }
 // ponte da base: início + novos + recuperados − perdidos = fim
+// ---- períodos do painel: semana, últimos 3/6 meses e personalizado ----
+const segundaDe = d => { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); const w = (x.getDay() + 6) % 7; return new Date(+x - w * DIA); };
+const ddmm = d => d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+function semanasPainel(hoje) { const s0 = segundaDe(hoje); return Array.from({ length: 26 }, (_, i) => { const a = new Date(+s0 - i * 7 * DIA), b = new Date(+a + 6 * DIA); return { v: isoDe(a), n: (i === 0 ? 'Esta semana · ' : i === 1 ? 'Semana passada · ' : '') + `${ddmm(a)} a ${ddmm(b)}` }; }); }
+function faixaPainel(hoje) {
+  const amanha = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate() + 1);
+  if (PV.per === 'semana') { if (!PV.sem) PV.sem = isoDe(segundaDe(hoje)); const ini = new Date(PV.sem + 'T00:00'), fim = new Date(+ini + 7 * DIA); return { ini, fim, rot: `Semana de ${ddmm(ini)} a ${ddmm(new Date(+fim - DIA))}`, curto: `semana ${ddmm(ini)}` }; }
+  if (PV.per === '3m' || PV.per === '6m') { const n = PV.per === '3m' ? 3 : 6, ini = new Date(hoje.getFullYear(), hoje.getMonth() - n, hoje.getDate() + 1); return { ini, fim: amanha, rot: `Últimos ${n} meses · ${ddmm(ini)} a ${ddmm(hoje)}`, curto: `últimos ${n} meses` }; }
+  if (!PV.de) { PV.de = isoDe(new Date(+hoje - 29 * DIA)); PV.ate = isoDe(hoje); }
+  const ini = new Date(PV.de + 'T00:00'), fim = new Date(new Date(PV.ate + 'T00:00').getTime() + DIA), y = d => d.getFullYear() !== hoje.getFullYear() ? '/' + String(d.getFullYear()).slice(2) : '';
+  return { ini, fim, rot: `De ${ddmm(ini)}${y(ini)} a ${ddmm(new Date(+fim - DIA))}${y(new Date(+fim - DIA))}`, curto: `${ddmm(ini)}${y(ini)} – ${ddmm(new Date(+fim - DIA))}${y(new Date(+fim - DIA))}` };
+}
+function diasUteisEntre(ini, fim) { const fer = new Set(metasV2().feriados || []), out = []; for (let d = new Date(ini); d < fim; d = new Date(+d + DIA)) if (d.getDay() !== 0 && !fer.has(isoDe(d))) out.push(isoDe(d)); return out; }
+// divide a faixa em dias (até 62 dias) ou em semanas
+function baldes(ini, fim) { const dias = Math.round((fim - ini) / DIA), sem = dias > 62, passo = sem ? 7 : 1, out = [];
+  for (let a = new Date(ini); a < fim; a = new Date(+a + passo * DIA)) { const b = new Date(Math.min(+fim, +a + passo * DIA)); out.push({ a, b, lab: sem ? ddmm(a) : dias <= 7 ? DIAS_SEM[a.getDay()] + ' ' + a.getDate() : String(a.getDate()) }); }
+  out.semanal = sem; return out; }
+// calendário: 1º clique escolhe o dia inicial, 2º o final
+function calendarioFaixa(ancora, de, ate, ok) {
+  document.getElementById('calFx')?.remove();
+  let a = de ? new Date(de + 'T12:00') : null, b = ate ? new Date(ate + 'T12:00') : null, hov = null, ver = new Date((b || new Date()).getFullYear(), (b || new Date()).getMonth() - 1, 1);
+  const el = document.createElement('div'); el.id = 'calFx'; el.className = 'calfx'; document.body.appendChild(el);
+  const r = ancora.getBoundingClientRect(); el.style.top = (r.bottom + 6) + 'px'; el.style.left = Math.max(8, Math.min(r.left, innerWidth - 580)) + 'px';
+  const mesH = m => { const pri = new Date(m.getFullYear(), m.getMonth(), 1), off = (pri.getDay() + 6) % 7, n = new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate(), fimR = b || (a && hov) || null;
+    let h = `<div class="calm"><b>${pri.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</b><div class="calg">${['S', 'T', 'Q', 'Q', 'S', 'S', 'D'].map(x => `<i>${x}</i>`).join('')}${'<span></span>'.repeat(off)}`;
+    for (let d = 1; d <= n; d++) { const dt = new Date(m.getFullYear(), m.getMonth(), d, 12), iso = isoDe(dt), lo = a && fimR ? (a < fimR ? a : fimR) : a, hi = a && fimR ? (a < fimR ? fimR : a) : a;
+      const cls = [lo && isoDe(lo) === iso ? 'ini' : '', hi && isoDe(hi) === iso ? 'fim' : '', lo && hi && dt > lo && dt < hi ? 'meio' : '', iso === hojeISO() ? 'hj' : ''].join(' ');
+      h += `<button type="button" data-d="${iso}" class="${cls}">${d}</button>`; }
+    return h + '</div></div>'; };
+  const pinta = () => { el.innerHTML = `<div class="calhd"><button type="button" data-n="-1">‹</button><small>${!a || b ? 'Clique no dia inicial' : 'Agora clique no dia final'}</small><button type="button" data-n="1">›</button></div>
+    <div class="calms">${mesH(ver)}${mesH(new Date(ver.getFullYear(), ver.getMonth() + 1, 1))}</div>
+    <div class="calft"><small>${a ? ddmm(a) + (b ? ' – ' + ddmm(b) : ' – …') : ''}</small><span><button type="button" class="mini" data-x>Cancelar</button> <button type="button" class="mini on" data-ok ${a && b ? '' : 'disabled'}>Aplicar</button></span></div>`; };
+  pinta();
+  el.addEventListener('click', e => { e.stopPropagation(); const t = e.target.closest('button'); if (!t) return;
+    if (t.dataset.n) { ver = new Date(ver.getFullYear(), ver.getMonth() + +t.dataset.n, 1); return pinta(); }
+    if (t.dataset.d) { const d = new Date(t.dataset.d + 'T12:00'); if (!a || b) { a = d; b = null; } else { b = d; if (b < a) [a, b] = [b, a]; } return pinta(); }
+    if ('x' in t.dataset) return el.remove();
+    if ('ok' in t.dataset && a && b) { el.remove(); ok(isoDe(a), isoDe(b)); } });
+  el.addEventListener('mouseover', e => { const t = e.target.closest('[data-d]'); if (!t || !a || b) return; hov = new Date(t.dataset.d + 'T12:00'); pinta(); });
+  setTimeout(() => document.addEventListener('click', function fora(ev) { if (!el.contains(ev.target)) { el.remove(); document.removeEventListener('click', fora); } }), 0);
+}
+
 function ponte(B) {
   const passos = [['Ativos no início', B.ativosIni, 'tot'], ['Novos', B.novos, 'mais'], ['Recuperados', B.recup, 'mais'], ['Perdidos', -B.perdidos, 'menos'], ['Ativos agora', B.ativosFim, 'tot']];
   const W = 640, H = 220, L = 20, R = 20, T = 22, Bm = 40, iw = W - L - R, ih = H - T - Bm, max = Math.max(B.ativosIni + B.novos + B.recup, B.ativosFim, 1), Y = v => T + ih - v / max * ih, gw = iw / passos.length, bw = Math.min(70, gw - 18);

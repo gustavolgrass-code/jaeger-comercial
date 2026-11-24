@@ -623,3 +623,19 @@ section:fullscreen #mapa{height:100vh}
 .hp{display:grid;grid-template-columns:120px 1fr 44px;align-items:center;gap:8px;font-size:12.5px;margin:6px 0}
 .hp .rb{height:8px;background:var(--sand)}.hp .rb i{display:block;height:100%}
 .hp b{text-align:right;font-weight:600}
+/* calendário de período */
+.calfx{position:fixed;z-index:4000;background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:0 14px 40px rgba(0,0,0,.22);padding:12px;width:560px;max-width:calc(100vw - 16px)}
+.calhd,.calft{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.calhd button{border:1px solid var(--line);background:var(--card);color:var(--choc);width:30px;height:30px;border-radius:6px;font-size:16px}
+.calhd small,.calft small{color:var(--mute)}
+.calms{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:10px 0}
+.calm>b{display:block;text-align:center;font-size:13px;font-weight:600;text-transform:capitalize;margin-bottom:6px}
+.calg{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+.calg i{font-style:normal;text-align:center;font-size:11px;color:var(--mute);padding:3px 0}
+.calg button{border:0;background:none;color:var(--choc);height:32px;border-radius:6px;font-size:13px}
+.calg button:hover{background:var(--sand)}
+.calg button.meio{background:var(--sand2);border-radius:0}
+.calg button.ini,.calg button.fim{background:var(--choc);color:var(--cream);font-weight:700}
+.calg button.hj{box-shadow:inset 0 0 0 1px var(--car)}
+.calft .mini.on{background:var(--choc);color:var(--cream)}
+@media (max-width:620px){.calms{grid-template-columns:1fr}.calms .calm:last-child{display:none}}
