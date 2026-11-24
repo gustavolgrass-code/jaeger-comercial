@@ -153,7 +153,7 @@ function telaPrimeiroAcesso(user) {
 /* =================== estrutura =================== */
 const ABAS = {
   comercial: [['mapa', 'Mapa'], ['funil', 'Funil'], ['agenda', 'Agenda'], ['carteira', 'Negócios'], ['contatos', 'Contatos'], ['abertura', 'Cadastrar venda'], ['painel', 'Painel'], ['uploads', 'Uploads'], ['regras', 'Regras e metas']],
-  operacao: [['rota', 'Dia de rota'], ['reposicao', 'Reposição'], ['resumo', 'Resumo do dia']] };
+  operacao: [['rota', 'Dia de rota'], ['reposicao', 'Reposição'], ['resumo', 'Resumo do dia'], ['estoque', 'Estoque']] };
 let lado = 'comercial';
 // menu lateral: grupos (CRM, Reposição, Ajustes) com ícones; recolhe para só os ícones e lembra a escolha
 const ICO = {
@@ -172,11 +172,11 @@ const ICO = {
   menu: '<path d="M3 6h18M3 12h18M3 18h18"/>', lua: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>',
   sol: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   recolher: '<rect x="3" y="3" width="18" height="18"/><path d="M9 3v18M15 9l-3 3 3 3"/>', abrir: '<rect x="3" y="3" width="18" height="18"/><path d="M9 3v18M13 9l3 3-3 3"/>',
-  seta: '<path d="m6 9 6 6 6-6"/>', lupa: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>', filtro: '<path d="M4 6h16M7 12h10M10 18h4"/>',
+  seta: '<path d="m6 9 6 6 6-6"/>', estoque: '<path d="M3 21V9l9-6 9 6v12"/><path d="M7 21v-8h10v8M7 17h10"/>', lupa: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>', filtro: '<path d="M4 6h16M7 12h10M10 18h4"/>',
   pino: '<path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.5"/>' };
 const ico = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" stroke-linejoin="miter">${ICO[k] || ''}</svg>`;
 const MENU = [{ g: 'CRM', lado: 'comercial', it: ['funil', 'mapa', 'agenda', 'carteira', 'contatos', 'abertura', 'painel', 'uploads'] },
-  { g: 'Reposição', lado: 'operacao', it: ['rota', 'reposicao', 'resumo'] }, { g: 'Ajustes', lado: 'comercial', it: ['regras'] }];
+  { g: 'Reposição', lado: 'operacao', it: ['rota', 'reposicao', 'resumo'] }, { g: 'Estoque', lado: 'operacao', it: ['estoque'] }, { g: 'Ajustes', lado: 'comercial', it: ['regras'] }];
 const nomeAba = k => (Object.values(ABAS).flat().find(([x]) => x === k) || [, k])[1];
 const grupoDe = k => MENU.find(m => m.it.includes(k));
 const guardar = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { } };
@@ -221,7 +221,7 @@ function irPara(a, semHist) {
   else if (!semHist && S.aba && !mesmo) { S.hist.push({ aba: S.aba, ...(S.histEnt || {}) }); if (S.hist.length > 40) S.hist.shift(); }
   S.aba = a; S.histEnt = ctx;
   pintarMenu();
-  ({ agenda: telaAgenda, perfil: telaPerfil, contato: telaContato, contatos: telaContatos, uploads: telaUploads, mapa: telaMapa, funil: telaFunil, carteira: telaCarteira, abertura: telaAbertura, painel: telaPainel, regras: telaRegras, rota: telaRota, reposicao: telaReposicao, pedcli: telaPedidosCliente, resumo: telaResumo, carteiramet: telaCarteiraMet })[a]();
+  ({ agenda: telaAgenda, perfil: telaPerfil, contato: telaContato, contatos: telaContatos, uploads: telaUploads, mapa: telaMapa, funil: telaFunil, carteira: telaCarteira, abertura: telaAbertura, painel: telaPainel, regras: telaRegras, rota: telaRota, reposicao: telaReposicao, pedcli: telaPedidosCliente, resumo: telaResumo, carteiramet: telaCarteiraMet, estoque: telaEstoque })[a]();
 }
 window.irPara = irPara;
 // texto do botão Voltar: diz para onde vai (ex.: "← Almeida 68" quando veio do perfil do negócio)
@@ -760,9 +760,11 @@ async function revisar(p, acao) {
 }
 
 /* ---------- cadastro ---------- */
-function abrirCadastro(loc) {
-  let pos = loc;
-  modal(`<h3>Novo ponto de venda</h3>
+const ETAPAS_CAD = ['mapeado', 'visitado', 'negociacao', 'avaliacao', 'ativo'];
+function abrirCadastro(loc, etapaIni) {
+  let pos = loc; if (etapaIni !== undefined) S.cadEtapa = etapaIni; const et0 = ETAPAS_CAD.includes(S.cadEtapa) ? S.cadEtapa : 'mapeado';
+  modal(`<h3>${et0 === 'mapeado' ? 'Novo ponto de venda' : 'Novo negócio'}</h3>
+  <label>Status</label><select id="cEt">${ETAPAS_CAD.map(k => `<option value="${k}" ${k === et0 ? 'selected' : ''}>${esc(etapa(k).n)}</option>`).join('')}</select>
   <label>Link do Google Maps</label><input id="cLink" placeholder="Cole o link do lugar no Google Maps">
   <div class="linkmsg" id="cMsg"></div>
   <label>ou Endereço</label><div class="row" style="gap:6px"><input id="cEnd" placeholder="Rua, número" style="flex:1"><button class="btn" id="cBuscaEnd">📍 Localizar</button></div>
@@ -814,8 +816,9 @@ function abrirCadastro(loc) {
     try {
       const cidade = $('#cCidade').value.trim() || null;
       const contato_id = await contatoDoForm(nome);
-      const n = await db.criarPdv({ contato_id, geo_precisao: 'exata', nome, ...lerEmpresa('c'), canal: lerCanal('cCanal'), endereco: rua || $('#cEnd').value.trim() || null, bairro: $('#cBairro').value.trim() || null, cidade, lng: pos[0], lat: pos[1], ...(linkG ? { link_maps: linkG } : {}), regiao: await garantirRegiao(pos[0], pos[1], cidade), potencial: +$('#cPot').value, observacao: $('#cObs').value.trim() || null, melhor_horario: $('#cHor').value.trim() || null, ...lerJanela('cj'), origem: $('#cLink').value ? 'link_maps' : 'manual', link_maps: $('#cLink').value.trim() || null, criado_por: S.eu.id });
-      fecharModal(); await atualizarUm(n.id); S.sel = n.id; if (S.aba === 'mapa') { desenhar(); painel(); } if (S.aba === 'abertura') { S.abPdv = n.id; telaAbertura(); } toast(nome + ' entrou no funil como Mapeado');
+      const etC = $('#cEt').value || 'mapeado'; S.cadEtapa = null;
+      const n = await db.criarPdv({ contato_id, etapa: etC, ...(etC === 'avaliacao' ? { avaliacao_inicio: hojeISO() } : {}), geo_precisao: 'exata', nome, ...lerEmpresa('c'), canal: lerCanal('cCanal'), endereco: rua || $('#cEnd').value.trim() || null, bairro: $('#cBairro').value.trim() || null, cidade, lng: pos[0], lat: pos[1], ...(linkG ? { link_maps: linkG } : {}), regiao: await garantirRegiao(pos[0], pos[1], cidade), potencial: +$('#cPot').value, observacao: $('#cObs').value.trim() || null, melhor_horario: $('#cHor').value.trim() || null, ...lerJanela('cj'), origem: $('#cLink').value ? 'link_maps' : 'manual', link_maps: $('#cLink').value.trim() || null, criado_por: S.eu.id });
+      fecharModal(); await atualizarUm(n.id); S.sel = n.id; if (S.aba === 'mapa') { desenhar(); painel(); } if (S.aba === 'abertura') { S.abPdv = n.id; telaAbertura(); } if (S.aba === 'carteira') telaCarteira(); toast(nome + ' entrou no funil como ' + etapa(etC).n);
     } catch (e) { erro(e); $('#cSalvar').disabled = false; }
   };
 }
@@ -1086,7 +1089,7 @@ function listaTarefas(ts, vazio) {
 let ord = { k: 'nome', d: 1 };
 function telaCarteira() {
   const RP = {}; let RU = S.rupCache || {};
-  $('#main').innerHTML = `<section class="view on"><div class="tablewrap"><div class="toolbar"><input id="q" placeholder="Buscar PDV…" style="width:240px"><select id="tEt"><option value="">Todas as etapas</option>${ETAPAS.map(e => `<option value="${e.k}">${e.n}</option>`).join('')}</select><select id="tPr"><option value="">Toda prioridade de reativação</option>${Object.entries(PRIOR).map(([k, x]) => `<option value="${k}">Reativar · ${x.n}</option>`).join('')}<option value="-">Sem prioridade definida</option></select><span id="tN" style="color:var(--mute)"></span></div><table id="tbl"></table></div></section>`;
+  $('#main').innerHTML = `<section class="view on"><div class="tablewrap"><div class="toolbar"><input id="q" placeholder="Buscar PDV…" style="width:240px"><select id="tEt"><option value="">Todas as etapas</option>${ETAPAS.map(e => `<option value="${e.k}">${e.n}</option>`).join('')}</select><select id="tPr"><option value="">Toda prioridade de reativação</option>${Object.entries(PRIOR).map(([k, x]) => `<option value="${k}">Reativar · ${x.n}</option>`).join('')}<option value="-">Sem prioridade definida</option></select><span id="tN" style="color:var(--mute)"></span><button class="btn pri" id="tNovo" style="margin-left:auto">+ Novo negócio</button></div><table id="tbl"></table></div></section>`;
   const cols = [['nome', 'PDV'], ['regiao', 'Região'], ['canal', 'Canal'], ['etapa', 'Etapa'], ['classe', 'Classe'], ['potencial', 'Potencial'], ['so', 'Sell-out médio'], ['rup', 'Ruptura'], ['ultima_compra', 'Última compra'], ['proxima_reposicao', 'Próx. reposição'], ['pr', 'Reativar']];
   const desenhaT = () => {
     const q = $('#q').value.toLowerCase(), et = $('#tEt').value, pr = $('#tPr').value;
@@ -1098,6 +1101,7 @@ function telaCarteira() {
     $('#tbl').querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => abrirPerfil(tr.dataset.id));
   };
   manter('carteira', ['q', 'tEt', 'tPr']);
+  $('#tNovo').onclick = () => abrirCadastro(null, ETAPAS_CAD.includes($('#tEt').value) ? $('#tEt').value : 'visitado');
   $('#q').oninput = $('#tEt').onchange = $('#tPr').onchange = desenhaT; desenhaT();
   db.rupturaPorPdv().then(r => { RU = S.rupCache = r; if ($('#tbl')) desenhaT(); }).catch(() => { });
   db.resumoPedidos().then(ls => { ls.forEach(o => { const x = RP[o.pdv_id] = RP[o.pdv_id] || { n: 0, un: 0, ult: null }; x.n++; x.un += Number(o.unidades) > 0 ? Number(o.unidades) : Math.round((Number(o.valor) || 0) / 4.6); if (!x.ult || o.criado_em > x.ult) x.ult = o.criado_em; }); if ($('#tbl')) desenhaT(); }).catch(() => { });
@@ -1544,7 +1548,7 @@ function painelDia(D, vends) {
   const fds = ini.getDay() === 0 || ini.getDay() === 6;
   $('#main').innerHTML = `<section class="view on"><div class="dash pnl">
   <div class="pfiltros"><div><h2>Painel</h2><small>${DIAS[ini.getDay()]}, ${dataLonga(ini)}${PV.dia === hojeI ? ' · hoje, até agora' : ''} · ${PV.vend === 'todos' ? 'todos os vendedores' : esc(nomeVend(PV.vend))}</small></div>
-   <div class="row" style="gap:8px;flex-wrap:wrap"><select id="pvPer">${[['dia', 'Por dia'], ['semana', 'Por semana'], ['mes', 'Por mês'], ['3m', 'Últimos 3 meses'], ['6m', 'Últimos 6 meses'], ['ano', 'Por ano'], ['custom', 'Personalizado']].map(([k, n]) => `<option value="${k}" ${k === 'dia' ? 'selected' : ''}>${n}</option>`).join('')}</select>
+   <div class="row" style="gap:8px;flex-wrap:wrap"><select id="pvPer">${[['dia', 'Por dia'], ['semana', 'Por semana'], ['mes', 'Por mês'], ['90d', 'Últimos 90 dias'], ['6m', 'Últimos 6 meses'], ['ano', 'Por ano'], ['custom', 'Personalizado']].map(([k, n]) => `<option value="${k}" ${k === 'dia' ? 'selected' : ''}>${n}</option>`).join('')}</select>
    <button class="btn" id="pvDiaAnt" title="Dia anterior">◀</button><input type="date" id="pvDia" value="${PV.dia}" max="${hojeI}"><button class="btn" id="pvDiaProx" title="Próximo dia" ${PV.dia >= hojeI ? 'disabled' : ''}>▶</button>
    <select id="pvCmpDia"><option value="sem" ${PV.cmpDia === 'sem' ? 'selected' : ''}>vs mesmo dia da semana passada</option><option value="ant" ${PV.cmpDia === 'ant' ? 'selected' : ''}>vs dia anterior</option></select>
    <select id="pvVend"><option value="todos">Todos os vendedores</option>${vends.map(v => `<option value="${v}" ${PV.vend === v ? 'selected' : ''}>${esc(nomeVend(v))}</option>`).join('')}</select>
@@ -1581,7 +1585,7 @@ async function telaPainel(recarregarDados) {
   const vends = [...new Set(D.pedidos.map(o => o.vend))];
   if (PV.per === 'dia') return painelDia(D, vends);
   // períodos: mês, ano ou uma faixa de datas (semana, últimos 3 ou 6 meses, personalizado), sempre comparada com a faixa anterior do mesmo tamanho
-  const FX = ['semana', '3m', '6m', 'custom'].includes(PV.per), porAno = PV.per === 'ano', fx = FX ? faixaPainel(hoje) : null;
+  const FX = ['semana', '90d', '6m', 'custom'].includes(PV.per), porAno = PV.per === 'ano', fx = FX ? faixaPainel(hoje) : null;
   const mes = FX ? mesKey(new Date(+fx.fim - DIA)) : porAno ? PV.ano + '-12' : PV.mes, mesC = PV.cmp === 'ano' ? mesSoma(mes, -12) : mesSoma(mes, -1);
   const mesesPer = porAno ? Array.from({ length: 12 }, (_, i) => PV.ano + '-' + String(i + 1).padStart(2, '0')) : [mes];
   const ini = FX ? fx.ini : porAno ? new Date(+PV.ano, 0, 1) : mesIni(mes), fim = FX ? fx.fim : porAno ? new Date(+PV.ano + 1, 0, 1) : mesFim(mes), atual = hoje >= ini && hoje < fim, corte = atual ? hoje : fim;
@@ -1647,7 +1651,7 @@ async function telaPainel(recarregarDados) {
 
   $('#main').innerHTML = `<section class="view on"><div class="dash pnl">
   <div class="pfiltros"><div><h2>Painel</h2><small>${rot}${atual && (!FX || PV.per === 'semana') ? ` · ${duPass} de ${duTot.length} dias úteis` : ''} · ${PV.vend === 'todos' ? 'todos os vendedores' : esc(nomeVend(PV.vend))}</small></div>
-   <div class="row" style="gap:8px;flex-wrap:wrap"><select id="pvPer">${[['dia', 'Por dia'], ['semana', 'Por semana'], ['mes', 'Por mês'], ['3m', 'Últimos 3 meses'], ['6m', 'Últimos 6 meses'], ['ano', 'Por ano'], ['custom', 'Personalizado']].map(([k, n]) => `<option value="${k}" ${PV.per === k ? 'selected' : ''}>${n}</option>`).join('')}</select>
+   <div class="row" style="gap:8px;flex-wrap:wrap"><select id="pvPer">${[['dia', 'Por dia'], ['semana', 'Por semana'], ['mes', 'Por mês'], ['90d', 'Últimos 90 dias'], ['6m', 'Últimos 6 meses'], ['ano', 'Por ano'], ['custom', 'Personalizado']].map(([k, n]) => `<option value="${k}" ${PV.per === k ? 'selected' : ''}>${n}</option>`).join('')}</select>
    ${PV.per === 'semana' ? `<select id="pvSem">${semanasPainel(hoje).map(w => `<option value="${w.v}" ${w.v === PV.sem ? 'selected' : ''}>${w.n}</option>`).join('')}</select>` : PV.per === 'custom' ? `<button class="btn" id="pvCal">📅 ${esc(fx.curto)}</button>` : ''}
    ${FX ? '' : porAno ? `<select id="pvAno">${anos.map(a => `<option ${a === PV.ano ? 'selected' : ''}>${a}</option>`).join('')}</select>` : `<select id="pvMes">${meses.map(k => `<option value="${k}" ${k === mes ? 'selected' : ''}>${mesNome(k)}</option>`).join('')}</select>`}
    ${FX ? '<span class="pcmp">vs período anterior</span>' : porAno ? '<span class="pcmp">vs ano anterior</span>' : `<select id="pvCmp"><option value="ant" ${PV.cmp === 'ant' ? 'selected' : ''}>vs mês anterior</option><option value="ano" ${PV.cmp === 'ano' ? 'selected' : ''}>vs mesmo mês do ano passado</option></select>`}
@@ -1740,7 +1744,8 @@ function semanasPainel(hoje) { const s0 = segundaDe(hoje); return Array.from({ l
 function faixaPainel(hoje) {
   const amanha = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate() + 1);
   if (PV.per === 'semana') { if (!PV.sem) PV.sem = isoDe(segundaDe(hoje)); const ini = new Date(PV.sem + 'T00:00'), fim = new Date(+ini + 7 * DIA); return { ini, fim, rot: `Semana de ${ddmm(ini)} a ${ddmm(new Date(+fim - DIA))}`, curto: `semana ${ddmm(ini)}` }; }
-  if (PV.per === '3m' || PV.per === '6m') { const n = PV.per === '3m' ? 3 : 6, ini = new Date(hoje.getFullYear(), hoje.getMonth() - n, hoje.getDate() + 1); return { ini, fim: amanha, rot: `Últimos ${n} meses · ${ddmm(ini)} a ${ddmm(hoje)}`, curto: `últimos ${n} meses` }; }
+  if (PV.per === '90d') { const ini = new Date(+amanha - 90 * DIA); return { ini, fim: amanha, rot: `Últimos 90 dias · ${ddmm(ini)} a ${ddmm(hoje)}`, curto: 'últimos 90 dias' }; }
+  if (PV.per === '6m') { const ini = new Date(hoje.getFullYear(), hoje.getMonth() - 6, hoje.getDate() + 1); return { ini, fim: amanha, rot: `Últimos 6 meses · ${ddmm(ini)} a ${ddmm(hoje)}`, curto: 'últimos 6 meses' }; }
   if (!PV.de) { PV.de = isoDe(new Date(+hoje - 29 * DIA)); PV.ate = isoDe(hoje); }
   const ini = new Date(PV.de + 'T00:00'), fim = new Date(new Date(PV.ate + 'T00:00').getTime() + DIA), y = d => d.getFullYear() !== hoje.getFullYear() ? '/' + String(d.getFullYear()).slice(2) : '';
   return { ini, fim, rot: `De ${ddmm(ini)}${y(ini)} a ${ddmm(new Date(+fim - DIA))}${y(new Date(+fim - DIA))}`, curto: `${ddmm(ini)}${y(ini)} – ${ddmm(new Date(+fim - DIA))}${y(new Date(+fim - DIA))}` };
@@ -2953,6 +2958,96 @@ async function verPedido(id, p) {
       if (cs.length && d.visita?.tipo === 'reposicao') { S.reabrir = { pdvId: p.id, contagens: cs, condicao: o.condicao, vencimento: o.vencimento, bonif: bon }; S.contando = p.id; S.repVolta = { aba: 'perfil', id: p.id }; irPara('reposicao'); }
       else { S.prefillVenda = { pdv: p.id, q: Object.fromEntries(d.itens.filter(i => +i.quantidade > 0).map(i => [i.produto_id, +i.quantidade])) }; S.abPdv = p.id; S.vendaVolta = { aba: 'perfil', id: p.id }; irPara('abertura'); } }; };
   $('#vpExc').onclick = () => excluir(false); $('#vpRef').onclick = () => excluir(true);
+}
+
+/* =================== estoque =================== */
+// saldo por produto no depósito e no carro de cada um; entradas de compra, carga/devolução do carro, perdas e inventário.
+// As reposições e vendas baixam sozinhas do carro de quem fez (vendido, bonificado e trocado).
+const TIPOS_EST = { compra: 'Compra', carga: 'Carga do carro', retorno: 'Devolução do carro', venda: 'Venda', bonificacao: 'Bonificação', troca: 'Troca', perda: 'Perda / vencido', ajuste: 'Ajuste de inventário' };
+const EST = {};
+const nomeProd = p => `${(p.linha || '').split(' ')[0]} ${p.sabor}`;
+async function telaEstoque() {
+  $('#main').innerHTML = '<section class="view on"><div class="loading">Carregando o estoque…</div></section>';
+  try { [EST.movs, EST.perfis] = await Promise.all([db.estoqueMovs(), db.perfisLista()]); }
+  catch (e) { if (/estoque_mov/.test(e.message || '')) return $('#main').innerHTML = `<section class="view on"><div class="dash pnl"><div class="panel"><h3>Falta criar a tabela do estoque</h3><p>Rode o <b>034_estoque.sql</b> no Supabase (SQL Editor → colar → Run) e abra esta aba de novo.</p></div></div></section>`; return erro(e); }
+  desenharEstoque();
+}
+function calcEstoque() {
+  const prods = S.base.produtos, locais = ['deposito', ...EST.perfis.map(p => 'carro:' + p.id)], sal = {}, agora = Date.now();
+  prods.forEach(p => { sal[p.id] = {}; locais.forEach(l => sal[p.id][l] = 0); });
+  let primeiro = agora; const saiu = {}, ultCusto = {};
+  EST.movs.forEach(m => { const t = new Date(m.em).getTime(); if (t < primeiro) primeiro = t; if (!sal[m.produto_id]) return; sal[m.produto_id][m.local] = (sal[m.produto_id][m.local] || 0) + +m.qtd;
+    if (['venda', 'bonificacao', 'troca'].includes(m.tipo) && t > agora - 56 * DIA) saiu[m.produto_id] = (saiu[m.produto_id] || 0) - +m.qtd;
+    if (m.tipo === 'compra' && m.custo_unit && (!ultCusto[m.produto_id] || t > ultCusto[m.produto_id].t)) ultCusto[m.produto_id] = { t, v: +m.custo_unit }; });
+  const semanas = Math.max(1, Math.min(8, (agora - primeiro) / (7 * DIA))), min = S.base.regras.estoque_min || {};
+  const linhas = prods.map(p => { const tot = Object.values(sal[p.id]).reduce((a, b) => a + b, 0), sem = (saiu[p.id] || 0) / semanas, cob = sem > 0 ? tot / (sem / 7) : null;
+    const mn = min[p.id] != null ? +min[p.id] : Math.ceil(sem * 2), custo = ultCusto[p.id]?.v ?? +p.custo ?? 0;
+    return { p, sal: sal[p.id], tot, sem, cob, mn, custo, st: tot <= 0 ? 'zerado' : tot < mn ? 'comprar' : 'ok' }; });
+  const hoje0 = hojeISO(), em15 = isoDe(new Date(agora + 15 * DIA));
+  const lotes = EST.movs.filter(m => m.tipo === 'compra' && m.validade && m.validade <= em15 && sal[m.produto_id] && Object.values(sal[m.produto_id]).reduce((a, b) => a + b, 0) > 0).sort((a, b) => a.validade < b.validade ? -1 : 1);
+  return { locais, linhas, lotes, hoje0 };
+}
+const nomeLocal = l => l === 'deposito' ? 'Depósito' : 'Carro ' + ((EST.perfis.find(p => 'carro:' + p.id === l)?.nome || '?').split(' ')[0]);
+function desenharEstoque() {
+  const C = calcEstoque(), L = C.linhas, tot = L.reduce((a, x) => a + Math.max(0, x.tot), 0), val = L.reduce((a, x) => a + Math.max(0, x.tot) * x.custo, 0);
+  const semT = L.reduce((a, x) => a + x.sem, 0), cobT = semT > 0 ? tot / (semT / 7) : null, f = EST.f || {};
+  const sinal = v => v > 0 ? 'var(--t-ok)' : v < 0 ? 'var(--t-bad)' : 'var(--mute)';
+  const hist = EST.movs.filter(m => (!f.tipo || m.tipo === f.tipo) && (!f.local || m.local === f.local)).slice(0, 200), prod = Object.fromEntries(S.base.produtos.map(p => [p.id, p]));
+  $('#main').innerHTML = `<section class="view on"><div class="dash pnl">
+   <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn pri" data-em="compra">+ Entrada (compra)</button><button class="btn" data-em="carga">🚚 Carregar carro</button><button class="btn" data-em="retorno">↩ Devolver do carro</button><button class="btn" data-em="perda">Perda / vencido</button><button class="btn" data-em="ajuste">📋 Inventário</button></div>
+   <div class="kpis"><div class="kpi"><small>Unidades em estoque</small><b>${fmt(Math.round(tot))}</b><small class="sub">depósito + carros</small></div><div class="kpi"><small>Valor a custo</small><b>${brl(val)}</b><small class="sub">pelo último custo de compra</small></div>
+    <div class="kpi"><small>Cobertura</small><b>${cobT == null ? '—' : Math.round(cobT) + ' dias'}</b><small class="sub">no ritmo de saída das últimas semanas</small></div>
+    <div class="kpi"><small>Para comprar</small><b style="color:${L.some(x => x.st !== 'ok') ? 'var(--t-bad)' : 'inherit'}">${L.filter(x => x.st !== 'ok').length}</b><small class="sub">sabores abaixo do mínimo</small></div></div>
+   ${C.lotes.length ? `<div class="esteira" style="margin:0"><b>⏳ Lotes vencendo em até 15 dias</b><p style="margin:4px 0 0">${C.lotes.slice(0, 8).map(m => `${esc(nomeProd(prod[m.produto_id] || {}))}${m.lote ? ' · lote ' + esc(m.lote) : ''} vence ${dstr(m.validade + 'T12:00')}${m.validade < C.hoje0 ? ' (vencido)' : ''}`).join(' · ')}</p></div>` : ''}
+   <div class="panel" style="overflow-x:auto"><h3>Saldo por produto</h3><p class="psub">Saída/semana = vendido + bonificado + trocado (média das últimas semanas). Mínimo: toque para mudar (padrão: 2 semanas de saída).</p>
+    <table class="dped"><tr><th>Produto</th>${C.locais.map(l => `<th>${esc(nomeLocal(l))}</th>`).join('')}<th>Total</th><th>Saída/sem.</th><th>Cobertura</th><th>Mínimo</th><th></th></tr>
+    ${LINHAS.map(li => { const ls = L.filter(x => x.p.linha === li.k || (x.p.linha || '').startsWith(li.k)); return ls.length ? `<tr><td colspan="${C.locais.length + 6}" style="background:var(--sand);font-weight:600;font-size:12px">${esc(li.n)}</td></tr>` + ls.map(x => `<tr><td>${esc(x.p.sabor)}</td>${C.locais.map(l => `<td style="color:${x.sal[l] < 0 ? 'var(--t-bad)' : 'inherit'}">${fmt(x.sal[l] || 0)}</td>`).join('')}<td><b>${fmt(x.tot)}</b></td><td>${x.sem ? dec(x.sem) : '—'}</td><td>${x.cob == null ? '—' : Math.round(x.cob) + ' d'}</td>
+      <td><input type="number" min="0" class="estmin" data-p="${x.p.id}" value="${x.mn}" style="width:64px"></td><td>${x.st === 'ok' ? '<span class="badge" style="background:var(--bg-ok)">ok</span>' : `<span class="badge" style="background:${x.st === 'zerado' ? '#DC2626' : '#F5A524'};color:#fff">${x.st === 'zerado' ? 'zerado' : 'comprar ' + Math.max(0, Math.ceil(x.mn * 2 - x.tot))}</span>`}</td></tr>`).join('') : ''; }).join('')}
+    ${(() => { const resto = L.filter(x => !LINHAS.some(li => x.p.linha === li.k || (x.p.linha || '').startsWith(li.k))); return resto.map(x => `<tr><td>${esc(nomeProd(x.p))}</td>${C.locais.map(l => `<td>${fmt(x.sal[l] || 0)}</td>`).join('')}<td><b>${fmt(x.tot)}</b></td><td>${x.sem ? dec(x.sem) : '—'}</td><td>${x.cob == null ? '—' : Math.round(x.cob) + ' d'}</td><td><input type="number" min="0" class="estmin" data-p="${x.p.id}" value="${x.mn}" style="width:64px"></td><td></td></tr>`).join(''); })()}</table></div>
+   <div class="panel" style="overflow-x:auto"><div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:8px"><h3 style="margin:0">Movimentações</h3>
+    <div class="row" style="gap:6px"><select id="esTipo"><option value="">Todos os tipos</option>${Object.entries(TIPOS_EST).map(([k, n]) => `<option value="${k}" ${f.tipo === k ? 'selected' : ''}>${n}</option>`).join('')}</select><select id="esLocal"><option value="">Todos os locais</option>${C.locais.map(l => `<option value="${l}" ${f.local === l ? 'selected' : ''}>${esc(nomeLocal(l))}</option>`).join('')}</select></div></div>
+    ${hist.length ? `<table class="dped" style="margin-top:8px"><tr><th>Quando</th><th>Produto</th><th>Local</th><th>Tipo</th><th>Qtd.</th><th>Por</th><th>Obs.</th><th></th></tr>${hist.map(m => `<tr><td>${new Date(m.em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td><td>${esc(nomeProd(prod[m.produto_id] || { sabor: '#' + m.produto_id }))}</td><td>${esc(nomeLocal(m.local))}</td><td>${TIPOS_EST[m.tipo] || m.tipo}</td><td style="color:${sinal(+m.qtd)};font-weight:600">${+m.qtd > 0 ? '+' : ''}${fmt(+m.qtd)}</td><td>${esc(m.perfis?.nome || '')}</td><td><small>${esc([m.obs, m.lote ? 'lote ' + m.lote : '', m.validade ? 'val. ' + dstr(m.validade + 'T12:00') : '', m.ref ? 'automático (reposição/venda)' : ''].filter(Boolean).join(' · '))}</small></td><td>${m.ref ? '' : `<button class="mini" data-apaga="${m.id}" title="Apagar este lançamento">✕</button>`}</td></tr>`).join('')}</table>` : '<p class="empty">Nenhuma movimentação ainda. Comece com "+ Entrada (compra)" ou "📋 Inventário" para lançar o que tem hoje.</p>'}</div>
+  </div></section>`;
+  document.querySelectorAll('[data-em]').forEach(b => b.onclick = () => modalEstoque(b.dataset.em, C));
+  $('#esTipo').onchange = e => { EST.f = { ...f, tipo: e.target.value }; desenharEstoque(); }; $('#esLocal').onchange = e => { EST.f = { ...f, local: e.target.value }; desenharEstoque(); };
+  document.querySelectorAll('.estmin').forEach(i => i.onchange = async () => { const m = { ...(S.base.regras.estoque_min || {}), [i.dataset.p]: Math.max(0, +i.value || 0) }; try { await db.salvarRegra('estoque_min', m); S.base.regras.estoque_min = m; desenharEstoque(); } catch (e) { erro(e); } });
+  document.querySelectorAll('[data-apaga]').forEach(b => b.onclick = async () => { if (!confirm('Apagar este lançamento do estoque?')) return; try { await db.apagarMovEstoque(b.dataset.apaga); EST.movs = EST.movs.filter(m => String(m.id) !== b.dataset.apaga); desenharEstoque(); toast('Lançamento apagado'); } catch (e) { erro(e); } });
+}
+// lançamentos: compra, carga, devolução, perda e inventário (grade de produtos + caixas)
+async function modalEstoque(tipo, C) {
+  const prods = S.base.produtos, carros = C.locais.filter(l => l !== 'deposito'), meu = 'carro:' + S.eu.id;
+  const tit = { compra: 'Entrada de compra', carga: 'Carregar o carro', retorno: 'Devolver do carro para o depósito', perda: 'Perda / vencido', ajuste: 'Inventário (contagem do estoque)' }[tipo];
+  const selLocal = (id, ls, v) => `<select id="${id}">${ls.map(l => `<option value="${l}" ${l === v ? 'selected' : ''}>${esc(nomeLocal(l))}</option>`).join('')}</select>`;
+  const topo = tipo === 'compra' ? `<div class="row" style="gap:10px;flex-wrap:wrap"><div><label>Entra em</label>${selLocal('emLoc', C.locais, 'deposito')}</div><div><label>Fornecedor</label><input id="emForn" placeholder="Baccaro, Monkey…"></div><div><label>Lote</label><input id="emLote" style="width:110px"></div><div><label>Validade</label><input type="date" id="emVal"></div></div>`
+    : tipo === 'carga' || tipo === 'retorno' ? `<div><label>Carro</label>${selLocal('emLoc', carros, carros.includes(meu) ? meu : carros[0])}</div>`
+    : `<div><label>Local</label>${selLocal('emLoc', C.locais, tipo === 'perda' ? (carros.includes(meu) ? meu : 'deposito') : 'deposito')}</div>`;
+  const colQ = tipo === 'ajuste' ? 'Contado' : 'Qtd.';
+  modal(`<h3>${tit}</h3>${topo}
+   ${tipo === 'compra' || tipo === 'carga' ? `<div class="row" style="gap:6px;flex-wrap:wrap;margin:10px 0 4px"><small style="color:var(--mute)">Caixas:</small>${KITS.map((k, i) => `<button type="button" class="mini cxbtn" data-kit="${i}">+1 ${esc(k.n)}</button>`).join('')}${tipo === 'carga' ? '<button type="button" class="mini" id="emRota">usar a carga da rota de hoje</button>' : ''}</div>` : ''}
+   <div style="max-height:46vh;overflow:auto;margin-top:6px"><table class="dped"><tr><th>Produto</th><th id="emSaldoH">Saldo</th><th>${colQ}</th>${tipo === 'compra' ? '<th>Custo un.</th>' : ''}</tr>
+   ${prods.map(p => `<tr><td>${esc(nomeProd(p))}</td><td class="emS" data-p="${p.id}"></td><td><input type="number" min="0" class="emQ" data-p="${p.id}" data-cod="${esc(p.codigo || p.bling_codigo || '')}" style="width:74px"></td>${tipo === 'compra' ? `<td><input type="number" step="0.01" min="0" class="emC" data-p="${p.id}" value="${p.custo ?? ''}" style="width:80px"></td>` : ''}</tr>`).join('')}</table></div>
+   <label>Observação</label><input id="emObs" style="width:100%" placeholder="${tipo === 'perda' ? 'Motivo: vencido, quebrado…' : ''}">
+   <div class="row" style="margin-top:14px;justify-content:space-between;align-items:center"><small id="emTot" style="color:var(--mute)"></small><span><button class="btn" onclick="fecharModal()">Cancelar</button> <button class="btn pri" id="emOk">Lançar</button></span></div>`);
+  const pintaSaldo = () => { const l = $('#emLoc').value; document.querySelectorAll('.emS').forEach(td => td.textContent = fmt(C.linhas.find(x => String(x.p.id) === td.dataset.p)?.sal[l] || 0));
+    $('#emSaldoH').textContent = 'Saldo ' + nomeLocal(l).toLowerCase(); if (tipo === 'ajuste' || tipo === 'retorno') document.querySelectorAll('.emQ').forEach(i => { const v = C.linhas.find(x => String(x.p.id) === i.dataset.p)?.sal[l] || 0; i.value = tipo === 'ajuste' ? Math.max(0, v) : (v > 0 ? v : ''); }); soma(); };
+  const soma = () => { $('#emTot').textContent = [...document.querySelectorAll('.emQ')].reduce((a, i) => a + (+i.value || 0), 0) + ' unidades'; };
+  $('#emLoc').onchange = pintaSaldo; document.querySelectorAll('.emQ').forEach(i => i.oninput = soma); pintaSaldo();
+  const byCod = c => document.querySelector(`.emQ[data-p="${S.base.produtos.find(p => p.codigo === c || p.bling_codigo === c)?.id}"]`);
+  document.querySelectorAll('[data-kit]').forEach(b => b.onclick = () => { Object.entries(KITS[+b.dataset.kit].q).forEach(([cod, q]) => { const i = byCod(cod); if (i) i.value = (+i.value || 0) + q; }); soma(); });
+  if ($('#emRota')) $('#emRota').onclick = async () => { const mot = $('#emLoc').value.split(':')[1]; try { const r = await db.obterRota(hojeISO(), mot); const cg = r?.carga; if (!cg || !Object.keys(cg).length) return toast('A rota de hoje desse carro não tem carga ajustada salva');
+    document.querySelectorAll('.emQ').forEach(i => i.value = cg[i.dataset.p] || ''); soma(); } catch (e) { erro(e); } };
+  $('#emOk').onclick = async () => {
+    const loc = $('#emLoc').value, obs = $('#emObs').value.trim() || null, rows = [], base = { usuario_id: S.eu.id, obs };
+    document.querySelectorAll('.emQ').forEach(i => { const pid = +i.dataset.p, q = +i.value; if (i.value === '' || (tipo !== 'ajuste' && !(q > 0))) return;
+      if (tipo === 'compra') rows.push({ ...base, produto_id: pid, local: loc, qtd: q, tipo, custo_unit: +document.querySelector(`.emC[data-p="${pid}"]`).value || null, lote: $('#emLote').value.trim() || null, validade: $('#emVal').value || null, obs: [$('#emForn').value.trim(), obs].filter(Boolean).join(' · ') || null });
+      else if (tipo === 'carga') { rows.push({ ...base, produto_id: pid, local: 'deposito', qtd: -q, tipo }); rows.push({ ...base, produto_id: pid, local: loc, qtd: q, tipo }); }
+      else if (tipo === 'retorno') { rows.push({ ...base, produto_id: pid, local: loc, qtd: -q, tipo }); rows.push({ ...base, produto_id: pid, local: 'deposito', qtd: q, tipo }); }
+      else if (tipo === 'perda') rows.push({ ...base, produto_id: pid, local: loc, qtd: -q, tipo });
+      else if (tipo === 'ajuste') { const atual = C.linhas.find(x => x.p.id === pid)?.sal[loc] || 0, dif = q - atual; if (dif) rows.push({ ...base, produto_id: pid, local: loc, qtd: dif, tipo, obs: obs || `contado ${q}, sistema ${atual}` }); } });
+    if (!rows.length) return toast(tipo === 'ajuste' ? 'Nada mudou: o contado é igual ao saldo' : 'Coloque as quantidades');
+    $('#emOk').disabled = true;
+    try { await db.lancarEstoque(rows); fecharModal(); toast(`${tit}: lançado`); telaEstoque(); } catch (e) { $('#emOk').disabled = false; erro(e); }
+  };
 }
 
 /* =================== contatos =================== */

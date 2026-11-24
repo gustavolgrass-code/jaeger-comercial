@@ -78,6 +78,7 @@ async function gravarContagemEPedido({ pdvId, tipoVisita, usuarioId, contagens, 
     const its = itens.filter(i => i.quantidade > 0 || i.bonificado > 0); // bonificação entra no pedido com quantidade 0 (não é cobrada)
     if (its.length) ok(await sb.from('pedido_itens').insert(its.map(i => ({ ...i, pedido_id: ped.id }))));
   }
+  await baixarEstoque(usuarioId, 'visita:' + visita.id, itens || [], contagens);
   return { visita, pedido: ped };
 }
 export async function registrarAbertura({ pdvId, patch, ...resto }) {
@@ -146,6 +147,7 @@ export async function registrarVenda({ pdvId, usuarioId, pedido, itens, patch })
   const its = itens.filter(i => i.quantidade > 0);
   if (its.length) ok(await sb.from('pedido_itens').insert(its.map(i => ({ ...i, pedido_id: ped.id }))));
   if (patch) await atualizarPdv(pdvId, patch);
+  await baixarEstoque(usuarioId, vis ? 'visita:' + vis.id : 'pedido:' + ped.id, itens, []);
   return { pedido: ped };
 }
 // preços combinados com o cliente: { produto_id: preço }
@@ -175,6 +177,7 @@ export async function painelDados() {
 }
 // apaga uma reposição/venda de vez: o pedido (itens saem junto) e a visita com as contagens dela
 export async function excluirPedido(id, visitaId) {
+  await sb.from('estoque_mov').delete().in('ref', ['pedido:' + id, ...(visitaId ? ['visita:' + visitaId] : [])]).then(() => { }, () => { });
   ok(await sb.from('pedidos').delete().eq('id', id));
   if (visitaId) ok(await sb.from('visitas').delete().eq('id', visitaId));
 }
@@ -266,3 +269,18 @@ export async function rupturaPorPdv() {
   const out = {}; Object.entries(pv).forEach(([id, o]) => { const u = Object.values(o).sort((a, b) => a.em < b.em ? -1 : 1).slice(-3), n = u.reduce((a, v) => a + v.n, 0); if (n) out[id] = { r: u.reduce((a, v) => a + v.z, 0) / n, z: u.reduce((a, v) => a + v.z, 0), n, vis: u.length }; });
   return out;
 }
+
+/* ---------- estoque ---------- */
+// saída automática do carro de quem fez a reposição/venda: vendido, bonificado e trocado (se a tabela ainda não existe, segue sem erro)
+async function baixarEstoque(usuarioId, ref, itens, contagens) {
+  try {
+    const local = 'carro:' + usuarioId, rows = [], add = (produto_id, q, tipo) => { if (q > 0) rows.push({ produto_id, local, qtd: -q, tipo, ref, usuario_id: usuarioId }); };
+    (itens || []).forEach(i => { add(i.produto_id, +i.quantidade || 0, 'venda'); add(i.produto_id, +i.bonificado || 0, 'bonificacao'); });
+    (contagens || []).forEach(c => add(c.produto_id, +c.troca || 0, 'troca'));
+    if (rows.length) await sb.from('estoque_mov').insert(rows);
+  } catch (e) { }
+}
+export async function estoqueMovs() { return tudo(() => sb.from('estoque_mov').select('id, em, produto_id, local, qtd, tipo, custo_unit, lote, validade, ref, obs, usuario_id, perfis(nome)').order('em', { ascending: false })); }
+export async function lancarEstoque(rows) { return ok(await sb.from('estoque_mov').insert(rows).select('id')); }
+export async function apagarMovEstoque(id) { return ok(await sb.from('estoque_mov').delete().eq('id', id)); }
+export async function perfisLista() { return ok(await sb.from('perfis').select('id, nome, papel').order('nome')); }
