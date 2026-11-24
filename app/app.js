@@ -1103,6 +1103,7 @@ function telaCarteira() {
 }
 
 /* =================== abertura de cliente =================== */
+const encVenda = id => { const e = (S.base.regras.encomendas || {})[id]; return e?.tipo === 'venda' ? e : null; };
 function telaAbertura() {
   const elig = S.pdvs.filter(p => p.etapa !== 'perdido' && p.etapa !== 'fechado').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
   if (!S.abPdv || !elig.some(p => p.id === S.abPdv)) S.abPdv = (elig.find(p => p.id === S.sel) || elig.find(p => p.etapa === 'negociacao') || elig[0] || {}).id;
@@ -1115,7 +1116,7 @@ function telaAbertura() {
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
    <div style="position:relative"><label class="lb">Cliente</label><input id="oBusca" autocomplete="off" placeholder="Digite o nome, razão social ou bairro…" value="${p ? esc(p.nome) + ' · ' + etapa(p.etapa).n : ''}" style="width:100%"><div id="oSug" class="sugs"></div></div>
    ${jaCliente ? `<div style="align-self:end;color:var(--soft);font-size:13px">Já é cliente (${etapa(p.etapa).n}): lança só o pedido, sem mexer na etapa nem no expositor.</div><div style="display:none">` : '<div style="display:contents">'}
-   <div><label class="lb">Expositor entregue</label><select id="oExp" style="width:100%">${ex.map(e => `<option value="${e.id}">${esc(e.nome)} · ${e.capacidade} un.</option>`).join('')}</select></div>
+   <div><label class="lb">Expositor</label><select id="oExp" style="width:100%">${ex.map(e => `<option value="${e.id}">${esc(e.nome)} · ${e.capacidade} un.</option>`).join('')}</select></div>
    <div><label class="lb">Pedido mínimo combinado (R$)</label><input id="oMin" type="number" step="10" value="150" style="width:100%"></div>
    <div><label class="lb">Repor a cada</label><select id="oCad" style="width:100%"><option value="">${cadPadrao().avaliacao || 7} dias (padrão da avaliação)</option><option value="10">10 dias</option><option value="14">14 dias</option></select></div></div></div>
   <h3 style="margin:16px 0 6px">Pagamento</h3><div class="row" style="flex-wrap:wrap;gap:14px;align-items:flex-end"><div class="pay" style="margin:0">${FORMAS.map((c, i) => `<label><input type="radio" name="oc" value="${c}" ${i === 0 ? 'checked' : ''}> ${c}</label>`).join('')}</div>
@@ -1129,6 +1130,7 @@ function telaAbertura() {
    <div class="row" style="justify-content:space-between"><button type="button" class="mini" id="oAddParc">+ parcela</button><small id="oParcInfo" style="color:var(--mute)"></small></div></div>
   <div class="row" style="justify-content:space-between;flex-wrap:wrap;margin:16px 0 6px"><h3 style="margin:0">Itens do pedido</h3><div class="row" style="gap:6px;flex-wrap:wrap">${p ? '<button class="mini ultped" id="oUlt" title="Preenche as quantidades com o último pedido deste cliente">↻ Último pedido</button>' : ''}<span style="color:var(--mute);font-size:12px">Kits:</span>${KITS.map((k, i) => `<button class="mini" data-kit="${i}">+ ${k.n}</button>`).join('')}<button class="mini" id="oZera">zerar</button></div></div><div id="oItens" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:8px 18px"></div><small style="color:var(--mute)">O preço ao lado de cada linha vale para todos os sabores dela. Em laranja: diferente da tabela do Bling.</small>
   <div class="row" style="justify-content:space-between;margin-top:14px;flex-wrap:wrap"><div><b id="oUn">0</b> unidades · <span id="oInfo" style="color:var(--soft)"></span></div><div style="text-align:right"><small id="oDesc" style="display:block;color:var(--soft);font-size:12.5px"></small><div style="font-family:var(--fh);font-size:26px" id="oTot">R$ 0,00</div></div></div>
+  ${caixaPix()}${blocoEntrega('o', p && encVenda(p.id))}
   <label class="lb">Observação</label><textarea id="oObs" rows="2" style="width:100%"></textarea>
   <div class="row" style="margin-top:12px;justify-content:flex-end;gap:14px;flex-wrap:wrap"><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="oPadrao" checked style="width:auto"> Guardar os preços como padrão deste cliente</label><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="oBling" checked style="width:auto"> Criar o pedido no Bling</label><button class="btn pri" id="oSave" ${p ? '' : 'disabled'}>Lançar venda</button></div></div></div></section>`;
   const fill = () => { const e = +$('#oExp').value; let l = ''; $('#oItens').innerHTML = S.base.produtos.map(pr => { const pc = S.precosCli?.[pr.id], v = pc != null ? Number(pc) : Number(pr.preco);
@@ -1192,6 +1194,17 @@ function telaAbertura() {
   $('#oExp').onchange = fill; const sec = $('#main section'); sec.addEventListener('input', calc); sec.addEventListener('change', calc);
   S.precosCli = {}; fill();
   if (p && S.prefillVenda?.pdv === p.id) { const q = S.prefillVenda.q; S.prefillVenda = null; document.querySelectorAll('.oq').forEach(i => i.value = q[i.dataset.p] || 0); calc(); toast('Itens do pedido excluído já preenchidos: corrija e lance de novo'); }
+  // venda guardada para entrega: volta preenchida (itens, preços, pagamento); ao lançar, sai da rota
+  const encV = p && encVenda(p.id);
+  if (encV) { if (encV.exp) $('#oExp').value = encV.exp; fill(); Object.entries(encV.precos || {}).forEach(([pid, v]) => { const o = document.querySelector(`.opr[data-p="${pid}"]`); if (o) o.value = v; });
+    document.querySelectorAll('.olp').forEach(i => { const o = document.querySelector(`.opr[data-linha="${i.dataset.linha}"]`); if (o) i.value = (+o.value).toFixed(2); });
+    document.querySelectorAll('.oq').forEach(i => i.value = encV.q?.[i.dataset.p] || 0);
+    const r = document.querySelector(`input[name=oc][value="${encV.forma}"]`); if (r) r.checked = true; if (encV.vencimento) $('#oVenc').value = encV.vencimento; if (encV.min) $('#oMin').value = encV.min;
+    $('#oEnt').checked = false; $('#oEntBox').hidden = true; calc();
+    $('#main .panel').insertAdjacentHTML('afterbegin', `<div class="esteira" style="margin:0 0 12px"><b>📦 Venda para entrega${encV.data ? ' em ' + dstr(encV.data + 'T12:00') : ''}${entregaTxt(encV) ? ' · ' + esc(entregaTxt(encV)) : ''}</b><p style="margin:4px 0 0">Itens e pagamento já preenchidos. Confira e toque em <b>Lançar venda</b>. <a href="#" id="encVDesc">descartar a entrega</a></p></div>`);
+    $('#encVDesc').onclick = async e => { e.preventDefault(); await apagarEncomenda(p.id); toast('Entrega descartada'); telaAbertura(); }; }
+  const entO = ligarEntrega('o', on => { $('#oSave').textContent = on ? '📦 Salvar para entrega' : 'Lançar venda'; });
+  atualizaPix();
   if (p) db.precosCliente(p.id).then(pc => { if (S.abPdv !== p.id || !Object.keys(pc || {}).length) return; S.precosCli = pc; const q = {}; document.querySelectorAll('.oq').forEach(i => q[i.dataset.p] = i.value); fill(); document.querySelectorAll('.oq').forEach(i => i.value = q[i.dataset.p] || 0); calc(); toast('Preços combinados com este cliente carregados'); });
   $('#oSave').onclick = async () => {
     const t = calc(); if (!t.un) return toast('Coloque os itens do pedido');
@@ -1203,6 +1216,12 @@ function telaAbertura() {
     const itens = [...document.querySelectorAll('.oq')].map(i => ({ produto_id: +i.dataset.p, quantidade: +i.value || 0, preco_unit: precoDe(i.dataset.p), bonificado: 0 }));
     const novosPrecos = {}; document.querySelectorAll('.opr').forEach(i => { if (Math.abs((+i.value || 0) - +i.dataset.tab) > 0.001) novosPrecos[i.dataset.p] = +(+i.value).toFixed(2); });
     const hoje = new Date(), venc = div ? parc.map(x => x.vencimento).filter(Boolean).sort().pop() || null : ($('#oVenc').value || null), mandar = $('#oBling').checked, guardar = $('#oPadrao').checked;
+    if (entO.on()) { const e = entO.ler(); if (!e.data) return toast('Escolha a data da entrega');
+      const q = {}, precos = {}; itens.forEach(i => { if (i.quantidade) q[i.produto_id] = i.quantidade; precos[i.produto_id] = i.preco_unit; });
+      $('#oSave').disabled = true;
+      try { await salvarEncomenda(p.id, { tipo: 'venda', q, precos, forma: div ? f1 : c, vencimento: venc, exp: +$('#oExp').value, min: +$('#oMin').value || null, ...e });
+        toast(`📦 Venda para entrega salva para ${dstr(e.data + 'T12:00')}: entra na rota desse dia`); S.abPdv = null; const volta = S.vendaVolta; S.vendaVolta = null;
+        if (volta?.aba === 'perfil') abrirPerfil(p.id); else if (volta?.aba === 'mapa') { S.sel = p.id; irPara('mapa'); } else if (volta?.aba === 'rota') irPara('rota'); else telaAbertura(); } catch (er) { erro(er); $('#oSave').disabled = false; } return; }
     $('#oSave').disabled = true;
     try {
       const reg = jaCliente
@@ -1212,6 +1231,8 @@ function telaAbertura() {
         pedido: { tipo: 'abertura', condicao: c, unidades: t.un, valor: t.tot, pago_na_hora: c === 'Dinheiro', vencimento: venc, ...pagExtra },
         itens,
         patch: { etapa: 'avaliacao', avaliacao_inicio: hoje.toISOString().slice(0, 10), expositor_id: +$('#oExp').value, condicao: div ? f1 : c, pedido_minimo: +$('#oMin').value || 150, cadencia_dias: $('#oCad').value ? +$('#oCad').value : null } });
+      if (!jaCliente) registrarExpositor(p.id, +$('#oExp').value, 'primeira venda');
+      if (encVenda(p.id)) await apagarEncomenda(p.id);
       await atualizarUm(p.id); const n = S.pdvs.find(x => x.id === p.id);
       toast(jaCliente ? `Venda lançada para ${p.nome}.` : `Venda lançada para ${p.nome}. Primeira reposição em ${dstr(n.proxima_reposicao)}.`);
       if (guardar && JSON.stringify(novosPrecos) !== JSON.stringify(S.precosCli || {})) { try { await db.salvarPrecos(p.id, novosPrecos); } catch (e) { toast('Venda salva, mas os preços do cliente não foram guardados: rode o SQL 015'); } }
@@ -1220,6 +1241,7 @@ function telaAbertura() {
       if (S.prosp) { PZ.visHoje[p.id] = 'fechou'; PZ.aberto = null; irPara('mapa'); }
       else if (volta?.aba === 'perfil') abrirPerfil(p.id);
       else if (volta?.aba === 'mapa') { S.sel = p.id; irPara('mapa'); }
+      else if (volta?.aba === 'rota') irPara('rota');
       else telaAbertura();
     } catch (e) { erro(/pagamentos/.test(e.message) ? new Error('Rode o 025_pagamento_dividido_agrupar.sql no Supabase para dividir o pagamento') : /frete/.test(e.message) ? new Error('Rode o 027_frete.sql no Supabase para lançar o custo da entrega') : e); $('#oSave').disabled = false; }
   };
@@ -1784,7 +1806,7 @@ function calcularRota() {
   // quem já está na rota do outro no mesmo dia não entra sozinho nesta
   const doOutro = new Set((RT.outras || []).flatMap(r => [...(r.paradas || []).map(s => s.id), ...(r.incluir || [])]));
   const encs = S.base.regras.encomendas || {};
-  const entra = x => { if (tira.has(x.p.id)) return false; if (incl.has(x.p.id)) return true; if (doOutro.has(x.p.id)) return false; if (encs[x.p.id]) return true; if (R.tipo === 'prospeccao') return false;
+  const entra = x => { if (tira.has(x.p.id)) return false; if (incl.has(x.p.id)) return true; if (doOutro.has(x.p.id)) return false; if (encDoDia(encs[x.p.id], R.data)) return true; if (R.tipo === 'prospeccao') return false;
     if (!atendeHoje(x.p)) return false; if (ehCanoas(x.p) && !moises && x.urg !== 'ruptura') return false; return x.urg !== 'espera'; };
   const reps = fila.filter(entra).map(x => ({ id: x.p.id, tipo: 'rep', p: x.p, urg: x.urg, jan: jan(x.p), temJan: !!x.p.janela_periodo, serv: c.tempo_rep, livre: incl.has(x.p.id) }));
   // prospecções: no misto, até 500 m de alguma parada de reposição; na prospecção, as que você escolheu
@@ -1794,8 +1816,10 @@ function calcularRota() {
     prosps = perto.sort((a, b) => (b.potencial || 0) - (a.potencial || 0)).slice(0, 25).map(p => ({ id: p.id, tipo: 'prosp', p, urg: 'espera', jan: jan(p), serv: c.tempo_prosp }));
   }
   // clientes colocados à mão na rota (qualquer um, mesmo sem urgência ou consumidor final)
-  [...R.incluir, ...Object.keys(encs).filter(id => !doOutro.has(id))].forEach(id => { if (tira.has(id) || reps.some(x => x.id === id) || prosps.some(x => x.id === id)) return; const p = S.pdvs.find(q => q.id === id); if (!p || !p.lat) return;
-    const pr = PROSP_ETAPAS.includes(p.etapa); (pr ? prosps : reps).push({ id, tipo: pr ? 'prosp' : 'rep', p, urg: RT.prev[id]?.urg || 'espera', jan: jan(p), temJan: !!p.janela_periodo, serv: pr ? c.tempo_prosp : c.tempo_rep, livre: true }); });
+  [...R.incluir, ...Object.keys(encs).filter(id => !doOutro.has(id) && encDoDia(encs[id], R.data))].forEach(id => { if (tira.has(id) || reps.some(x => x.id === id) || prosps.some(x => x.id === id)) return; const p = S.pdvs.find(q => q.id === id); if (!p || !p.lat) return;
+    const pr = PROSP_ETAPAS.includes(p.etapa) && !encs[id]; (pr ? prosps : reps).push({ id, tipo: pr ? 'prosp' : 'rep', p, urg: RT.prev[id]?.urg || 'espera', jan: jan(p), temJan: !!p.janela_periodo, serv: pr ? c.tempo_prosp : c.tempo_rep, livre: true }); });
+  // entregas marcadas para hoje: prioridade (não saem da rota) e no período combinado
+  reps.forEach(x => { const e = encs[x.id]; if (!encDoDia(e, R.data)) return; x.urg = 'ruptura'; x.livre = true; x.enc = e; if (e.periodo && e.periodo !== 'dia_todo' && JANELAS[e.periodo]) { x.jan = [JANELAS[e.periodo]]; x.temJan = true; } });
   // rota já em andamento: o que foi feito fica, o resto é recalculado a partir de agora
   const st = Object.fromEntries((R.paradas || []).map(s => [s.id, s.status]));
   const feito = s => feitos.has(s.id) || st[s.id] === 'feito' || st[s.id] === 'ausente';
@@ -1900,10 +1924,10 @@ function pintarRota(k) {
     const u = URG[pv.urg] || URG.espera, rep = s.tipo === 'rep';
     return `<div class="stop rstop ${est ? 'done' : ''}" data-id="${p.id}">${!est && i >= k.fixos.length ? `<div class="grip" data-grip="${p.id}" title="Arraste para mudar a ordem">⠿</div>` : ''}<div class="n" style="background:${corPin(s, est)}">${est === 'feito' ? '✓' : est === 'ausente' ? '🚪' : i + 1}</div>
      <div class="info"><div class="rhora">${est === 'feito' ? '✅ feito' : est === 'ausente' ? '🚪 não estava' : h ? `${hhmm(h.comeca)}${h.espera > 4 ? ` <small>(chega ${hhmm(h.chega)}, espera ${Math.round(h.espera)} min)</small>` : ''}${h.foraJanela ? ' <small style="color:#B8402A">⚠️ fora do horário do cliente</small>' : ''}` : ''}</div>
-      <b class="lnkperfil" data-perfil="${p.id}" title="Abrir o perfil do negócio">${esc(p.nome)}</b>${(S.base.regras.encomendas || {})[p.id] && !est ? ' <span class="badge" style="background:var(--bg-ok)" title="Pedido já combinado">📦 encomenda feita' + ((S.base.regras.encomendas[p.id].obs || '').match(/whats/i) ? ' pelo WhatsApp' : '') + '</span>' : ''} ${est ? '' : rep ? `<span class="badge" style="background:${u.c}22">${u.i} ${pv.dias <= 0 ? 'possível zerado' : `~${Math.round(pv.dias)} dia${Math.round(pv.dias) === 1 ? '' : 's'}`}</span>` : '<span class="badge" style="background:#7B4FC022">🟣 prospecção</span>'}
+      <b class="lnkperfil" data-perfil="${p.id}" title="Abrir o perfil do negócio">${esc(p.nome)}</b>${encDoDia((S.base.regras.encomendas || {})[p.id], R.data) && !est ? (e => ` <span class="badge" style="background:var(--bg-ok)" title="${esc(e.obs || 'Pedido já combinado')}">📦 ${e.tipo === 'venda' ? 'venda para entregar' : 'pedido para entrega'}${entregaTxt(e) ? ' · ' + esc(entregaTxt(e)) : ''}</span>`)(S.base.regras.encomendas[p.id]) : ''} ${est ? '' : rep ? `<span class="badge" style="background:${u.c}22">${u.i} ${pv.dias <= 0 ? 'possível zerado' : `~${Math.round(pv.dias)} dia${Math.round(pv.dias) === 1 ? '' : 's'}`}</span>` : '<span class="badge" style="background:#7B4FC022">🟣 prospecção</span>'}
       ${p.precisa_dono !== false && (p.janela_dias?.length || p.janela_periodo) ? ' <span title="Precisa do dono">🔒</span>' : ''}${ehCanoas(p) ? ' <span class="badge">Canoas</span>' : ''}
       <br><small style="color:var(--mute)">${esc(p.bairro || '')}${janelaTxt(p) ? ' · 🕘 ' + esc(janelaTxt(p)) : ' · sem janela cadastrada'}${rep && pv.deixado != null ? ` · deixado ${pv.deixado} un. em ${dstr(pv.deixadoEm)}${pv.estoque != null ? ` · estimado ~${Math.round(pv.estoque)}` : ''}` : ''}${rep && pv.un ? ` · repor ~${pv.un} un.` : ''}${rep ? ` · previsão por ${pv.fonte}` : ''}</small></div>
-     ${est === 'feito' && rep && RT.visitas.some(v => v.pdv_id === p.id && v.tipo === 'reposicao') ? `<div class="racoes"><button class="mini reabrir" data-reab="${p.id}">reabrir reposição</button></div>` : ''}${est ? '' : `<div class="racoes">${rep ? `<button class="btn pri" data-rep="${p.id}">Repor</button>` : `<button class="btn pri" data-pv="${p.id}">Visitei</button>`}<button class="mini" data-aus="${p.id}">não estava</button><button class="mini" data-tira="${p.id}">tirar</button>${outrosMot().map(m => `<button class="mini" data-passa="${p.id}" data-para="${m.id}" title="Passar para a rota de ${esc(m.nome)}">→ ${esc(m.nome)}</button>`).join('')}</div>`}</div>`; };
+     ${est === 'feito' && rep && RT.visitas.some(v => v.pdv_id === p.id && v.tipo === 'reposicao') ? `<div class="racoes"><button class="mini reabrir" data-reab="${p.id}">reabrir reposição</button></div>` : ''}${est ? '' : `<div class="racoes">${encVenda(p.id) && encDoDia(encVenda(p.id), R.data) ? `<button class="btn pri" data-entv="${p.id}">Entregar</button>` : rep ? `<button class="btn pri" data-rep="${p.id}">Repor</button>` : `<button class="btn pri" data-pv="${p.id}">Visitei</button>`}<button class="mini" data-aus="${p.id}">não estava</button><button class="mini" data-tira="${p.id}">tirar</button>${outrosMot().map(m => `<button class="mini" data-passa="${p.id}" data-para="${m.id}" title="Passar para a rota de ${esc(m.nome)}">→ ${esc(m.nome)}</button>`).join('')}</div>`}</div>`; };
   const nRep = todas.filter(s => s.tipo === 'rep'), nPr = todas.filter(s => s.tipo === 'prosp');
   const feitosN = l => l.filter(s => k.feitos.has(s.id) || k.st[s.id] === 'feito').length;
   const cg = carga(todas.filter(s => !k.feitos.has(s.id)));
@@ -2026,6 +2050,7 @@ function ligarRota(k, todas) {
       try { await db.criarNota(id, nota, S.eu.id); } catch (e) { toast(/pdv_notas/.test(e.message) ? 'Saiu da rota, mas o motivo não foi guardado: rode o 022_observacoes.sql' : 'Saiu da rota, mas o motivo não foi guardado'); }
       fecharModal(); await salvarRotaDia({ tirar: [...new Set([...R.tirar, id])], incluir: R.incluir.filter(x => x !== id), paradas: (R.paradas || []).filter(x => x.id !== id) }, ate ? `Postergado até ${dstr(ate + 'T12:00')} · motivo no histórico` : 'Tirado da rota · motivo no histórico'); desenharRota(); }; });
   document.querySelectorAll('[data-rep]').forEach(b => b.onclick = async () => { if (!R.paradas?.length) await salvarRotaDia({ paradas: fixar() }); S.contando = b.dataset.rep; irPara('reposicao'); });
+  document.querySelectorAll('[data-entv]').forEach(b => b.onclick = async () => { if (!R.paradas?.length) await salvarRotaDia({ paradas: fixar() }); S.abPdv = b.dataset.entv; S.vendaVolta = { aba: 'rota' }; irPara('abertura'); });
   document.querySelectorAll('[data-aus]').forEach(b => b.onclick = async () => { const id = b.dataset.aus, p = S.pdvs.find(x => x.id === id);
     const ps = (R.paradas?.length ? R.paradas : fixar()).map(x => x.id === id ? { ...x, status: 'ausente' } : x);
     await salvarRotaDia({ paradas: ps }); toast(`${p.nome}: não estava. Próximo dia na janela: ${proximoDiaJanela(p, R.data)}`); desenharRota(); });
@@ -2140,6 +2165,37 @@ function ligarSteppers(raiz) {
     i.value = Math.max(0, (+i.value || 0) + +b.dataset.d); i.dispatchEvent(new Event('input', { bubbles: true })); });
   raiz.addEventListener('focusin', e => { if (e.target.matches('.stp input')) e.target.select(); });
 }
+// pedido para entrega: data, período e por onde veio; vira encomenda e entra na rota daquele dia como prioridade
+const PERIODOS_ENT = { manha: 'Manhã', tarde: 'Tarde', dia_todo: 'Dia todo' }, ORIGENS = { whatsapp: 'WhatsApp', ligacao: 'Ligação', presencial: 'Presencial' };
+const proxUtil = () => { let d = new Date(Date.now() + DIA); while (d.getDay() === 0) d = new Date(+d + DIA); return isoDe(d); };
+function blocoEntrega(px, e = null) {
+  return `<label class="chkcomp"><input type="checkbox" id="${px}Ent" ${e ? 'checked' : ''}> 📦 Pedido para entrega <small style="color:var(--mute)">(guarda o pedido; entra na rota do dia escolhido como prioridade)</small></label>
+  <div class="divpag" id="${px}EntBox" ${e ? '' : 'hidden'}><div class="row" style="flex-wrap:wrap;gap:12px;align-items:flex-end">
+   <div><label class="lb">Data da entrega</label><input type="date" id="${px}EntD" value="${e?.data || proxUtil()}" min="${hoje()}"></div>
+   <div><label class="lb">Período</label><select id="${px}EntP">${Object.entries(PERIODOS_ENT).map(([k, n]) => `<option value="${k}" ${(e?.periodo || 'dia_todo') === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+   <div><label class="lb">Pedido feito por</label><div class="nbol">${Object.entries(ORIGENS).map(([k, n]) => `<button type="button" data-ori="${k}" class="${(e?.origem || 'whatsapp') === k ? 'on' : ''}">${n}</button>`).join('')}</div></div></div>
+   <label class="lb">Observação da entrega</label><input id="${px}EntO" value="${esc(e?.obs || '')}" placeholder="Ex.: entregar com o gerente; levar maquininha" style="width:100%"></div>`;
+}
+function ligarEntrega(px, aoMudar = () => { }) {
+  const chk = document.getElementById(px + 'Ent'), box = document.getElementById(px + 'EntBox');
+  chk.onchange = () => { box.hidden = !chk.checked; aoMudar(chk.checked); };
+  box.querySelectorAll('[data-ori]').forEach(b => b.onclick = () => box.querySelectorAll('[data-ori]').forEach(x => x.classList.toggle('on', x === b)));
+  return { on: () => chk.checked, ler: () => ({ data: document.getElementById(px + 'EntD').value, periodo: document.getElementById(px + 'EntP').value, origem: box.querySelector('[data-ori].on')?.dataset.ori || 'whatsapp', obs: document.getElementById(px + 'EntO').value.trim() }) };
+}
+const entregaTxt = e => [e.origem ? ORIGENS[e.origem] : null, e.periodo && e.periodo !== 'dia_todo' ? PERIODOS_ENT[e.periodo].toLowerCase() : null].filter(Boolean).join(' · ');
+// encomenda vale para o dia da rota quando não tem data ou a data já chegou
+const encDoDia = (e, d) => !!e && (!e.data || e.data <= d);
+async function salvarEncomenda(pdvId, obj) { const todas = { ...(S.base.regras.encomendas || {}), [pdvId]: { ...obj, em: new Date().toISOString(), por: S.eu.nome || '' } }; await db.salvarRegra('encomendas', todas); S.base.regras.encomendas = todas; }
+async function apagarEncomenda(pdvId) { const todas = { ...(S.base.regras.encomendas || {}) }; if (!todas[pdvId]) return; delete todas[pdvId]; await db.salvarRegra('encomendas', todas).catch(() => { }); S.base.regras.encomendas = todas; }
+// Pix: mostra a chave para passar ao cliente sempre que Pix estiver escolhido na tela
+const chavePix = () => S.base?.regras?.pix_chave || '51999540937';
+const caixaPix = () => `<div class="pixinfo" hidden>💠 Chave Pix: <b>${esc(chavePix())}</b> <button type="button" class="mini" data-copiapix>copiar</button><small style="color:var(--mute)"> · passe ao cliente</small></div>`;
+function atualizaPix() { document.querySelectorAll('.pixinfo').forEach(el => { const sec = el.closest('section') || document; el.hidden = ![...sec.querySelectorAll('input[type=radio]:checked')].some(r => r.value === 'Pix') && ![...sec.querySelectorAll('select.pf')].some(x => x.value === 'Pix'); }); }
+document.addEventListener('change', atualizaPix);
+document.addEventListener('click', e => { const b = e.target.closest('[data-copiapix]'); if (!b) return; (navigator.clipboard?.writeText(chavePix()) || Promise.reject()).then(() => toast('Chave Pix copiada'), () => toast('Chave Pix: ' + chavePix())); });
+// expositor de cada cliente: histórico (entregue na 1ª venda e trocas), para o custo de aquisição no financeiro
+async function registrarExpositor(pdvId, expId, tipo) { const h = { ...(S.base.regras.expositores_hist || {}) }; h[pdvId] = [...(h[pdvId] || []), { expositor_id: expId, tipo, em: new Date().toISOString(), por: S.eu.nome || '' }];
+  try { await db.salvarRegra('expositores_hist', h); S.base.regras.expositores_hist = h; } catch (e) { } }
 function voltarDaRep() { const v = S.repVolta; S.repVolta = null; S.contando = null; if (v?.aba === 'perfil') abrirPerfil(v.id); else if (v?.aba === 'mapa') { S.sel = v.id; irPara('mapa'); } else irPara('rota'); }
 async function telaReposicao() {
   const p = S.pdvs.find(x => x.id === S.contando);
@@ -2155,7 +2211,7 @@ async function telaReposicao() {
   const preco = pr => Number(precos[pr.id] ?? pr.preco);
   const formaIni = re?.condicao && FORMAS.includes(re.condicao) ? re.condicao : FORMAS.includes(p.condicao) ? p.condicao : 'Boleto';
   let h = `<section class="view on"><div class="count"><div class="toolbar"><h2 style="font-family:var(--fh);margin:0">${esc(p.nome)}</h2><span class="badge">Expositor ${esc(ex.nome)} · ${ex.capacidade} un.</span>${re ? '<span class="badge" style="background:var(--bg-warn)">Reabrindo a reposição</span>' : ''}${enc ? `<span class="badge" style="background:var(--bg-ok)">📦 Encomenda de ${dstr(enc.em)}${enc.por ? ' · ' + esc(enc.por) : ''}</span>` : ''}</div>
-  ${enc ? `<div class="esteira" style="margin-bottom:10px"><b>📦 Este cliente tem encomenda feita${enc.obs ? ': ' + esc(enc.obs) : ''}.</b><p style="margin:4px 0 0">O pedido e o pagamento já estão preenchidos. Conte o expositor e toque em <b>Fechar reposição</b> para lançar e mandar ao Bling. <a href="#" id="encDesc">descartar a encomenda</a></p></div>` : ''}
+  ${enc ? `<div class="esteira" style="margin-bottom:10px"><b>📦 Pedido para entrega${enc.data ? ' em ' + dstr(enc.data + 'T12:00') : ''}${entregaTxt(enc) ? ' · ' + esc(entregaTxt(enc)) : ''}${enc.obs ? ': ' + esc(enc.obs) : ''}.</b><p style="margin:4px 0 0">O pedido e o pagamento já estão preenchidos. Conte o expositor e toque em <b>Fechar reposição</b> para lançar e mandar ao Bling. <a href="#" id="encDesc">descartar a encomenda</a></p></div>` : ''}
   <p style="color:var(--soft);margin-top:0">Conte o que tem de cada sabor no expositor, inclusive o que vai ser trocado. O sistema sugere quanto repor e calcula o sell-out.<br><small>Deixado: ${re ? 'o mesmo da reposição reaberta' : dx.fonte === 'contagem' ? `contagem de ${dstr(dx.em)}` : dx.fonte === 'pedido' ? `o que foi entregue no último pedido (${dstr(dx.em)}), pelo histórico` : 'sem histórico deste cliente'}${Object.keys(precos).length ? ' · preços combinados com o cliente aplicados' : ''}</small></p>
   <div id="ct" class="contagem">`;
   let l = '';
@@ -2171,9 +2227,10 @@ async function telaReposicao() {
   h += `</div><div class="panel totpanel"><div class="kits"><b>Atalhos do pedido</b> <small style="color:var(--mute)">cada toque soma um kit em "Repor"</small><div class="row" style="flex-wrap:wrap;gap:6px;margin-top:6px">${KITS.map((k, i) => `<button class="btn" type="button" data-kit="${i}">+ ${k.n} <b class="kq" data-kq="${i}"></b></button>`).join('')}<button class="btn" type="button" id="kZerar">Zerar repor</button></div></div>
   <div class="row" style="justify-content:space-between;flex-wrap:wrap;margin-top:12px"><div><b id="tUn">0 un.</b> a repor · sell-out <b id="tSo">0 un.</b> · trocas <b id="tTr">0</b> <small style="color:var(--mute)">(repostas sem cobrar)</small> · bonificação <b id="tBon">0</b> <small style="color:var(--mute)">(não cobra; sai do carro)</small></div><div style="font-family:var(--fh);font-size:24px" id="tVal">R$ 0,00</div></div>
   ${cons ? `<div class="esteira" style="margin-top:12px"><b>Cliente em consignado.</b><p>Cobra só o que foi vendido desde a última visita: <b id="tCons">R$ 0,00</b>.</p></div>` : ''}
-  <h3 style="margin:14px 0 6px">Pagamento</h3>${blocoPag('rp', formaIni, re?.vencimento)}
-  <label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="rBling" checked> Criar o pedido de venda no Bling</label>
-  <div class="row" style="margin-top:12px;flex-wrap:wrap;gap:8px"><button class="btn" id="bVoltar">Voltar</button><button class="btn" id="bEnc" title="Guarda o pedido para fechar quando chegar no cliente">📦 ${enc ? 'Atualizar encomenda' : 'Salvar como encomenda'}</button><button class="btn pri" id="fechar">Fechar reposição</button></div></div></div></section>`;
+  <h3 style="margin:14px 0 6px">Pagamento</h3>${blocoPag('rp', formaIni, re?.vencimento)}${caixaPix()}
+  ${re ? '' : blocoEntrega('rp')}
+  <label style="display:flex;gap:8px;align-items:center;margin-top:10px" id="rBlingL"><input type="checkbox" id="rBling" checked> Criar o pedido de venda no Bling</label>
+  <div class="row" style="margin-top:12px;flex-wrap:wrap;gap:8px"><button class="btn" id="bVoltar">Voltar</button><button class="btn pri" id="fechar">Fechar reposição</button></div></div></div></section>`;
   $('#main').innerHTML = h;
   const linhas = () => [...document.querySelectorAll('#ct .lin[data-p]')];
   const kitsUsados = {};
@@ -2181,15 +2238,17 @@ async function telaReposicao() {
   const calc = () => { let un = 0, so = 0, tr = 0, val = 0, vc = 0, bo = 0;
     linhas().forEach(r => { const a = +r.dataset.ant, enc = r.querySelector('.enc').value, t = +r.querySelector('.trc').value || 0, pre = +r.dataset.pre;
       // repor = o que é vendido (cobrado); as trocas são repostas 1 a 1 sem cobrar e não entram aqui
-      if (enc !== '' && !r.querySelector('.rep').dataset.mexeu) r.querySelector('.rep').value = Math.max(0, +r.dataset.alvo - +enc);
+      // Repor começa zerado (só a encomenda vem preenchida); a sugestão para completar o expositor aparece ao lado
+      const sug = enc === '' ? 0 : Math.max(0, +r.dataset.alvo - +enc);
       const rep = +r.querySelector('.rep').value || 0, s = enc === '' ? null : Math.max(0, a - +enc);
-      r.querySelector('.so').textContent = s === null ? '—' : s; r.querySelector('.val').textContent = rep ? 'repor ' + brl(rep * pre) : '—';
+      r.querySelector('.so').textContent = s === null ? '—' : s; r.querySelector('.val').innerHTML = rep ? 'repor ' + brl(rep * pre) : sug ? `<a href="#" data-sug="${sug}">sugestão ${sug}</a>` : '—';
       r.classList.toggle('vendeu', (s || 0) > 0);
       un += rep; so += s || 0; tr += t; val += rep * pre; vc += (s || 0) * pre; bo += +r.querySelector('.bon').value || 0; });
     if (cons) { val = vc; $('#tCons').textContent = brl(vc); }
     valItens = val; $('#tUn').textContent = un + ' un.'; $('#tSo').textContent = so + ' un.'; $('#tTr').textContent = tr; $('#tBon').textContent = bo + ' un.';
     const fr = pag ? pag.ler().frete : { v: 0 }; $('#tVal').textContent = brl(val + (fr.cobrado ? fr.v : 0)); pag?.resto(); return { un, so, tr, val, bo }; };
   $('#ct').addEventListener('input', e => { if (e.target.classList.contains('rep')) e.target.dataset.mexeu = 1; calc(); });
+  $('#ct').addEventListener('click', e => { const a = e.target.closest('[data-sug]'); if (!a) return; e.preventDefault(); const i = a.closest('.lin').querySelector('.rep'); i.value = a.dataset.sug; i.dataset.mexeu = 1; calc(); });
   ligarSteppers($('#ct')); calc();
   document.querySelectorAll('[data-kit]').forEach(b => b.onclick = () => { const i = +b.dataset.kit, k = KITS[i];
     // primeiro toque num kit troca a sugestão daquela linha pelo kit; os próximos somam
@@ -2198,18 +2257,19 @@ async function telaReposicao() {
     kitsUsados[i] = (kitsUsados[i] || 0) + 1; document.querySelector(`[data-kq="${i}"]`).textContent = '×' + kitsUsados[i]; calc(); });
   $('#kZerar').onclick = () => { linhas().forEach(r => { const i = r.querySelector('.rep'); i.value = 0; i.dataset.mexeu = 1; }); Object.keys(kitsUsados).forEach(k => { delete kitsUsados[k]; document.querySelector(`[data-kq="${k}"]`).textContent = ''; }); calc(); };
   pag = ligarPag('rp', () => valItens, () => calc()); pag.preencher(enc?.pag); calc();
-  // encomenda: guarda o pedido (repor, bonificação) e o pagamento; aparece no Dia de rota e volta preenchido quando você abrir a reposição
-  $('#bEnc').onclick = () => { modal(`<h3>Salvar encomenda de ${esc(p.nome)}</h3><p style="color:var(--soft);margin-top:0">O pedido fica guardado e o cliente aparece no Dia de rota com 📦. Quando chegar lá, toque em Repor, confira e feche: aí vai para o Bling.</p><label>Observação</label><input id="encObs" value="${esc(enc?.obs || 'pedido pelo WhatsApp')}"><div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="encOk">Salvar encomenda</button></div>`);
-    $('#encOk').onclick = async () => { const ln = {}; linhas().forEach(r => { const rp = +r.querySelector('.rep').value || 0, bn = +r.querySelector('.bon').value || 0; if (rp || bn) ln[r.dataset.p] = { rep: rp, bon: bn }; });
-      if (!Object.keys(ln).length) return toast('Coloque os itens do pedido em Repor');
-      const g = pag.ler(), todas = { ...(S.base.regras.encomendas || {}) }; todas[p.id] = { linhas: ln, pag: { forma: g.forma, vencimento: g.vencimento, parcelas: g.parcelas, frete: g.frete }, obs: $('#encObs').value.trim(), em: new Date().toISOString(), por: S.eu.nome || '' };
-      try { await db.salvarRegra('encomendas', todas); S.base.regras.encomendas = todas; fecharModal(); toast('Encomenda salva: aparece no Dia de rota'); S.contando = null; irPara('rota'); } catch (e) { erro(e); } }; };
+  // pedido para entrega: em vez de fechar, guarda como encomenda para o dia escolhido
+  const ent = re ? null : ligarEntrega('rp', on => { $('#fechar').textContent = on ? '📦 Salvar para entrega' : 'Fechar reposição'; $('#rBlingL').style.display = on ? 'none' : ''; });
+  atualizaPix();
   if ($('#encDesc')) $('#encDesc').onclick = async e => { e.preventDefault(); const todas = { ...(S.base.regras.encomendas || {}) }; delete todas[p.id];
     try { await db.salvarRegra('encomendas', todas); S.base.regras.encomendas = todas; toast('Encomenda descartada'); telaReposicao(); } catch (er) { erro(er); } };
   $('#bVoltar').onclick = () => { S.reabrir = null; voltarDaRep(); };
   $('#fechar').onclick = async () => {
     const t = calc(), g = pag.ler(), pg = g.condicao, venc = g.vencimento, mandar = $('#rBling').checked;
     if (!g.ok) return toast('Cada parcela precisa ter valor, e a soma não pode passar do total');
+    if (ent?.on()) { const e = ent.ler(), ln = {}; linhas().forEach(r => { const rp = +r.querySelector('.rep').value || 0, bn = +r.querySelector('.bon').value || 0; if (rp || bn) ln[r.dataset.p] = { rep: rp, bon: bn }; });
+      if (!Object.keys(ln).length) return toast('Coloque os itens do pedido em Repor'); if (!e.data) return toast('Escolha a data da entrega');
+      try { await salvarEncomenda(p.id, { tipo: 'reposicao', linhas: ln, pag: { forma: g.forma, vencimento: g.vencimento, parcelas: g.parcelas, frete: g.frete }, ...e });
+        toast(`📦 Entrega salva para ${dstr(e.data + 'T12:00')}: entra na rota desse dia`); S.contando = null; voltarDaRep(); } catch (er) { erro(er); } return; }
     // reposto (físico) = vendido + trocas repostas; o pedido cobra só o vendido
     // bonificação: vai para o expositor (entra no reposto e sai do carro), mas não é cobrada
     const bonDe = r => +r.querySelector('.bon').value || 0;
@@ -2220,7 +2280,7 @@ async function telaReposicao() {
     try {
       const reg = await db.registrarReposicao({ pdvId: p.id, usuarioId: S.eu.id, contagens, itens,
         pedido: { tipo: cons ? 'reposicao_consignado' : 'reposicao', condicao: pg, unidades: cons ? t.so : t.un, valor: g.total, pago_na_hora: pg === 'Dinheiro', vencimento: venc, ...g.extra } });
-      if (enc) { const todas = { ...(S.base.regras.encomendas || {}) }; delete todas[p.id]; await db.salvarRegra('encomendas', todas).catch(() => { }); S.base.regras.encomendas = todas; }
+      if (enc) await apagarEncomenda(p.id);
       let n = await db.carregarPdv(p.id), extra = '';
       const r = regraAval();
       if (n.etapa === 'avaliacao' && (n.aval_reposicoes || 0) >= r.reposicoes) {
@@ -2490,6 +2550,7 @@ async function telaPerfil() {
     <small id="eEndTxt" style="color:var(--mute)"></small>`; })()}
     <label>Link do Google Maps <small style="color:var(--mute);font-weight:400">(opcional: cole o link do lugar e o pino vai para lá)</small></label><input id="eLink" value="${esc(/^https?:/.test(p.link_maps || '') ? p.link_maps : '')}" placeholder="https://www.google.com/maps/place/…"><div class="linkmsg" id="eLinkMsg"></div>
     <div class="row"><div style="flex:1"><label>Classe</label><select id="eCla"><option value="">—</option>${['A', 'B', 'C', 'D'].map(x => `<option ${x === p.classe ? 'selected' : ''}>${x}</option>`).join('')}</select></div><div style="flex:1"><label>Potencial</label>${campoPot('ePot', p.potencial)}</div></div>
+    <label>Expositor</label><select id="eExp"><option value="">— sem expositor —</option>${S.base.expositores.map(x => `<option value="${x.id}" ${x.id === p.expositor_id ? 'selected' : ''}>${esc(x.nome)} · ${x.capacidade} un.</option>`).join('')}</select>
     <label class="chkbox" style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="eCF" style="width:auto" ${p.consumidor_final ? 'checked' : ''}> Consumidor final <small style="color:var(--mute)">(não gera reposição automática; dá para pôr na rota à mão)</small></label>
     <label>Observação</label><textarea id="eObs" rows="3">${esc(p.observacao || '')}</textarea><div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="eOk">Salvar</button></div>`);
     ligarCanal('eCanal'); ligarEmpresa('e', 'eNome');
@@ -2518,6 +2579,7 @@ async function telaPerfil() {
       const end = [rua, num].filter(Boolean).join(', ');
       const patch = { nome: $('#eNome').value.trim() || p.nome, ...lerEmpresa('e'), canal: lerCanal('eCanal'), endereco: end || null, bairro: bai || null, cidade: cid || null, classe: $('#eCla').value || null, potencial: +$('#ePot').value, observacao: $('#eObs').value.trim() || null };
       if (!!$('#eCF').checked !== !!p.consumidor_final) patch.consumidor_final = $('#eCF').checked;
+      const nExp = $('#eExp').value ? +$('#eExp').value : null; if (nExp !== (p.expositor_id || null)) { patch.expositor_id = nExp; if (nExp) registrarExpositor(p.id, nExp, p.expositor_id ? 'troca' : 'entregue'); }
       if ((num || null) !== (p.numero || null)) patch.numero = num || null; if ((uf || null) !== (p.uf || null)) patch.uf = uf || null; if ((cep || null) !== (p.cep || null)) patch.cep = cep || null;
       // link do Google novo: o pino vai para o lugar do link (mais preciso que o endereço) e o link fica guardado
       const link = $('#eLink').value.trim(), gl = link && link !== p.link_maps ? lerLink(link) : null;

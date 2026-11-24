@@ -614,3 +614,4 @@ section:fullscreen #mapa{height:100vh}
 
 .mbusca{position:relative}.mbusca input{width:100%;min-height:36px}
 .tmbar .mbusca input{min-height:0}
+.pixinfo{margin:10px 0 0;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg-info);display:flex;align-items:center;gap:8px;flex-wrap:wrap}.pixinfo[hidden]{display:none}.pixinfo b{font-size:15px;letter-spacing:.03em}
