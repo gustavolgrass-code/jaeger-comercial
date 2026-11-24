@@ -210,7 +210,7 @@ function pintarMenu() {
     <div class="sb-grp" ${fech[m.g] && m.g !== ativo ? 'style="display:none"' : ''}>${m.it.map(k => `<button class="sb-it ${k === a ? 'on' : ''}" data-a="${k}" title="${esc(nomeAba(k))}">${ico(k)}<span class="sb-lbl">${esc(nomeAba(k))}</span></button>`).join('')}</div>`).join('');
   const g = grupoDe(a); if (g) lado = g.lado; $('#tAcoes').innerHTML = '';
   $('#tTri').textContent = g ? g.g : (lado === 'operacao' ? 'Reposição' : 'CRM');
-  $('#tTit').textContent = a === 'perfil' ? 'Perfil do negócio' : a === 'contato' ? 'Contato' : a === 'pedcli' ? 'Detalhes dos pedidos' : nomeAba(a);
+  $('#tTit').textContent = a === 'carteiramet' ? 'Detalhes da carteira' : a === 'perfil' ? 'Perfil do negócio' : a === 'contato' ? 'Contato' : a === 'pedcli' ? 'Detalhes dos pedidos' : nomeAba(a);
 }
 // navegação com "voltar" de verdade: cada tela guarda de onde veio (aba + cliente/contato aberto)
 S.hist = []; S.fil = {};
@@ -221,7 +221,7 @@ function irPara(a, semHist) {
   else if (!semHist && S.aba && !mesmo) { S.hist.push({ aba: S.aba, ...(S.histEnt || {}) }); if (S.hist.length > 40) S.hist.shift(); }
   S.aba = a; S.histEnt = ctx;
   pintarMenu();
-  ({ agenda: telaAgenda, perfil: telaPerfil, contato: telaContato, contatos: telaContatos, uploads: telaUploads, mapa: telaMapa, funil: telaFunil, carteira: telaCarteira, abertura: telaAbertura, painel: telaPainel, regras: telaRegras, rota: telaRota, reposicao: telaReposicao, pedcli: telaPedidosCliente, resumo: telaResumo })[a]();
+  ({ agenda: telaAgenda, perfil: telaPerfil, contato: telaContato, contatos: telaContatos, uploads: telaUploads, mapa: telaMapa, funil: telaFunil, carteira: telaCarteira, abertura: telaAbertura, painel: telaPainel, regras: telaRegras, rota: telaRota, reposicao: telaReposicao, pedcli: telaPedidosCliente, resumo: telaResumo, carteiramet: telaCarteiraMet })[a]();
 }
 window.irPara = irPara;
 // texto do botão Voltar: diz para onde vai (ex.: "← Almeida 68" quando veio do perfil do negócio)
@@ -1385,6 +1385,146 @@ function ligarGraficos(raiz) {
 }
 const legenda = ss => `<div class="leg">${ss.map(s => `<span><i style="background:${s.cor};${s.tracejado ? 'height:2px;border-top:2px dashed ' + s.cor + ';background:none' : ''}"></i>${esc(s.nome)}</span>`).join('')}</div>`;
 
+/* ---- métricas de carteira e campo (sem R$: o financeiro fica na aba própria) ---- */
+const FUNIL = ['visitado', 'negociacao', 'avaliacao', 'ativo'];
+// funil a partir da visita: quem entrou em cada etapa, quantos passaram para a próxima e em quantos dias
+function metFunil(D, vend) {
+  const ent = {}; (D.etapas || []).forEach(e => { const o = ent[e.pdv_id] = ent[e.pdv_id] || {}; if (!o[e.para]) o[e.para] = { em: new Date(e.em), u: e.usuario_id }; });
+  const ord = k => FUNIL.indexOf(k);
+  const lista = Object.entries(ent).filter(([, o]) => o.visitado && (vend === 'todos' || o.visitado.u === vend)).map(([id, o]) => {
+    const pdv = S.pdvs.find(p => p.id === id); let max = 0; FUNIL.forEach((k, i) => { if (o[k]) max = Math.max(max, i); }); if (pdv && ord(pdv.etapa) > max) max = ord(pdv.etapa);
+    return { id, o, max, perdido: pdv && ['perdido', 'fechado'].includes(pdv.etapa) && max < 3 }; });
+  return FUNIL.map((k, i) => { const chegou = lista.filter(x => x.max >= i), passou = lista.filter(x => x.max > i);
+    const dias = lista.filter(x => x.o[k] && x.o[FUNIL[i + 1]]).map(x => (x.o[FUNIL[i + 1]].em - x.o[k].em) / DIA).filter(d => d >= 0);
+    const parados = chegou.filter(x => x.max === i && !x.perdido && x.o[k]).map(x => (Date.now() - x.o[k].em) / DIA);
+    return { k, n: chegou.length, passou: i < FUNIL.length - 1 ? passou.length : null, conv: i < FUNIL.length - 1 && chegou.length ? passou.length / chegou.length : null,
+      dias: dias.length ? dias.reduce((a, b) => a + b, 0) / dias.length : null, parados: parados.length, paradoMed: parados.length ? parados.reduce((a, b) => a + b, 0) / parados.length : null }; });
+}
+// contagens por visita de um cliente (ordem de data), para sell-out, ruptura, trocas e giro
+function visitasContadas(D) {
+  const pv = {}; (D.contagens || []).forEach(c => { if (!c.visitas) return; const id = c.visita_id || c.visitas.em + c.visitas.pdv_id, v = (pv[c.visitas.pdv_id] = pv[c.visitas.pdv_id] || {})[id] = pv[c.visitas.pdv_id]?.[id] || { em: new Date(c.visitas.em), u: c.visitas.usuario_id, so: 0, tr: 0, lin: 0, zer: 0, cont: [] };
+    v.so += +c.sellout || Math.max(0, (+c.deixado_anterior || 0) - (+c.encontrado || 0)); v.tr += +c.troca || 0; if (+c.deixado_anterior > 0) { v.lin++; if (+c.encontrado === 0) v.zer++; } v.cont.push(c); });
+  const out = {}; Object.entries(pv).forEach(([id, o]) => out[id] = Object.values(o).sort((a, b) => a.em - b.em)); return out;
+}
+// giro do expositor: quantos dias ele leva para esvaziar no ritmo de venda do cliente
+function giroDe(p, vs) {
+  const ex = p.expositor_id ? expo(p.expositor_id) : null; if (!ex?.capacidade || !vs || vs.length < 2) return null;
+  const u = vs.slice(-5), dias = (u[u.length - 1].em - u[0].em) / DIA; if (dias < 3) return null;
+  const vd = u.slice(1).reduce((a, v) => a + v.so, 0) / dias; if (!(vd > 0)) return { ex, vd: 0, dias: null, st: 'grande', sug: S.base.expositores.slice().sort((a, b) => a.capacidade - b.capacidade)[0] };
+  const d = ex.capacidade / vd, alvo = vd * 14, sug = S.base.expositores.filter(x => x.capacidade).slice().sort((a, b) => Math.abs(a.capacidade - alvo) - Math.abs(b.capacidade - alvo))[0];
+  return { ex, vd, dias: d, st: d < 7 ? 'pequeno' : d > 28 ? 'grande' : 'ok', sug: sug && sug.id !== ex.id ? sug : null };
+}
+// saúde de cada cliente (0 a 100): ritmo de compra, sell-out, ruptura, trocas e dias sem visita
+function saudeCarteira(D) {
+  const VC = visitasContadas(D), R = Object.fromEntries(ritmos(D).map(r => [r.p.id, r])), agora = Date.now();
+  const ultVis = {}; (D.visitas || []).forEach(v => { const t = new Date(v.em); if (!ultVis[v.pdv_id] || t > ultVis[v.pdv_id]) ultVis[v.pdv_id] = t; });
+  return S.pdvs.filter(p => ['avaliacao', 'ativo', 'risco', 'revisao'].includes(p.etapa)).map(p => {
+    const vs = VC[p.id] || [], r = R[p.id], u3 = vs.slice(-3), a3 = vs.slice(-6, -3);
+    const ptsRit = !r ? 15 : r.atraso <= 1 ? 35 : r.atraso <= 1.5 ? 20 : r.atraso <= 2 ? 8 : 0;
+    const so3 = u3.reduce((a, v) => a + v.so, 0), soA = a3.reduce((a, v) => a + v.so, 0), tend = a3.length >= 2 && soA ? so3 / u3.length / (soA / a3.length) - 1 : null;
+    const ptsSo = tend == null ? 12 : tend >= -0.1 ? 20 : tend >= -0.3 ? 10 : 0;
+    const lin = u3.reduce((a, v) => a + v.lin, 0), rup = lin ? u3.reduce((a, v) => a + v.zer, 0) / lin : null, ptsRup = rup == null ? 10 : rup === 0 ? 15 : rup <= 0.2 ? 8 : 0;
+    const v90 = vs.filter(v => v.em > agora - 90 * DIA), so90 = v90.reduce((a, v) => a + v.so, 0), tr90 = v90.reduce((a, v) => a + v.tr, 0), troca = so90 ? tr90 / so90 : null, ptsTr = troca == null ? 10 : troca <= 0.05 ? 15 : troca <= 0.12 ? 8 : 0;
+    const semVis = ultVis[p.id] ? Math.floor((agora - ultVis[p.id]) / DIA) : null, ptsVis = semVis == null ? 8 : semVis <= 21 ? 15 : semVis <= 45 ? 8 : 0;
+    const nota = ptsRit + ptsSo + ptsRup + ptsTr + ptsVis, faixa = nota >= 70 ? 'ok' : nota >= 45 ? 'atencao' : 'risco';
+    const dSo = vs.length >= 2 ? (vs[vs.length - 1].em - vs[Math.max(0, vs.length - 5)].em) / DIA : 0, soSem = dSo > 3 ? vs.slice(Math.max(1, vs.length - 4)).reduce((a, v) => a + v.so, 0) / dSo * 7 : null;
+    return { p, nota, faixa, partes: { ritmo: ptsRit, sellout: ptsSo, ruptura: ptsRup, troca: ptsTr, visita: ptsVis }, r, tend, rup, troca, semVis, soSem, giro: giroDe(p, vs), vs };
+  }).sort((a, b) => a.nota - b.nota);
+}
+const FAIXA_S = { ok: { n: 'Saudável', c: '#16A34A', i: '🟢' }, atencao: { n: 'Atenção', c: '#F5A524', i: '🟡' }, risco: { n: 'Risco', c: '#DC2626', i: '🔴' } };
+const pctM = v => v == null ? '—' : Math.round(v * 100) + '%';
+// ruptura e trocas no período (contagens das reposições), com o filtro de vendedor
+function metExpositor(D, ini, fim, vend) {
+  const cs = (D.contagens || []).filter(c => c.visitas && new Date(c.visitas.em) >= ini && new Date(c.visitas.em) < fim && (vend === 'todos' || c.visitas.usuario_id === vend));
+  const lin = cs.filter(c => +c.deixado_anterior > 0), zer = lin.filter(c => +c.encontrado === 0);
+  const so = cs.reduce((a, c) => a + (+c.sellout || Math.max(0, (+c.deixado_anterior || 0) - (+c.encontrado || 0))), 0), tr = cs.reduce((a, c) => a + (+c.troca || 0), 0);
+  const porSab = {}, porCli = {}; lin.forEach(c => { const k = c.produto_id; porSab[k] = porSab[k] || { n: 0, z: 0 }; porSab[k].n++; if (+c.encontrado === 0) porSab[k].z++; const q = c.visitas.pdv_id; porCli[q] = porCli[q] || { n: 0, z: 0 }; porCli[q].n++; if (+c.encontrado === 0) porCli[q].z++; });
+  return { lin: lin.length, zer: zer.length, rup: lin.length ? zer.length / lin.length : null, so, tr, troca: so ? tr / so : null, porSab, porCli, visitas: new Set(cs.map(c => c.visita_id || c.visitas.em)).size };
+}
+// produtividade de campo no período, para quem estiver no filtro (você, Moisés ou todos)
+function metCampo(D, ini, fim, vend) {
+  const em = x => new Date(x) >= ini && new Date(x) < fim, eu = u => vend === 'todos' || u === vend;
+  const vis = (D.visitas || []).filter(v => em(v.em) && eu(v.usuario_id)), rep = vis.filter(v => v.tipo === 'reposicao').length, pro = vis.filter(v => v.tipo === 'prospeccao').length;
+  const porDia = {}; vis.forEach(v => { const k = (v.usuario_id || '') + '|' + isoDe(new Date(v.em)); (porDia[k] = porDia[k] || []).push(new Date(v.em)); });
+  const dias = Object.keys(porDia).length, gaps = Object.values(porDia).flatMap(ts => ts.sort((a, b) => a - b).slice(1).map((t, i) => (t - ts[i]) / 60000)).filter(g => g > 2 && g <= 120);
+  const rotas = (D.rotas || []).filter(r => r.data && new Date(r.data + 'T12:00') >= ini && new Date(r.data + 'T12:00') < fim && new Date(r.data + 'T12:00') <= new Date() && eu(r.motorista) && (r.paradas || []).length);
+  const visDia = {}; (D.visitas || []).forEach(v => visDia[v.pdv_id + '|' + isoDe(new Date(v.em))] = 1);
+  let plan = 0, feitas = 0; rotas.forEach(r => (r.paradas || []).forEach(s => { plan++; if (s.status === 'feito' || s.status === 'ausente' || visDia[s.id + '|' + r.data]) feitas++; }));
+  const motivos = { 'Postergada': 0, 'Cliente negou': 0, 'Não estava': 0 };
+  (D.notas || []).filter(n => em(n.em) && eu(n.autor)).forEach(n => { if (/Entrega postergada/.test(n.texto)) motivos['Postergada']++; else if (/negou a reposi/.test(n.texto)) motivos['Cliente negou']++; });
+  vis.filter(v => v.resultado === 'nao_estava' || v.tipo === 'nao_estava').forEach(() => motivos['Não estava']++);
+  return { vis: vis.length, rep, pro, dias, porDia: dias ? vis.length / dias : null, tempo: gaps.length ? gaps.reduce((a, b) => a + b, 0) / gaps.length : null, rotas: rotas.length, plan, feitas, cumprida: plan ? feitas / plan : null, motivos };
+}
+function blocoCarteira(D, ini, fim, rotPer) {
+  const F = metFunil(D, PV.vend), E = metExpositor(D, ini, fim, PV.vend), C = metCampo(D, ini, fim, PV.vend), SC = saudeCarteira(D);
+  const nF = k => SC.filter(x => x.faixa === k).length, giros = SC.map(x => x.giro).filter(Boolean);
+  const prod = Object.fromEntries(S.base.produtos.map(p => [p.id, p]));
+  const kp = (n, v, sub) => `<div class="kpi"><small>${n}</small><b>${v}</b>${sub ? `<small class="sub">${sub}</small>` : ''}</div>`;
+  const maxF = Math.max(1, F[0].n);
+  return `<h2 class="psec">Carteira e campo <button class="btn" id="pvDetCart" style="margin-left:10px;font-size:12px;padding:5px 10px">Detalhes da carteira →</button></h2>
+  <div class="pgrid">
+   <div class="panel"><h3>Funil a partir da visita</h3><p class="psub">Todos os pontos que já foram visitados${PV.vend === 'todos' ? '' : ' por ' + esc(nomeVend(PV.vend))} · % que passa para a etapa seguinte e dias até passar</p>
+    <div class="funil">${F.map((f, i) => `<div class="fz"><div class="fzb" style="width:${Math.max(6, f.n / maxF * 100)}%;background:${etapa(f.k).c}"><span>${etapa(f.k).n}</span><b>${f.n}</b></div>
+     ${f.conv != null ? `<div class="fzc"><b>${pctM(f.conv)}</b> passam${f.dias != null ? ` · <b>${Math.round(f.dias)} dias</b> em média` : ''}${f.parados ? ` · ${f.parados} parados aqui há ~${Math.round(f.paradoMed)} dias` : ''}</div>` : ''}</div>`).join('')}</div>
+    ${F[0].n ? '' : '<p class="empty" style="padding:10px 0">Ainda não há pontos que passaram por "Visitado". O funil começa a encher quando as visitas de prospecção mudarem a etapa.</p>'}</div>
+   <div class="panel"><h3>Expositor · ${rotPer}</h3><p class="psub">Das contagens de reposição</p>
+    <div class="kpis k2">${kp('Ruptura', pctM(E.rup), `${E.zer} de ${E.lin} sabores encontrados zerados`)}${kp('Índice de troca', pctM(E.troca), `${fmt(E.tr)} trocas para ${fmt(E.so)} vendidas`)}
+     ${kp('Expositor pequeno', giros.filter(g => g.st === 'pequeno').length, 'esvazia em menos de 7 dias')}${kp('Expositor grande', giros.filter(g => g.st === 'grande').length, 'leva mais de 28 dias para girar')}</div>
+    ${Object.keys(E.porSab).length ? `<p class="psub" style="margin-top:10px">Sabores que mais zeram</p>${ranking(Object.entries(E.porSab).map(([k, v]) => ({ n: prod[k] ? (prod[k].linha || '').split(' ')[0] + ' ' + prod[k].sabor : k, v: v.z / v.n, c: COR.ruim, tip: `${v.z} de ${v.n} contagens zeradas` })).sort((a, b) => b.v - a.v).slice(0, 5), '%', { max: 1 })}` : ''}</div>
+  </div>
+  <div class="pgrid">
+   <div class="panel"><h3>Saúde da carteira</h3><p class="psub">Nota de 0 a 100: ritmo de compra, sell-out, ruptura, trocas e dias sem visita</p>
+    <div class="mixn">${['ok', 'atencao', 'risco'].map(k => `<div><b style="color:${FAIXA_S[k].c}">${nF(k)}</b><small>${FAIXA_S[k].i} ${FAIXA_S[k].n}</small></div>`).join('')}</div>
+    <div class="lst" style="margin-top:10px">${SC.filter(x => x.faixa !== 'ok').slice(0, 8).map(x => `<div class="trow" data-cmet="${x.p.id}"><i style="background:${FAIXA_S[x.faixa].c}"></i><div style="flex:1"><b>${esc(x.p.nome)}</b><br><small style="color:var(--mute)">${motivoSaude(x)}</small></div><b>${x.nota}</b></div>`).join('') || '<p class="psub">Nenhum cliente em atenção ou risco.</p>'}</div></div>
+   <div class="panel"><h3>Produtividade de campo · ${rotPer}</h3><p class="psub">${PV.vend === 'todos' ? 'Todos' : esc(nomeVend(PV.vend))}</p>
+    <div class="kpis k2">${kp('Visitas', C.vis, `${C.rep} reposições · ${C.pro} prospecções`)}${kp('Visitas por dia de rua', C.porDia == null ? '—' : dec(C.porDia), `${C.dias} dia${C.dias === 1 ? '' : 's'} com visita`)}
+     ${kp('Rota cumprida', pctM(C.cumprida), C.plan ? `${C.feitas} de ${C.plan} paradas em ${C.rotas} rota${C.rotas === 1 ? '' : 's'}` : 'sem rota salva no período')}${kp('Tempo por parada', C.tempo == null ? '—' : Math.round(C.tempo) + ' min', 'entre uma visita e a próxima')}</div>
+    <p class="psub" style="margin-top:10px">Motivos de não atender</p>${ranking(Object.entries(C.motivos).map(([n, v]) => ({ n, v, c: COR.s2 })), 'n')}</div>
+  </div>`;
+}
+function motivoSaude(x) { const m = [];
+  if (x.r && x.r.atraso > 1.3) m.push(`${x.r.semPed} dias sem pedido (ritmo ${Math.round(x.r.inter)})`); if (x.tend != null && x.tend < -0.1) m.push(`sell-out ${Math.round(x.tend * 100)}%`);
+  if (x.rup) m.push(`ruptura ${pctM(x.rup)}`); if (x.troca > 0.05) m.push(`troca ${pctM(x.troca)}`); if (x.semVis == null || x.semVis > 21) m.push(x.semVis == null ? 'nunca visitado' : `${x.semVis} dias sem visita`);
+  return esc(m.join(' · ') || 'pouco histórico'); }
+// tela: a carteira inteira com as métricas, ordenável; o nome abre os detalhes do cliente
+async function telaCarteiraMet() {
+  $('#main').innerHTML = '<section class="view on"><div class="loading">Calculando a carteira…</div></section>';
+  try { if (!PV.dados) { PV.dados = prepararPainel(await db.painelDados()); PV.t = Date.now(); } } catch (e) { return erro(e); }
+  const SC = saudeCarteira(PV.dados); S.cmOrd = S.cmOrd || 'nota';
+  const col = { nota: x => x.nota, nome: x => x.p.nome, rup: x => x.rup ?? -1, troca: x => x.troca ?? -1, so: x => x.soSem ?? -1, giro: x => x.giro?.dias ?? 999, vis: x => x.semVis ?? 9999, atraso: x => x.r?.atraso ?? -1 };
+  const draw = () => { const f = S.cmFil || '', ls = SC.filter(x => !f || x.faixa === f).sort((a, b) => { const va = col[S.cmOrd](a), vb = col[S.cmOrd](b); return (typeof va === 'string' ? va.localeCompare(vb) : va - vb) * (S.cmDesc ? -1 : 1); });
+    $('#cmT').innerHTML = `<tr>${[['nome', 'Cliente'], ['nota', 'Saúde'], ['atraso', 'Ritmo de compra'], ['so', 'Sell-out/sem.'], ['rup', 'Ruptura'], ['troca', 'Troca'], ['giro', 'Giro do expositor'], ['vis', 'Última visita']].map(([k, n]) => `<th data-o="${k}">${n}${S.cmOrd === k ? (S.cmDesc ? ' ▼' : ' ▲') : ''}</th>`).join('')}</tr>` +
+      ls.map(x => `<tr><td><a href="#" data-cli="${x.p.id}"><b>${esc(x.p.nome)}</b></a><br><small style="color:var(--mute)">${esc(etapa(x.p.etapa).n)}${x.p.bairro ? ' · ' + esc(x.p.bairro) : ''}</small></td>
+       <td><span class="badge" style="background:${FAIXA_S[x.faixa].c};color:#fff">${x.nota}</span> <small>${FAIXA_S[x.faixa].n}</small></td>
+       <td>${x.r ? `${x.r.semPed} d sem pedido<br><small style="color:var(--mute)">compra a cada ${Math.round(x.r.inter)} d</small>` : '—'}</td>
+       <td>${x.soSem == null ? '—' : dec(x.soSem) + ' un.'}${x.tend != null ? `<br><small class="${x.tend >= 0 ? 'up' : 'dn'}">${x.tend >= 0 ? '▲' : '▼'} ${Math.abs(Math.round(x.tend * 100))}%</small>` : ''}</td>
+       <td>${pctM(x.rup)}</td><td>${pctM(x.troca)}</td>
+       <td>${x.giro ? `${x.giro.dias == null ? 'parado' : Math.round(x.giro.dias) + ' dias'} <small style="color:var(--mute)">· ${esc(x.giro.ex.nome)}</small>${x.giro.st !== 'ok' ? `<br><small style="color:${x.giro.st === 'pequeno' ? 'var(--t-bad)' : 'var(--car-d)'}">${x.giro.st === 'pequeno' ? 'pequeno' : 'grande'}${x.giro.sug ? ' → ' + esc(x.giro.sug.nome) : ''}</small>` : ''}` : '<small style="color:var(--mute)">sem contagens</small>'}</td>
+       <td>${x.semVis == null ? 'nunca' : x.semVis + ' dias'}</td></tr>`).join('');
+    $('#cmT').querySelectorAll('th[data-o]').forEach(th => th.onclick = () => { if (S.cmOrd === th.dataset.o) S.cmDesc = !S.cmDesc; else { S.cmOrd = th.dataset.o; S.cmDesc = false; } draw(); });
+    $('#cmT').querySelectorAll('[data-cli]').forEach(a => a.onclick = e => { e.preventDefault(); S.perfilId = a.dataset.cli; S.sel = a.dataset.cli; irPara('pedcli'); }); };
+  $('#main').innerHTML = `<section class="view on"><div class="dash pnl"><div class="row" style="gap:8px"><button class="btn" id="cmVoltar">← Painel</button><span style="color:var(--mute)">Detalhes da carteira · ${SC.length} clientes</span></div>
+   <div class="row" style="gap:6px;flex-wrap:wrap">${[['', 'Todos'], ['risco', '🔴 Risco'], ['atencao', '🟡 Atenção'], ['ok', '🟢 Saudável']].map(([k, n]) => `<button class="mini ${(S.cmFil || '') === k ? 'on' : ''}" data-f="${k}">${n} (${k ? SC.filter(x => x.faixa === k).length : SC.length})</button>`).join('')}</div>
+   <div class="panel" style="overflow-x:auto"><table class="dped" id="cmT"></table></div>
+   <small style="color:var(--mute)">Saúde: ritmo de compra 35 pts · sell-out em alta ou estável 20 · sem ruptura nas 3 últimas contagens 15 · troca até 5% em 90 dias 15 · visita nos últimos 21 dias 15. Giro: dias para o expositor esvaziar no ritmo de venda (bom entre 7 e 28).</small></div></section>`;
+  $('#cmVoltar').onclick = () => voltar('painel');
+  document.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { S.cmFil = b.dataset.f; document.querySelectorAll('[data-f]').forEach(x => x.classList.toggle('on', x === b)); draw(); });
+  draw();
+}
+// no detalhe do cliente: as mesmas métricas só dele
+function blocoMetCliente(id) {
+  if (!PV.dados) return '<div id="cliMet"></div>';
+  const x = saudeCarteira(PV.dados).find(y => y.p.id === id); if (!x) return '';
+  const pt = x.partes, barra = (n, v, m) => `<div class="hp"><span>${n}</span><div class="rb"><i style="width:${v / m * 100}%;background:${v / m >= .7 ? '#16A34A' : v / m >= .4 ? '#F5A524' : '#DC2626'}"></i></div><b>${v}/${m}</b></div>`;
+  const vs = x.vs.slice(-8);
+  return `<div class="panel"><h3>Saúde e expositor <span class="badge" style="background:${FAIXA_S[x.faixa].c};color:#fff;margin-left:6px">${x.nota} · ${FAIXA_S[x.faixa].n}</span></h3><p class="psub">${motivoSaude(x)}</p>
+   <div class="pgrid" style="margin:0"><div>${barra('Ritmo de compra', pt.ritmo, 35)}${barra('Sell-out', pt.sellout, 20)}${barra('Sem ruptura', pt.ruptura, 15)}${barra('Troca baixa', pt.troca, 15)}${barra('Visita recente', pt.visita, 15)}</div>
+   <div class="kpis k2" style="margin:0"><div class="kpi"><small>Ruptura (3 últimas)</small><b>${pctM(x.rup)}</b></div><div class="kpi"><small>Troca (90 dias)</small><b>${pctM(x.troca)}</b></div>
+    <div class="kpi"><small>Sell-out</small><b>${x.soSem == null ? '—' : dec(x.soSem) + ' un./sem.'}</b>${x.tend != null ? `<small class="sub ${x.tend >= 0 ? 'up' : 'dn'}">${x.tend >= 0 ? '▲' : '▼'} ${Math.abs(Math.round(x.tend * 100))}% nas 3 últimas</small>` : ''}</div>
+    <div class="kpi"><small>Giro do expositor</small><b>${x.giro ? (x.giro.dias == null ? 'parado' : Math.round(x.giro.dias) + ' dias') : '—'}</b><small class="sub">${x.giro ? esc(x.giro.ex.nome) + ' · ' + x.giro.ex.capacidade + ' un.' + (x.giro.st !== 'ok' ? ` · ${x.giro.st === 'pequeno' ? 'pequeno' : 'grande'}${x.giro.sug ? ', sugestão: ' + esc(x.giro.sug.nome) : ''}` : ' · tamanho certo') : 'precisa de 2 contagens'}</small></div></div></div>
+   ${vs.length >= 2 ? `<p class="psub" style="margin-top:12px">Sell-out e trocas por reposição</p>${grafBarras('cmSo', vs.map(v => v.em.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })), [{ nome: 'Sell-out', cor: COR.s1, vals: vs.map(v => v.so) }, { nome: 'Trocas', cor: COR.s2, vals: vs.map(v => v.tr) }], 'un', { h: 180 })}${legenda([{ nome: 'Sell-out', cor: COR.s1 }, { nome: 'Trocas', cor: COR.s2 }])}` : ''}</div>`;
+}
+
 /* ---- painel de um dia ---- */
 function painelDia(D, vends) {
   const hojeI = hojeISO(); if (!PV.dia) PV.dia = hojeI; if (!PV.cmpDia) PV.cmpDia = 'sem';
@@ -1558,6 +1698,7 @@ async function telaPainel(recarregarDados) {
    <div class="kpi"><small>Pontos cadastrados</small><b>${cads}</b><small class="sub">meta ${(MT.cadastros_semana || 0) * Math.round(duTot.length / 6)} no ${unid}</small></div>
    <div class="kpi"><small>Tarefas atrasadas</small><b>${S.pdvs.filter(p => p.acao_data && ymd(p.acao_data) < hojeISO()).length}</b></div></div>
 
+  ${blocoCarteira(D, ini, fim, porAno ? PV.ano : mesNome(mes, true))}
   <div id="orfaosBling"></div>
   ${(() => { const al = alertasProsp(); return al.length ? `<div class="panel alertas"><h3>Alertas de prospecção (${al.length}) · visitados sem próxima ação</h3>${al.slice(0, 30).map(p => `<div class="trow" style="cursor:default"><i style="background:${p.ultimo_resultado === 'nao_estava' ? '#3F6FA8' : etapa(p.etapa).c}"></i><div style="flex:1"><b>${esc(p.nome)}</b><br><small style="color:var(--mute)">${RESULTADOS[p.ultimo_resultado]?.n || 'Visitado'} em ${dstr(p.ultima_prospeccao)}${p.melhor_horario ? ' · melhor horário: ' + esc(p.melhor_horario) : ''}</small></div><button class="mini" data-altar="${p.id}">+ tarefa</button><button class="mini" data-alab="${p.id}">abrir</button></div>`).join('')}</div>` : ''; })()}
   </div></section>`;
@@ -1569,6 +1710,8 @@ async function telaPainel(recarregarDados) {
   if ($('#pvCmp')) $('#pvCmp').onchange = e => { PV.cmp = e.target.value; telaPainel(); };
   $('#pvVend').onchange = e => { PV.vend = e.target.value; telaPainel(); };
   $('#pvAtual').onclick = () => telaPainel(true);
+  $('#pvDetCart').onclick = () => irPara('carteiramet');
+  sec.querySelectorAll('[data-cmet]').forEach(d => d.onclick = () => { S.perfilId = d.dataset.cmet; S.sel = d.dataset.cmet; irPara('pedcli'); });
   $('#pvBO').onclick = () => telaBackoffice(); sec.querySelectorAll('[data-bo]').forEach(a => a.onclick = e => { e.preventDefault(); telaBackoffice(); });
   sec.querySelectorAll('[data-ab]').forEach(d => d.onclick = () => abrirPerfil(d.dataset.ab));
   sec.querySelectorAll('[data-rtar]').forEach(b => b.onclick = () => { const p = S.pdvs.find(x => x.id === b.dataset.rtar); modalTarefa({ data: hojeISO(), titulo: 'Recuperar: ' + p.nome, tipo: 'ligacao', pdv_id: p.id, contato_id: p.contato_id }, () => telaPainel()); });
@@ -2631,7 +2774,8 @@ async function telaPedidosCliente() {
   let peds, it, precosC = {}; try { [peds, it, precosC] = await Promise.all([db.pedidosDoCliente(p.id), db.itensDoCliente(p.id), db.precosCliente(p.id).catch(() => ({}))]); } catch (e) { return erro(e); }
   peds = peds.filter(o => !/cancel/i.test(o.bling_situacao || ''));
   const voltarHtml = `<div class="row" style="gap:8px"><button class="btn" id="dVoltar">← ${esc(p.nome)}</button><span style="color:var(--mute)">Detalhes dos pedidos</span></div>`;
-  if (!peds.length) { $('#main').innerHTML = `<section class="view on"><div class="dash pnl">${voltarHtml}<p class="empty">Este cliente ainda não tem pedidos.</p></div></section>`; $('#dVoltar').onclick = () => voltar('perfil'); return; }
+  if (!PV.dados) { try { PV.dados = prepararPainel(await db.painelDados()); PV.t = Date.now(); } catch (e) { } }
+  if (!peds.length) { $('#main').innerHTML = `<section class="view on"><div class="dash pnl">${voltarHtml}${blocoMetCliente(p.id)}<p class="empty">Este cliente ainda não tem pedidos.</p></div></section>`; $('#dVoltar').onclick = () => voltar('perfil'); ligarGraficos($('#main section')); return; }
   // itens por pedido (app primeiro; se o pedido não tem itens no app, usa os do Bling)
   const prodId = Object.fromEntries(S.base.produtos.map(x => [x.id, x])), porCod = {}; S.base.produtos.forEach(x => { if (x.bling_codigo) porCod[x.bling_codigo] = x; });
   const itens = {}; it.pitens.forEach(i => (itens[i.pedido_id] = itens[i.pedido_id] || []).push({ pr: prodId[i.produto_id], q: +i.quantidade, v: +i.quantidade * +i.preco_unit }));
@@ -2677,6 +2821,7 @@ async function telaPedidosCliente() {
   $('#main').innerHTML = `<section class="view on"><div class="dash pnl">${voltarHtml}
   <div class="pfiltros"><div><h2>${esc(p.nome)}</h2><small>${peds.length} pedidos desde ${dataLonga(ds[0])} · ${etapa(p.etapa).n}</small></div></div>
   <div class="kpis">${kpi('Total comprado', brl(total), `${brl(porMes)} por mês em média`)}${kpi('Ticket médio', brl(total / peds.length), tend != null ? `${tend >= 0 ? '▲' : '▼'} ${Math.round(Math.abs(tend) * 100)}% nos 3 últimos` : '')}${kpi('Compra a cada', inter ? Math.round(inter) + ' dias' : '—', regular !== '—' ? regular : '')}${kpi('Consumo', `${dec(unSem)} un./semana`, `${fmt(unT)} unidades no total · ${dec(unT / peds.length)} por pedido`)}</div>
+  ${blocoMetCliente(p.id)}
   <div class="panel pleit"><h3>Leitura do padrão</h3><ul>${leit.map(l => `<li>${l}</li>`).join('')}</ul></div>
   <div class="pgrid">
    <div class="panel"><h3>Compras por mês</h3><p class="psub">Valor comprado nos últimos 12 meses</p>${grafBarras('dMes', meses.map(m => m.n), [{ nome: 'Valor', cor: COR.s1, vals: meses.map(m => m.v) }], 'R$')}</div>

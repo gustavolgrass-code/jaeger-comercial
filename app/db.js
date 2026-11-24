@@ -160,12 +160,18 @@ export async function painelDados() {
     tudo(() => sb.from('pedidos').select('id, pdv_id, criado_em, valor, unidades, criado_por, tipo, bling_id').order('criado_em')),
     tudo(() => sb.from('bling_itens').select('pedido_id, codigo, descricao, quantidade, valor, desconto')).catch(() => []),
     tudo(() => sb.from('pedido_itens').select('pedido_id, produto_id, quantidade, preco_unit')),
-    tudo(() => sb.from('contagens').select('produto_id, troca, encontrado, deixado_anterior, visitas(em, pdv_id, usuario_id)')).catch(() => []),
-    tudo(() => sb.from('visitas').select('pdv_id, em, tipo, usuario_id, resultado')),
+    tudo(() => sb.from('contagens').select('produto_id, troca, encontrado, deixado_anterior, sellout, reposto, visita_id, visitas(em, pdv_id, usuario_id)')).catch(() => []),
+    tudo(() => sb.from('visitas').select('id, pdv_id, em, tipo, usuario_id, resultado')),
     sb.from('perfis').select('id, nome, papel').then(ok),
     sb.from('produtos').select('*').order('ordem').then(ok),
   ]);
-  return { pedidos, bitens, pitens, contagens, visitas, perfis, produtos };
+  // para as métricas de carteira e campo: mudanças de etapa, rotas planejadas e motivos registrados
+  const [etapas, rotas, notas] = await Promise.all([
+    tudo(() => sb.from('pdv_etapas').select('pdv_id, de, para, em, usuario_id').order('em')).catch(() => []),
+    tudo(() => sb.from('rotas').select('data, motorista, paradas')).catch(() => []),
+    tudo(() => sb.from('pdv_notas').select('pdv_id, texto, em, autor')).catch(() => []),
+  ]);
+  return { pedidos, bitens, pitens, contagens, visitas, perfis, produtos, etapas, rotas, notas };
 }
 // apaga uma reposição/venda de vez: o pedido (itens saem junto) e a visita com as contagens dela
 export async function excluirPedido(id, visitaId) {
