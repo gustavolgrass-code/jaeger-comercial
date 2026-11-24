@@ -85,6 +85,22 @@ const regNome = c => (S.base.regioes.find(r => r.codigo === c) || {}).nome || 's
 const atraso = p => p.proxima_reposicao ? Math.floor((Date.now() - new Date(p.proxima_reposicao)) / DIA) : null;
 // entrega postergada até uma data (ex.: escola que só volta em março): guardado em regras.adiados = { pdvId: 'AAAA-MM-DD' }
 const adiadoAte = (p, d = hoje()) => { const a = (S.base?.regras?.adiados || {})[p?.id]; return a && a > d ? a : null; };
+// meses para postergar (a partir do próximo) e o dia da semana em que mais se atende a região do cliente
+const mesesAdiar = d0 => { const a = new Date(d0 + 'T12:00'), out = []; for (let i = 1; i <= 8; i++) { const m = new Date(a.getFullYear(), a.getMonth() + i, 1); out.push({ v: `${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, '0')}`, n: m.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }) }); } return out; };
+function diaDaRegiao(p, mes, sem, min) {
+  const cont = [0, 0, 0, 0, 0, 0, 0]; let n = 0;
+  S.pdvs.filter(x => x.regiao && x.regiao === p.regiao && x.ultima_visita).forEach(x => { const d = new Date(x.ultima_visita).getDay(); if (d > 0 && d < 6) { cont[d]++; n++; } });
+  let dow, por;
+  if (n >= 3) { dow = cont.indexOf(Math.max(...cont)); por = `dia em que mais se atende ${p.regiao} (${Math.round(cont[dow] / n * 100)}% das visitas)`; }
+  else { const r = S.base.regioes.find(g => g.codigo === p.regiao); if (r?.dia_rota != null && r.dia_rota > 0 && r.dia_rota < 6) { dow = r.dia_rota; por = `dia de rota de ${p.regiao}`; } else { dow = 1; por = 'sem histórico da região: segunda'; } }
+  const [y, m] = mes.split('-').map(Number), ini = new Date(y, m - 1, 1, 12), ultimo = new Date(y, m, 0, 12).getDate();
+  // semana k = dias (k-1)*7+1 … k*7; "última" = os 7 últimos dias do mês
+  const d1 = sem === 5 ? ultimo - 6 : (sem - 1) * 7 + 1; let d = new Date(y, m - 1, d1, 12);
+  while (d.getDay() !== dow) d = new Date(d.getTime() + DIA);
+  let iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  if (iso <= min) iso = min;
+  return { data: iso, dow: new Date(iso + 'T12:00').getDay(), por };
+}
 const prazoTxt = p => { const a = atraso(p); if (p.consumidor_final) return 'consumidor final'; if (adiadoAte(p)) return 'postergada até ' + dstr(adiadoAte(p) + 'T12:00'); if (a === null) return repoe(p) ? '1ª reposição' : '—'; return a > 0 ? `atrasada ${a} dia${a > 1 ? 's' : ''}` : a === 0 ? 'vence hoje' : `em ${-a} dia${a < -1 ? 's' : ''}`; };
 const expo = id => S.base.expositores.find(e => e.id === id) || S.base.expositores[0];
 const alvo = (expoId, prodId) => (S.base.alvo.find(a => a.expositor_id === expoId && a.produto_id === prodId) || {}).quantidade || 0;
@@ -1926,13 +1942,18 @@ function ligarRota(k, todas) {
   document.querySelectorAll('[data-tira]').forEach(b => b.onclick = () => { const id = b.dataset.tira, p = S.pdvs.find(x => x.id === id);
     modal(`<h3>Tirar ${esc(p.nome)} da rota</h3>
      <div class="tiraops"><label><input type="radio" name="tmot" value="adiar" checked><span><b>Postergar a entrega</b><small>Fica para outro dia</small></span></label>
-      <div id="tAte" style="margin:-2px 0 6px 28px"><small>Voltar a entrar na rota a partir de</small><br><input type="date" id="tData" min="${R.data}"> <button class="mini" type="button" id="tMar">1º de março</button><br><small style="color:var(--mute)">Em branco: sai só da rota deste dia.</small></div>
+      <div id="tAte" style="margin:-2px 0 6px 28px"><small>Voltar a entrar na rota a partir de</small>
+       <div class="row" style="gap:6px;flex-wrap:wrap;margin:4px 0"><select id="tMes" style="width:auto"><option value="">Mês…</option>${mesesAdiar(R.data).map(m => `<option value="${m.v}">${m.n}</option>`).join('')}</select>
+        <select id="tSem" style="width:auto">${['1ª', '2ª', '3ª', '4ª', 'última'].map((n, i) => `<option value="${i + 1}">${n} semana</option>`).join('')}</select>
+        <input type="date" id="tData" min="${R.data}" style="width:150px"></div>
+       <small id="tSug" style="color:var(--soft);display:block"></small><small style="color:var(--mute)">Em branco: sai só da rota deste dia.</small></div>
       <label><input type="radio" name="tmot" value="negou"><span><b>Cliente negou a reposição</b><small>Não quis repor agora</small></span></label></div>
      <label>Motivo</label><textarea id="tTxt" rows="3" style="width:100%" placeholder="Ex.: dono viajando, volta segunda; ainda tem bastante produto…"></textarea>
      <p style="color:var(--soft);font-size:12px;margin:6px 0 0">Fica registrado no histórico do negócio.</p>
      <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="tOk">Tirar da rota</button></div>`);
     document.querySelectorAll('input[name=tmot]').forEach(r => r.onchange = () => $('#tAte').style.display = document.querySelector('input[name=tmot]:checked').value === 'adiar' ? '' : 'none');
-    $('#tMar').onclick = () => { const a = new Date(R.data + 'T12:00'), y = a.getMonth() >= 2 ? a.getFullYear() + 1 : a.getFullYear(); $('#tData').value = `${y}-03-01`; };
+    const sugere = () => { const m = $('#tMes').value; if (!m) return; const r = diaDaRegiao(p, m, +$('#tSem').value, R.data); $('#tData').value = r.data; $('#tSug').innerHTML = `→ entra na rota <b>${DIAS[r.dow].toLowerCase()}, ${dstr(r.data + 'T12:00')}</b> · ${esc(r.por)}`; };
+    $('#tMes').onchange = sugere; $('#tSem').onchange = sugere; $('#tData').onchange = () => { $('#tMes').value = ''; $('#tSug').textContent = ''; };
     $('#tOk').onclick = async () => { const tipo = document.querySelector('input[name=tmot]:checked').value, txt = $('#tTxt').value.trim(), ate = tipo === 'adiar' ? $('#tData').value : '';
       if (!txt) return toast('Escreva o motivo');
       if (ate && ate <= R.data) return toast('A data precisa ser depois de hoje');
