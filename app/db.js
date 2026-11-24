@@ -258,3 +258,11 @@ export async function corrigirVendasSemVisita(dias = 30) {
     if (v.error) continue; await sb.from('pedidos').update({ visita_id: v.data.id }).eq('id', o.id); n++; }
   return n;
 }
+
+// ruptura por cliente: nas 3 últimas contagens, quantos sabores que tinham sido deixados estavam zerados
+export async function rupturaPorPdv() {
+  const cs = await tudo(() => sb.from('contagens').select('visita_id, deixado_anterior, encontrado, visitas(em, pdv_id)'));
+  const pv = {}; cs.forEach(c => { if (!c.visitas) return; const v = ((pv[c.visitas.pdv_id] = pv[c.visitas.pdv_id] || {})[c.visita_id] = pv[c.visitas.pdv_id][c.visita_id] || { em: c.visitas.em, n: 0, z: 0 }); if (+c.deixado_anterior > 0) { v.n++; if (+c.encontrado === 0) v.z++; } });
+  const out = {}; Object.entries(pv).forEach(([id, o]) => { const u = Object.values(o).sort((a, b) => a.em < b.em ? -1 : 1).slice(-3), n = u.reduce((a, v) => a + v.n, 0); if (n) out[id] = { r: u.reduce((a, v) => a + v.z, 0) / n, z: u.reduce((a, v) => a + v.z, 0), n, vis: u.length }; });
+  return out;
+}
