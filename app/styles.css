@@ -643,3 +643,12 @@ section:fullscreen #mapa{height:100vh}
 #mapa{position:relative}
 .pendpill{position:absolute;top:12px;right:12px;z-index:1000;display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--choc);font:600 13px var(--fb);box-shadow:0 4px 14px rgba(0,0,0,.2)}
 .pendpill i{width:10px;height:10px;border-radius:50%;display:inline-block}.pendpill b{color:var(--car-d);font-weight:600}
+/* ditado por voz */
+.vozbox{position:relative;display:block}
+.vozbox>textarea,.vozbox>input{width:100%;padding-right:42px}
+.vozbtn{position:absolute;right:6px;top:6px;width:30px;height:30px;border-radius:50%;border:1px solid var(--line);background:var(--card);color:var(--soft);display:flex;align-items:center;justify-content:center;padding:0;opacity:.8}
+.vozbtn svg{width:16px;height:16px}
+.vozbtn:hover{opacity:1;color:var(--choc)}
+.vozbtn.ouvindo{background:#DC2626;border-color:#DC2626;color:#fff;opacity:1;animation:vozpulse 1.2s infinite}
+@keyframes vozpulse{0%{box-shadow:0 0 0 0 rgba(220,38,38,.5)}70%{box-shadow:0 0 0 10px rgba(220,38,38,0)}100%{box-shadow:0 0 0 0 rgba(220,38,38,0)}}
+.vozbox>input~.vozbtn{top:50%;transform:translateY(-50%)}

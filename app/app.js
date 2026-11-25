@@ -3825,3 +3825,29 @@ async function syncBlingAuto() {
 /* =================== início =================== */
 $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') fecharModal(); });
 iniciar();
+
+/* =================== ditado por voz nos campos de observação =================== */
+// botão 🎤 ao lado de toda caixa de observação/motivo: fala e o texto entra no campo (reconhecimento de voz do navegador, em português)
+(() => {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if (!SR) return;
+  const ALVO = el => !/hor|tel|mail|cnpj|cep|num|link|busca/i.test(el.id || '') && (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && (!el.type || el.type === 'text') && /obs|txt|mot|hist|EntO|^ncH$|^lxH$|^bxH$|nota|coment|desc/i.test((el.id || '') + ' ' + (el.className || '') + ' ' + (el.placeholder || ''))));
+  let rec = null, ativo = null;
+  const parar = () => { try { rec && rec.stop(); } catch (e) { } };
+  const ouvir = (campo, btn) => {
+    if (ativo === btn) return parar();
+    parar(); rec = new SR(); rec.lang = 'pt-BR'; rec.continuous = true; rec.interimResults = true;
+    const base = campo.value ? campo.value.replace(/\s*$/, ' ') : ''; let final = '';
+    rec.onresult = e => { let parcial = ''; for (let i = e.resultIndex; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) final += t; else parcial += t; }
+      const txt = (final + parcial).trim(); campo.value = base + (txt ? txt.charAt(0).toUpperCase() + txt.slice(1) : ''); campo.dispatchEvent(new Event('input', { bubbles: true })); };
+    rec.onerror = e => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed') toast('Permita o microfone para este site no navegador'); else if (e.error !== 'aborted' && e.error !== 'no-speech') toast('Não consegui ouvir: ' + e.error); };
+    rec.onend = () => { btn.classList.remove('ouvindo'); btn.title = 'Falar (ditado)'; if (ativo === btn) ativo = null; campo.dispatchEvent(new Event('change', { bubbles: true })); };
+    try { rec.start(); ativo = btn; btn.classList.add('ouvindo'); btn.title = 'Ouvindo… toque para parar'; campo.focus(); } catch (e) { toast('Microfone indisponível'); }
+  };
+  const decorar = el => { if (el.dataset.voz || !ALVO(el) || el.closest('.calfx')) return; el.dataset.voz = 1;
+    const w = document.createElement('span'); w.className = 'vozbox'; el.parentNode.insertBefore(w, el); w.appendChild(el);
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'vozbtn'; b.title = 'Falar (ditado)'; b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
+    b.onclick = e => { e.preventDefault(); e.stopPropagation(); ouvir(el, b); }; w.appendChild(b); };
+  const varrer = raiz => { if (!raiz.querySelectorAll) return; if (raiz.matches?.('textarea,input')) decorar(raiz); raiz.querySelectorAll('textarea,input').forEach(decorar); };
+  new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(varrer))).observe(document.body, { childList: true, subtree: true });
+  varrer(document.body);
+})();
