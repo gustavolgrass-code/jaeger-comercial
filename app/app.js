@@ -754,6 +754,7 @@ function painel() {
   <div class="sect"><h3>Etapa do funil</h3><select id="sEt" style="width:100%">${ETAPAS.map(e => `<option value="${e.k}" ${e.k === p.etapa ? 'selected' : ''}>${e.n}</option>`).join('')}</select></div>
   ${p.observacao ? `<div class="sect"><h3>Observação</h3><div style="color:var(--soft)">${esc(p.observacao)}</div></div>` : ''}
   <div class="actions">
+   ${botoesRota(p, 'b')}
    ${repoe(p) ? `<button class="btn pri" style="font-size:15px;padding:11px" id="bRepor">Repor (contar o expositor) →</button>` : ''}
    ${podeComprar ? `<button class="btn car" style="font-size:15px;padding:11px" id="bComprar">Registrar venda →</button>` : ''}
    <button class="btn ${podeComprar ? '' : 'pri'}" id="bVisita">Registrar visita de prospecção</button>
@@ -770,6 +771,8 @@ function painel() {
   s.querySelectorAll('[data-pot]').forEach(b => b.onclick = () => salvarPdv(p.id, { potencial: +b.dataset.pot }, 'Potencial atualizado'));
   $('#sEt').onchange = e => mudarEtapa(p.id, e.target.value, () => { desenhar(); painel(); });
   if ($('#sCad')) $('#sCad').onchange = e => salvarPdv(p.id, { cadencia_dias: e.target.value ? +e.target.value : null }, 'Frequência atualizada');
+  if ($('#bRota')) $('#bRota').onclick = () => porNaRotaHoje(p.id, false);
+  if ($('#bReat')) $('#bReat').onclick = async () => { await porNaRotaHoje(p.id, true); desenhar(); painel(); };
   if ($('#bRepor')) $('#bRepor').onclick = () => { S.contando = p.id; S.repVolta = { aba: 'mapa', id: p.id }; irPara('reposicao'); };
   if ($('#bComprar')) $('#bComprar').onclick = () => { S.abPdv = p.id; S.vendaVolta = { aba: 'mapa', id: p.id }; irPara('abertura'); };
   $('#bVisita').onclick = () => visitaRapida(p);
@@ -931,6 +934,18 @@ async function mudarEtapa(id, nova, depois) {
   try { await db.atualizarPdv(id, { etapa: nova, ...(p.etapa === 'perdido' ? { motivo_perda: null, retomar_em: null } : {}) }); await atualizarUm(id); toast('Etapa: ' + etapa(nova).n + (nova === 'fechado' ? ' · saiu do mapa' : '')); if (nova === 'fechado' && S.sel === id) S.sel = null; depois && depois(); } catch (e) { erro(/fechado/.test(e.message) ? new Error('Rode o 023_fechado_classe_d.sql no Supabase') : e); }
 }
 window.mudarEtapa = mudarEtapa;
+// põe qualquer cliente (até inativo ou perdido) na sua rota de hoje; "reativar" também volta a etapa para Ativo
+async function porNaRotaHoje(id, reativar) {
+  const p = S.pdvs.find(x => x.id === id); if (!p) return;
+  try {
+    if (reativar && !['ativo', 'avaliacao', 'revisao'].includes(p.etapa)) { await db.atualizarPdv(id, { etapa: 'ativo', etapa_motivo: 'Reativado: voltou para a rota', ...(p.etapa === 'perdido' ? { motivo_perda: null, retomar_em: null } : {}) }); await atualizarUm(id); }
+    const d = hojeISO(), r = await db.obterRota(d, S.eu.id).catch(() => null) || { data: d, motorista: S.eu.id, tipo: 'reposicao', inicio: '08:00', fim: '18:00', incluir: [], tirar: [], paradas: [] };
+    await db.salvarRota({ data: d, motorista: S.eu.id, tipo: r.tipo || 'reposicao', inicio: r.inicio || '08:00', fim: r.fim || '18:00', incluir: [...new Set([...(r.incluir || []), id])], tirar: (r.tirar || []).filter(x => x !== id), paradas: r.paradas || [] });
+    if (reativar) { const ad = { ...(S.base.regras.adiados || {}) }; if (ad[id]) { delete ad[id]; await db.salvarRegra('adiados', ad).catch(() => { }); S.base.regras.adiados = ad; } }
+    toast(`${p.nome} ${reativar ? 'reativado e ' : ''}entrou na sua rota de hoje`);
+  } catch (e) { erro(/motorista|rotas_pkey|null value/.test(e.message || '') ? new Error('Rode o 031_rota_por_pessoa.sql no Supabase para salvar a rota') : e); }
+}
+const botoesRota = (p, px) => `<div class="row" style="gap:6px;flex-wrap:wrap">${!['ativo', 'avaliacao', 'revisao'].includes(p.etapa) && !['mapeado', 'visitado', 'negociacao'].includes(p.etapa) ? `<button class="btn car" id="${px}Reat" style="flex:1">♻ Reativar e pôr na rota de hoje</button>` : ''}<button class="btn" id="${px}Rota" style="flex:1">➕ Pôr na rota de hoje</button></div>`;
 
 // "Em risco" automático e recuperação
 async function avaliarRisco() {
@@ -2733,7 +2748,7 @@ async function telaPerfil() {
      ${adiadoAte(p) ? `<p style="background:var(--bg-warn);padding:8px 10px;border-radius:8px;margin:8px 0 0">🗓️ Reposição postergada até <b>${dstr(adiadoAte(p) + 'T12:00')}</b>: até lá não entra sozinho na rota. <a href="#" id="pRetomar">retomar agora</a></p>` : ''}
      ${p.observacao ? `<p style="background:var(--sand);padding:8px 10px;border-radius:8px;margin:8px 0 0">${esc(p.observacao)}</p>` : ''}
      <div class="row" style="flex-wrap:wrap;margin-top:12px">
-      ${repoe(p) ? '<button class="btn pri" id="pRepor">Repor (contar o expositor) →</button>' : ''}${podeComprar ? '<button class="btn car" id="pComprar">Registrar venda →</button>' : ''}
+      ${botoesRota(p, 'p')}${repoe(p) ? '<button class="btn pri" id="pRepor">Repor (contar o expositor) →</button>' : ''}${podeComprar ? '<button class="btn car" id="pComprar">Registrar venda →</button>' : ''}
       <button class="btn pri" id="pVisita">Registrar visita</button>
       <select id="pEtapa">${ETAPAS.map(e => `<option value="${e.k}" ${e.k === p.etapa ? 'selected' : ''}>${e.n}</option>`).join('')}</select>
       <button class="btn" id="pEditar">Editar dados</button><button class="btn" id="pMapa">Ver no mapa</button><button class="btn" id="pAjustar">Ajustar localização</button><button class="btn" id="pExcluirTopo" style="color:var(--t-bad)">Excluir negócio</button>
@@ -2768,6 +2783,8 @@ async function telaPerfil() {
   $('#pNovaTar').onclick = $('#pTarTopo').onclick = () => modalTarefa({ data: hojeISO(), pdv_id: p.id, contato_id: p.contato_id });
   document.querySelectorAll('[data-tid]').forEach(el => el.onclick = () => modalTarefa(tars.find(t => t.id === el.dataset.tid)));
   if ($('#pRetomar')) $('#pRetomar').onclick = async e => { e.preventDefault(); const ad = { ...(S.base.regras.adiados || {}) }; delete ad[p.id]; try { await db.salvarRegra('adiados', ad); S.base.regras.adiados = ad; toast('Reposição retomada'); abrirPerfil(p.id); } catch (er) { erro(er); } };
+  if ($('#pRota')) $('#pRota').onclick = () => porNaRotaHoje(p.id, false);
+  if ($('#pReat')) $('#pReat').onclick = async () => { await porNaRotaHoje(p.id, true); telaPerfil(); };
   if ($('#pRepor')) $('#pRepor').onclick = () => { S.contando = p.id; S.repVolta = { aba: 'perfil', id: p.id }; irPara('reposicao'); };
   if ($('#pComprar')) $('#pComprar').onclick = () => { S.abPdv = p.id; S.vendaVolta = { aba: 'perfil', id: p.id }; irPara('abertura'); };
   $('#pVisita').onclick = () => visitaRapida(p, telaPerfil);
