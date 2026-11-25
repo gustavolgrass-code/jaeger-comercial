@@ -202,6 +202,26 @@ async function escreverFin(metodo: string, caminho: string, corpo: unknown) {
   return j;
 }
 
+// cliente novo: procura pelo nome exato e, se não existir, cria o cadastro no Bling com os dados do app
+async function criarContatoBling(p: any, doc: string, token: string): Promise<number | null> {
+  if (!p?.nome) return null;
+  const nome = String(p.razao_social || p.nome).trim();
+  try { const r = await chamar(`/contatos?limite=5&pesquisa=${encodeURIComponent(nome)}`, token); const igual = (r?.data ?? []).find((c: any) => String(c.nome || '').trim().toLowerCase() === nome.toLowerCase()); if (igual?.id) return Number(igual.id); } catch { /* segue para criar */ }
+  const tel = String(p.contatos?.whatsapp || p.contatos?.telefone || p.telefone || '').replace(/\D/g, '');
+  const rua = String(p.endereco || '').replace(/,\s*\d+.*$/, '').trim();
+  const corpo: Record<string, unknown> = {
+    nome, fantasia: p.nome, situacao: 'A', tipo: doc.length === 11 ? 'F' : doc.length === 14 ? 'J' : 'J', indicadorIe: 9,
+    ...(doc ? { numeroDocumento: doc } : {}), ...(tel ? { celular: tel } : {}), ...(p.contatos?.email ? { email: p.contatos.email } : {}),
+    endereco: { geral: { endereco: rua || undefined, numero: p.numero || (String(p.endereco || '').match(/,\s*(\d+)/)?.[1]) || 'S/N', bairro: p.bairro || undefined, municipio: p.cidade || undefined, uf: p.uf || 'RS', cep: String(p.cep || '').replace(/\D/g, '') || undefined } },
+  };
+  const r = await fetch(`${API}/contatos`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json', 'enable-jwt': '1' }, body: JSON.stringify(corpo) });
+  const res = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(`Cliente novo: o Bling recusou criar o cadastro (${r.status}): ${JSON.stringify(res?.error ?? res).slice(0, 500)}`);
+  const id = res?.data?.id ? Number(res.data.id) : null;
+  if (id) await db.from('pdvs').update({ bling_contato_id: String(id) }).eq('id', p.id);
+  return id;
+}
+
 // envia um pedido do app para o Bling (configuração em regras.chave = 'bling')
 // id da forma de pagamento no Bling: primeiro o que está nas regras; senão procura pelo nome (ex.: "Cartão" acha "Cartão de crédito")
 const semAc = (t: string) => String(t ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
@@ -215,7 +235,7 @@ async function idForma(nome: string, cfg: Record<string, any>, token: string): P
 
 async function enviarPedido(pedidoId: string) {
   const token = await tokenValido();
-  const { data: ped, error } = await db.from('pedidos').select('*, pdvs(id, nome, razao_social, cnpj, bling_contato_id), pedido_itens(quantidade, bonificado, preco_unit, produtos(id, linha, sabor, preco, bling_produto_id, bling_codigo))').eq('id', pedidoId).single();
+  const { data: ped, error } = await db.from('pedidos').select('*, pdvs(*, contatos(nome, telefone, whatsapp, email)), pedido_itens(quantidade, bonificado, preco_unit, produtos(id, linha, sabor, preco, bling_produto_id, bling_codigo))').eq('id', pedidoId).single();
   if (error || !ped) throw new Error('pedido não encontrado');
   if (ped.bling_id) return { ja_enviado: true, bling_id: ped.bling_id, numero: ped.bling_pedido_id };
   const { data: rg } = await db.from('regras').select('valor').eq('chave', 'bling').maybeSingle();
@@ -224,7 +244,8 @@ async function enviarPedido(pedidoId: string) {
   let contatoId = ped.pdvs?.bling_contato_id ? Number(ped.pdvs.bling_contato_id) : null;
   const doc = String(ped.pdvs?.cnpj ?? '').replace(/\D/g, '');
   if (!contatoId && doc) { const r = await chamar(`/contatos?limite=1&numeroDocumento=${doc}`, token); contatoId = r?.data?.[0]?.id ?? null; }
-  if (!contatoId) throw new Error('Cliente sem cadastro no Bling (sem CNPJ/CPF que bata). Cadastre no Bling primeiro.');
+  if (!contatoId) contatoId = await criarContatoBling(ped.pdvs, doc, token);
+  if (!contatoId) throw new Error('Não consegui achar nem criar o cliente no Bling.');
   const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
   // preço abaixo da tabela vai como preço de tabela + desconto no pedido (o Bling mostra o desconto)
   let descontoReais = 0;
