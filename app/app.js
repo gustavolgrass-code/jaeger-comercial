@@ -381,11 +381,16 @@ function desenhar() {
   const pend = repPendentes();
   $('#nPend').textContent = pend.length ? `(${pend.length})` : '';
   $('#bPend').classList.toggle('car', !!S.modoPend);
-  (S.modoPend ? pend : S.pdvs).filter(p => p.lat && p.etapa !== 'fechado' && (S.modoPend || S.etapasMapa.has(p.etapa)) && (!fr || p.regiao === fr)).forEach(p => {
-    const m = L.marker([p.lat, p.lng], { icon: pino(etapa(p.etapa).c, S.sel === p.id ? 1.35 : p.classe === 'A' ? 1.15 : 1), zIndexOffset: S.sel === p.id ? 1000 : 0 });
+  // Pendentes: quem precisa de reposição fica roxo; os outros clientes da carteira aparecem em cinza para ver quem dá para antecipar na mesma rota
+  const pendIds = new Set(pend.map(p => p.id)), ROXO = '#7E22CE', CINZA = '#9CA3AF';
+  (S.modoPend ? S.pdvs.filter(p => pendIds.has(p.id) || repoe(p)) : S.pdvs).filter(p => p.lat && p.etapa !== 'fechado' && (S.modoPend || S.etapasMapa.has(p.etapa)) && (!fr || p.regiao === fr)).forEach(p => {
+    const ehP = S.modoPend && pendIds.has(p.id), cor = !S.modoPend ? etapa(p.etapa).c : ehP ? ROXO : CINZA;
+    const m = L.marker([p.lat, p.lng], { icon: pino(cor, S.sel === p.id ? 1.35 : ehP ? 1.2 : S.modoPend ? 0.85 : p.classe === 'A' ? 1.15 : 1), zIndexOffset: S.sel === p.id ? 1000 : ehP ? 500 : 0 });
     m.on('click', () => { if (S.rotaDe && S.rotaDe !== p.id) return tracarRota(S.rotaDe, p.id); S.sel = p.id; desenhar(); painel(); });
-    m.bindTooltip(esc(p.nome)); m.addTo(camada);
+    const dias = p.proxima_reposicao ? Math.round((new Date(p.proxima_reposicao) - new Date(hojeISO() + 'T00:00')) / DIA) : null;
+    m.bindTooltip(esc(p.nome) + (S.modoPend ? (ehP ? ' · reposição pendente' : dias != null ? ` · próxima reposição ${dias <= 0 ? 'hoje' : 'em ' + dias + ' dia' + (dias === 1 ? '' : 's')}` : '') : '')); m.addTo(camada);
   });
+  if (S.modoPend) { $('#legend').innerHTML = `<span><i class="dot" style="background:${ROXO}"></i>Reposição pendente (${pend.length})</span><span><i class="dot" style="background:${CINZA}"></i>Outros clientes (dá para antecipar)</span>`; return; }
   $('#legend').innerHTML = ETAPAS.filter(NO_MAPA).map(e => `<span><i class="dot" style="background:${e.c}"></i>${e.n} (${S.pdvs.filter(p => p.etapa === e.k).length})</span>`).join('');
 }
 function ultimos6(p) {
