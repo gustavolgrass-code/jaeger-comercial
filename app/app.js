@@ -105,9 +105,22 @@ const prazoTxt = p => { const a = atraso(p); if (p.consumidor_final) return 'con
 const expo = id => S.base.expositores.find(e => e.id === id) || S.base.expositores[0];
 const alvo = (expoId, prodId) => (S.base.alvo.find(a => a.expositor_id === expoId && a.produto_id === prodId) || {}).quantidade || 0;
 
+// quem comprou pelo Bling (sem visita de reposição no app) não tinha próxima reposição e aparecia como "1ª reposição" pendente.
+// Agora a próxima reposição também conta a última compra: última compra + o ritmo de compra do cliente (7 a 45 dias; sem histórico, 14)
+async function estimarProximas() {
+  let ds; try { ds = await db.datasPedidos(); } catch (e) { return; }
+  const por = {}; ds.forEach(o => (por[o.pdv_id] = por[o.pdv_id] || []).push(new Date(o.criado_em).getTime()));
+  S.pdvs.forEach(p => { const ts = (por[p.id] || []).sort((a, b) => a - b); if (!ts.length) return;
+    const dias = []; for (let i = 1; i < ts.length; i++) { const d = (ts[i] - ts[i - 1]) / DIA; if (d >= 3) dias.push(d); }
+    dias.sort((a, b) => a - b); const med = dias.length ? dias[Math.floor(dias.length / 2)] : 14, inter = Math.max(7, Math.min(45, Math.round(med)));
+    const est = new Date(ts[ts.length - 1] + inter * DIA), atual = p.proxima_reposicao ? new Date(p.proxima_reposicao) : null;
+    p.ultima_compra_em = new Date(ts[ts.length - 1]).toISOString();
+    if (!atual || est > atual) { p.proxima_reposicao = isoDe(est); p.prox_por_compra = true; } });
+}
 async function recarregar() {
   const [pdvs, so, cts] = await Promise.all([db.carregarPdvs(), db.carregarSellouts(), db.listarContatos().catch(() => [])]);
   S.pdvs = pdvs; S.contatos = cts;
+  await estimarProximas();
   S.sellouts = {};
   so.forEach(s => (S.sellouts[s.pdv_id] = S.sellouts[s.pdv_id] || []).push(s));
 }
