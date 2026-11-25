@@ -344,7 +344,7 @@ function telaMapa() {
     bu.oninput = listar; bu.onfocus = listar; bu.onblur = () => setTimeout(() => { sug.style.display = 'none'; }, 150);
     bu.onkeydown = e => { if (e.key === 'Enter') sug.querySelector('[data-pick]')?.dispatchEvent(new MouseEvent('mousedown')); if (e.key === 'Escape') { bu.value = ''; listar(); } }; }
   $('#bAdd').onclick = () => abrirCadastro(null);
-  $('#bPend').onclick = () => { S.modoPend = !S.modoPend; S.sel = null; desenhar(); painel(); };
+  $('#bPend').onclick = () => { S.modoPend = !S.modoPend; S.pendMin = false; S.sel = null; desenhar(); painel(); };
   $('#bLoc').onclick = () => alternarLocalizacao();
   if (S.rastreando) { mostrarEu(false); $('#bLoc').classList.add('pri'); }
   manter('mapa', ['fReg']);
@@ -416,12 +416,18 @@ function repPendentes() {
 }
 function listaPendentes(s) {
   const l = repPendentes();
+  document.getElementById('pendPill')?.remove();
+  // minimizada: some a lista e fica só uma etiqueta no mapa para abrir de novo
+  if (S.pendMin) { s.classList.remove('open'); s.innerHTML = ''; setTimeout(() => mapa && mapa.invalidateSize(), 0);
+    $('#mapa').insertAdjacentHTML('beforeend', `<button class="pendpill" id="pendPill" title="Abrir a lista"><i style="background:#7E22CE"></i>${l.length} pendente${l.length === 1 ? '' : 's'} <b>▸ lista</b></button>`);
+    $('#pendPill').onclick = () => { S.pendMin = false; painel(); }; return; }
   s.classList.add('open');
-  s.innerHTML = `<button class="btn" style="float:right;padding:4px 10px" id="xPend">✕</button><h2>Reposições pendentes</h2>
-  <p style="color:var(--soft);margin-top:0">${l.length} cliente${l.length === 1 ? '' : 's'} com reposição para hoje ou atrasada. O mapa mostra só eles.</p>
+  s.innerHTML = `<div style="float:right;display:flex;gap:6px"><button class="btn" style="padding:4px 10px" id="mPend" title="Minimizar a lista e ver o mapa inteiro">—</button><button class="btn" style="padding:4px 10px" id="xPend" title="Sair das pendentes">✕</button></div><h2>Reposições pendentes</h2>
+  <p style="color:var(--soft);margin-top:0">${l.length} cliente${l.length === 1 ? '' : 's'} com reposição para hoje ou atrasada (roxos no mapa). Os cinza são os outros clientes, para antecipar na mesma rota.</p>
   ${l.map(p => { const a = atraso(p); return `<div class="stop" style="padding:10px;align-items:flex-start"><div class="info"><b>${esc(p.nome)}</b><br><small style="color:var(--mute)">${p.regiao || '—'} · ${esc(p.bairro || p.cidade || '')} · ${etapa(p.etapa).n}</small><br><span class="badge" style="background:${(a ?? 1) > 0 ? 'var(--bg-bad)' : 'var(--bg-warn)'};margin-top:4px;display:inline-block">${prazoTxt(p)}${p.proxima_reposicao ? ' · era ' + dstr(p.proxima_reposicao) : ''}</span></div>
    <div style="display:flex;flex-direction:column;gap:4px"><button class="btn" data-ver="${p.id}" style="padding:5px 10px">Ver</button><button class="btn pri" data-repor="${p.id}" style="padding:5px 10px">Repor</button></div></div>`; }).join('') || '<p class="empty">Nada pendente. 🎉</p>'}`;
-  $('#xPend').onclick = () => { S.modoPend = false; desenhar(); painel(); };
+  $('#xPend').onclick = () => { S.modoPend = false; S.pendMin = false; desenhar(); painel(); };
+  $('#mPend').onclick = () => { S.pendMin = true; painel(); };
   s.querySelectorAll('[data-ver]').forEach(b => b.onclick = () => { const p = S.pdvs.find(x => x.id === b.dataset.ver); S.modoPend = false; S.sel = p.id; desenhar(); painel(); if (p.lat) mapa.setView([p.lat, p.lng], 16); });
   s.querySelectorAll('[data-repor]').forEach(b => b.onclick = () => { S.contando = b.dataset.repor; S.modoPend = false; lado = 'operacao'; irPara('reposicao'); });
 }
@@ -708,6 +714,7 @@ function painel() {
   const s = $('#side'); if (!s) return;
   const antes = s.classList.contains('open'); setTimeout(() => { if (mapa && s.classList.contains('open') !== antes) mapa.invalidateSize(); }, 0);
   const p = S.pdvs.find(x => x.id === S.sel);
+  if (!(S.modoPend && !p)) document.getElementById('pendPill')?.remove();
   if (!p && S.modoPend) return listaPendentes(s);
   if (!p && S.areasOn) return painelAreas(s);
   if (!p && S.quad && S.quads) return painelQuad(s);
