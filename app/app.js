@@ -394,17 +394,16 @@ function desenhar() {
   const pend = repPendentes();
   $('#nPend').textContent = pend.length ? `(${pend.length})` : '';
   $('#bPend').classList.toggle('car', !!S.modoPend);
-  // Pendentes: quem precisa de reposição fica roxo; os outros clientes da carteira aparecem em cinza para ver quem dá para antecipar na mesma rota
-  const pendIds = new Set(pend.map(p => p.id)), ROXO = '#7E22CE', CINZA = '#9CA3AF';
-  (S.modoPend ? S.pdvs.filter(p => pendIds.has(p.id) || repoe(p)) : S.pdvs).filter(p => p.lat && p.etapa !== 'fechado' && (S.modoPend || S.etapasMapa.has(p.etapa)) && (!fr || p.regiao === fr)).forEach(p => {
-    const ehP = S.modoPend && pendIds.has(p.id), cor = !S.modoPend ? etapa(p.etapa).c : ehP ? ROXO : CINZA;
+  // Pendentes: quem precisa de reposição fica roxo e maior; o resto segue o filtro de status e região, nas cores de sempre
+  const pendIds = new Set(pend.map(p => p.id)), ROXO = '#7E22CE';
+  S.pdvs.filter(p => p.lat && p.etapa !== 'fechado' && (S.etapasMapa.has(p.etapa) || (S.modoPend && pendIds.has(p.id))) && (!fr || p.regiao === fr)).forEach(p => {
+    const ehP = S.modoPend && pendIds.has(p.id), cor = ehP ? ROXO : etapa(p.etapa).c;
     const m = L.marker([p.lat, p.lng], { icon: pino(cor, S.sel === p.id ? 1.35 : ehP ? 1.2 : S.modoPend ? 0.85 : p.classe === 'A' ? 1.15 : 1), zIndexOffset: S.sel === p.id ? 1000 : ehP ? 500 : 0 });
     m.on('click', () => { if (S.rotaDe && S.rotaDe !== p.id) return tracarRota(S.rotaDe, p.id); S.sel = p.id; desenhar(); painel(); });
     const dias = p.proxima_reposicao ? Math.round((new Date(p.proxima_reposicao) - new Date(hojeISO() + 'T00:00')) / DIA) : null;
     m.bindTooltip(esc(p.nome) + (S.modoPend ? (ehP ? ' · reposição pendente' : dias != null ? ` · próxima reposição ${dias <= 0 ? 'hoje' : 'em ' + dias + ' dia' + (dias === 1 ? '' : 's')}` : '') : '')); m.addTo(camada);
   });
-  if (S.modoPend) { $('#legend').innerHTML = `<span><i class="dot" style="background:${ROXO}"></i>Reposição pendente (${pend.length})</span><span><i class="dot" style="background:${CINZA}"></i>Outros clientes (dá para antecipar)</span>`; return; }
-  $('#legend').innerHTML = ETAPAS.filter(NO_MAPA).map(e => `<span><i class="dot" style="background:${e.c}"></i>${e.n} (${S.pdvs.filter(p => p.etapa === e.k).length})</span>`).join('');
+  $('#legend').innerHTML = (S.modoPend ? `<span><i class="dot" style="background:${ROXO}"></i><b>Reposição pendente (${pend.length})</b></span>` : '') + ETAPAS.filter(NO_MAPA).map(e => `<span><i class="dot" style="background:${e.c}"></i>${e.n} (${S.pdvs.filter(p => p.etapa === e.k).length})</span>`).join('');
 }
 function ultimos6(p) {
   const so = (S.sellouts[p.id] || []).slice(-6);
@@ -436,7 +435,7 @@ function listaPendentes(s) {
     $('#pendPill').onclick = () => { S.pendMin = false; painel(); }; return; }
   s.classList.add('open');
   s.innerHTML = `<div style="float:right;display:flex;gap:6px"><button class="btn" style="padding:4px 10px" id="mPend" title="Minimizar a lista e ver o mapa inteiro">—</button><button class="btn" style="padding:4px 10px" id="xPend" title="Sair das pendentes">✕</button></div><h2>Reposições pendentes</h2>
-  <p style="color:var(--soft);margin-top:0">${l.length} cliente${l.length === 1 ? '' : 's'} com reposição para hoje ou atrasada (roxos no mapa). Os cinza são os outros clientes, para antecipar na mesma rota.</p>
+  <p style="color:var(--soft);margin-top:0">${l.length} cliente${l.length === 1 ? '' : 's'} com reposição para hoje ou atrasada (roxos e maiores no mapa). Os outros pinos seguem o filtro de status, para ver quem dá para antecipar na mesma rota.</p>
   ${l.map(p => { const a = atraso(p); return `<div class="stop" style="padding:10px;align-items:flex-start"><div class="info"><b>${esc(p.nome)}</b><br><small style="color:var(--mute)">${p.regiao || '—'} · ${esc(p.bairro || p.cidade || '')} · ${etapa(p.etapa).n}</small><br><span class="badge" style="background:${(a ?? 1) > 0 ? 'var(--bg-bad)' : 'var(--bg-warn)'};margin-top:4px;display:inline-block">${prazoTxt(p)}${p.proxima_reposicao ? ' · era ' + dstr(p.proxima_reposicao) : ''}</span></div>
    <div style="display:flex;flex-direction:column;gap:4px"><button class="btn" data-ver="${p.id}" style="padding:5px 10px">Ver</button><button class="btn pri" data-repor="${p.id}" style="padding:5px 10px">Repor</button></div></div>`; }).join('') || '<p class="empty">Nada pendente. 🎉</p>'}`;
   $('#xPend').onclick = () => { S.modoPend = false; S.pendMin = false; desenhar(); painel(); };
