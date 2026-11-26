@@ -179,7 +179,7 @@ async function puxarContatos(inicio: number) {
 }
 
 // leitura de consulta (só GET, só estes caminhos) para analisar os cadastros do Bling
-const LEITURA_OK = /^\/(pedidos\/vendas(\/\d+)?|produtos(\/\d+)?|formas-pagamentos(\/\d+)?|naturezas-operacoes|vendedores(\/\d+)?|contatos\/\d+|situacoes\/modulos(\/\d+)?|situacoes\/\d+|categorias\/receitas-despesas(\/\d+)?|lojas?|canais-venda|depositos|empresas\/me\/dados-basicos|contas\/(receber|pagar)(\/\d+)?|contas-contabeis(\/\d+)?|caixas(\/\d+)?|borderos(\/\d+)?|contatos|estoques\/saldos)(\?.*)?$/;
+const LEITURA_OK = /^\/(pedidos\/vendas(\/\d+)?|produtos(\/\d+)?|formas-pagamentos(\/\d+)?|naturezas-operacoes|vendedores(\/\d+)?|contatos\/\d+|situacoes\/modulos(\/\d+)?|situacoes\/\d+|categorias\/receitas-despesas(\/\d+)?|lojas?|canais-venda|depositos|empresas\/me\/dados-basicos|contas\/(receber|pagar)(\/\d+)?|contas-contabeis(\/\d+)?|caixas(\/\d+)?|produtos\/fornecedores(\/\d+)?|borderos(\/\d+)?|contatos|estoques\/saldos)(\?.*)?$/;
 async function ler(caminho: string) {
   if (!LEITURA_OK.test(caminho)) throw new Error('caminho de leitura não permitido');
   return chamar(caminho, await tokenValido());
@@ -202,20 +202,40 @@ async function escreverFin(metodo: string, caminho: string, corpo: unknown) {
   return j;
 }
 
-// custo dos produtos: grava o preço de custo (fornecedor.precoCusto) de cada produto e confere lendo de volta
+// custo dos produtos: grava o preço de custo de cada produto e confere lendo de volta.
+// O Bling guarda o custo no vínculo produto-fornecedor; tenta, nesta ordem: PATCH do produto, PUT do vínculo /produtos/fornecedores, PUT do produto inteiro (só produto simples)
+async function enviarBling(metodo: string, caminho: string, corpo: unknown, token: string) {
+  const r = await fetch(`${API}${caminho}`, { method: metodo, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json', 'enable-jwt': '1' }, body: JSON.stringify(corpo) });
+  const txt = await r.text(); return { ok: r.ok, status: r.status, txt: txt.slice(0, 300) };
+}
 async function atualizarCustos(itens: { id: string | number; custo: number }[]) {
   const token = await tokenValido(), out: unknown[] = [];
+  const lerCusto = async (id: string) => Number(((await chamar(`/produtos/${id}`, token) as any)?.data?.fornecedor?.precoCusto) ?? NaN);
   for (const it of (itens || []).slice(0, 50)) {
-    const id = String(it.id || '').replace(/\D/g, ''), custo = Math.round(Number(it.custo) * 100) / 100;
+    const id = String(it.id || '').replace(/\D/g, ''), custo = Math.round(Number(it.custo) * 100) / 100, tent: unknown[] = [];
     if (!id || !(custo >= 0)) { out.push({ id, ok: false, erro: 'dados inválidos' }); continue; }
     try {
       const atual = (await chamar(`/produtos/${id}`, token) as any)?.data ?? {}, f = atual.fornecedor ?? {}, antes = Number(f.precoCusto ?? 0);
-      const corpo = { fornecedor: { ...(f.id ? { id: f.id } : {}), ...(f.contato?.id ? { contato: { id: f.contato.id } } : {}), precoCusto: custo } };
-      const r = await fetch(`${API}/produtos/${id}`, { method: 'PATCH', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json', 'enable-jwt': '1' }, body: JSON.stringify(corpo) });
-      const txt = await r.text(); if (!r.ok) throw new Error(`Bling (${r.status}): ${txt.slice(0, 400)}`);
-      const depois = Number(((await chamar(`/produtos/${id}`, token) as any)?.data?.fornecedor?.precoCusto) ?? NaN);
-      out.push({ id, nome: atual.nome, codigo: atual.codigo, antes, depois, ok: Math.abs(depois - custo) < 0.005 });
-    } catch (e) { out.push({ id, ok: false, erro: String((e as Error).message || e) }); }
+      let depois = NaN, via = '';
+      // 1) PATCH parcial do produto
+      let r = await enviarBling('PATCH', `/produtos/${id}`, { fornecedor: { ...(f.id ? { id: f.id } : {}), ...(f.contato?.id ? { contato: { id: f.contato.id } } : {}), precoCusto: custo } }, token); tent.push({ via: 'patch', ...r });
+      if (r.ok) { depois = await lerCusto(id); if (Math.abs(depois - custo) < 0.005) via = 'patch'; }
+      // 2) vínculo produto-fornecedor
+      if (!via && f.id) {
+        let v: any = {}; try { v = (await chamar(`/produtos/fornecedores/${f.id}`, token) as any)?.data ?? {}; } catch { /* segue */ }
+        const corpo = { descricao: v.descricao ?? '', codigo: v.codigo ?? f.codigo ?? '', precoCusto: custo, precoCompra: Number(v.precoCompra ?? f.precoCompra ?? 0), padrao: v.padrao ?? true, garantia: v.garantia ?? 0,
+          produto: { id: Number(id) }, fornecedor: { id: Number(v.fornecedor?.id ?? f.contato?.id ?? 0) } };
+        r = await enviarBling('PUT', `/produtos/fornecedores/${f.id}`, corpo, token); tent.push({ via: 'fornecedor', ...r });
+        if (r.ok) { depois = await lerCusto(id); if (Math.abs(depois - custo) < 0.005) via = 'fornecedor'; }
+      }
+      // 3) produto inteiro (só simples, sem variações nem estrutura)
+      if (!via && atual.formato === 'S' && !(atual.variacoes?.length)) {
+        const corpo = { ...atual, fornecedor: { ...f, precoCusto: custo } }; delete corpo.id; delete corpo.actionEstoque; delete corpo.variacoes; if (corpo.estoque) delete corpo.estoque.saldoVirtualTotal;
+        r = await enviarBling('PUT', `/produtos/${id}`, corpo, token); tent.push({ via: 'produto', ...r });
+        if (r.ok) { depois = await lerCusto(id); if (Math.abs(depois - custo) < 0.005) via = 'produto'; }
+      }
+      out.push({ id, nome: atual.nome, codigo: atual.codigo, antes, depois, ok: !!via, via, ...(via ? {} : { erro: 'o Bling não gravou o custo', tentativas: tent }) });
+    } catch (e) { out.push({ id, ok: false, erro: String((e as Error).message || e), tentativas: tent }); }
   }
   return { itens: out };
 }
