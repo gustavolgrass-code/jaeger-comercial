@@ -2275,7 +2275,7 @@ async function telaRota() {
   $('#main').innerHTML = '<section class="view on"><div class="loading">Montando o dia de rota…</div></section>';
   RT.data = RT.data || hoje();
   try {
-    if (!S.vendasCorrigidas) { S.vendasCorrigidas = true; await db.corrigirVendasSemVisita().catch(() => 0); }
+    if (!S.vendasCorrigidas) { S.vendasCorrigidas = true; await db.corrigirVendasSemVisita(30, Object.values(S.base.regras.encomendas || {}).map(e => e.pedido_id).filter(Boolean)).catch(() => 0); }
     await recarregar();
     const [raw, perfis, doDia, vis] = await Promise.all([db.dadosRota(), RT.perfis.length ? RT.perfis : db.perfisTodos().catch(() => [S.eu]), db.rotasDoDia(RT.data).catch(e => { RT.semTabela = true; return []; }), db.visitasDoDia(RT.data)]);
     RT.raw = raw; RT.perfis = perfis; RT.visitas = vis; RT.prev = prever(raw, RT.data);
@@ -2758,18 +2758,32 @@ async function telaReposicao() {
   $('#kZerar').onclick = () => zerar(['rep']); $('#kZerEnc').onclick = () => zerar(['enc']); $('#kZerTudo').onclick = () => zerar(['rep', 'enc', 'trc', 'bon']);
   pag = ligarPag('rp', () => valItens, () => calc()); pag.preencher(enc?.pag); if (enc && enc.bling === false && $('#rBling')) $('#rBling').checked = false; calc();
   // pedido para entrega: em vez de fechar, guarda como encomenda para o dia escolhido
-  const ent = re ? null : ligarEntrega('rp', on => { $('#fechar').textContent = on ? '📦 Salvar para entrega' : 'Fechar reposição'; $('#rBlingL').style.display = on ? 'none' : ''; });
+  const ent = re ? null : ligarEntrega('rp', on => { $('#fechar').textContent = on ? '📦 Salvar para entrega' : 'Fechar reposição'; });
   atualizaPix();
-  if ($('#encDesc')) $('#encDesc').onclick = async e => { e.preventDefault(); const todas = { ...(S.base.regras.encomendas || {}) }; delete todas[p.id];
-    try { await db.salvarRegra('encomendas', todas); S.base.regras.encomendas = todas; toast('Encomenda descartada'); telaReposicao(); } catch (er) { erro(er); } };
+  if ($('#encDesc')) $('#encDesc').onclick = async e => { e.preventDefault(); const todas = { ...(S.base.regras.encomendas || {}) }, pid = todas[p.id]?.pedido_id; delete todas[p.id];
+    if (pid && !confirm('Descartar a entrega e excluir também o pedido já criado (no app e no Bling)?')) return;
+    try { if (pid) { try { await db.bling('excluir_pedido', { pedido_id: pid }); } catch (er) { if (!/não foi enviado|sem bling/i.test(er.message)) toast('Bling: ' + er.message); } await db.excluirPedido(pid, null); }
+      await db.salvarRegra('encomendas', todas); S.base.regras.encomendas = todas; toast('Encomenda descartada'); telaReposicao(); } catch (er) { erro(er); } };
   $('#bVoltar').onclick = () => { S.reabrir = null; voltarDaRep(); };
   $('#fechar').onclick = async () => {
     const t = calc(), g = pag.ler(), pg = g.condicao, venc = g.vencimento, mandar = $('#rBling').checked;
     if (!g.ok) return toast('Cada parcela precisa ter valor, e a soma não pode passar do total');
     if (ent?.on()) { const e = ent.ler(), ln = {}; linhas().forEach(r => { const v = c => r.querySelector('.' + c).value, rp = +v('rep') || 0, bn = +v('bon') || 0, en = v('enc'), tr = +v('trc') || 0; ln[r.dataset.p] = { rep: rp, bon: bn, trc: tr, enc: en === '' ? null : +en }; });
       if (!Object.values(ln).some(x => x.rep || x.bon)) return toast('Coloque os itens do pedido em Repor'); if (!e.data) return toast('Escolha a data da entrega');
-      try { await salvarEncomenda(p.id, { tipo: 'reposicao', linhas: ln, pag: { forma: g.forma, vencimento: g.vencimento, parcelas: g.parcelas, frete: g.frete, pago: g.pago }, bling: mandar, ...e });
-        toast(`📦 Entrega salva para ${dstr(e.data + 'T12:00')}: entra na rota desse dia`); S.contando = null; voltarDaRep(); } catch (er) { erro(er); } return; }
+      $('#fechar').disabled = true;
+      try { let pedId = enc?.pedido_id || null, blingTxt = '';
+        // enviar ao Bling já agora (ex.: cliente quer a nota antes da entrega): cria o pedido sem visita; na entrega ele é aproveitado
+        const itensE = linhas().map(r => ({ produto_id: +r.dataset.p, quantidade: +r.querySelector('.rep').value || 0, preco_unit: +r.dataset.pre, bonificado: +r.querySelector('.bon').value || 0 }));
+        const t = calc();
+        if (mandar) {
+          if (pedId) { await db.editarPedido(pedId, { itens: itensE, condicao: g.condicao, vencimento: g.vencimento }); await db.atualizarPedidoCampos(pedId, { ...g.extra }).catch(() => { });
+            try { await db.bling('atualizar_pedido', { pedido_id: pedId }); blingTxt = ' · pedido atualizado no Bling'; } catch (er) { blingTxt = ' · Bling não atualizado: ' + er.message; } }
+          else { const ped = await db.criarPedidoEntrega({ pdvId: p.id, usuarioId: S.eu.id, itens: itensE, pedido: { tipo: cons ? 'reposicao_consignado' : 'reposicao', condicao: g.condicao, unidades: t.un, valor: g.total, pago_na_hora: false, vencimento: g.vencimento, ...g.extra } }); pedId = ped.id; }
+        }
+        await salvarEncomenda(p.id, { tipo: 'reposicao', linhas: ln, pag: { forma: g.forma, vencimento: g.vencimento, parcelas: g.parcelas, frete: g.frete, pago: g.pago }, bling: mandar, pedido_id: pedId, ...e });
+        toast(`📦 Entrega salva para ${dstr(e.data + 'T12:00')}: entra na rota desse dia${blingTxt}`); S.contando = null; voltarDaRep();
+        if (mandar && pedId && !enc?.pedido_id) enviarAoBling(pedId, p.nome, false);
+      } catch (er) { erro(er); $('#fechar').disabled = false; } return; }
     // reposto (físico) = vendido + trocas repostas; o pedido cobra só o vendido
     // bonificação: vai para o expositor (entra no reposto e sai do carro), mas não é cobrada
     const bonDe = r => +r.querySelector('.bon').value || 0;
@@ -2778,8 +2792,18 @@ async function telaReposicao() {
                        : linhas().map(r => ({ produto_id: +r.dataset.p, quantidade: +r.querySelector('.rep').value || 0, preco_unit: +r.dataset.pre, bonificado: bonDe(r) }));
     $('#fechar').disabled = true;
     try {
-      const reg = await db.registrarReposicao({ pdvId: p.id, usuarioId: S.eu.id, contagens, itens,
-        pedido: { tipo: cons ? 'reposicao_consignado' : 'reposicao', condicao: pg, unidades: cons ? t.so : t.un, valor: g.total, pago_na_hora: pg === 'Dinheiro', vencimento: venc, ...g.extra } });
+      const pedidoNovo = { tipo: cons ? 'reposicao_consignado' : 'reposicao', condicao: pg, unidades: cons ? t.so : t.un, valor: g.total, pago_na_hora: pg === 'Dinheiro', vencimento: venc, ...g.extra };
+      let reg, jaNoBling = false;
+      if (enc?.pedido_id) { // pedido já criado (e talvez já no Bling) quando a entrega foi salva: aproveita, sem duplicar
+        const v = await db.registrarReposicao({ pdvId: p.id, usuarioId: S.eu.id, contagens, itens, pedido: null });
+        await db.atualizarPedidoCampos(enc.pedido_id, { visita_id: v.visita.id });
+        const antes = JSON.stringify(Object.entries(enc.linhas || {}).map(([k, x]) => [+k, x.rep || 0, x.bon || 0]).filter(x => x[1] || x[2]).sort((a, b) => a[0] - b[0]));
+        const agora = JSON.stringify(itens.filter(i => i.quantidade || i.bonificado).map(i => [i.produto_id, i.quantidade, i.bonificado]).sort((a, b) => a[0] - b[0]));
+        await db.editarPedido(enc.pedido_id, { itens, condicao: pg, vencimento: venc }); await db.atualizarPedidoCampos(enc.pedido_id, { pago_na_hora: pg === 'Dinheiro', ...g.extra }).catch(() => { });
+        reg = { visita: v.visita, pedido: { id: enc.pedido_id } }; jaNoBling = !!enc.bling;
+        if (jaNoBling && (antes !== agora || enc.pag?.forma !== g.forma)) db.bling('atualizar_pedido', { pedido_id: enc.pedido_id }).then(() => toast('Pedido atualizado no Bling')).catch(er => toast('Pedido não atualizado no Bling: ' + er.message));
+        if (jaNoBling && g.pago) baixarNoBling(enc.pedido_id).then(({ falha }) => toast(falha.length ? 'Pagamento não baixado no Bling: veja o pedido' : 'Pagamento baixado no Bling ✓')).catch(er => toast('Baixa não feita: ' + msgBling(er)));
+      } else reg = await db.registrarReposicao({ pdvId: p.id, usuarioId: S.eu.id, contagens, itens, pedido: pedidoNovo });
       if (enc) await apagarEncomenda(p.id);
       let n = await db.carregarPdv(p.id), extra = '';
       const r = regraAval();
@@ -2789,7 +2813,7 @@ async function telaReposicao() {
       } else if (n.etapa === 'avaliacao') extra = ` Avaliação: ${n.aval_reposicoes} de ${r.reposicoes}.`;
       if (p.condicao !== g.forma && !cons && !g.parcelas.length) await db.atualizarPdv(p.id, { condicao: g.forma }).catch(() => { });
       S.reabrir = null; await recarregar(); await avaliarRisco(); toast('Reposição registrada.' + extra); voltarDaRep();
-      if (mandar && reg.pedido && (cons ? t.so : t.un) > 0) enviarAoBling(reg.pedido.id, p.nome, g.pago);
+      if (mandar && reg.pedido && !jaNoBling && (cons ? t.so : t.un) > 0) enviarAoBling(reg.pedido.id, p.nome, g.pago);
     } catch (e) { erro(e); $('#fechar').disabled = false; }
   };
 }

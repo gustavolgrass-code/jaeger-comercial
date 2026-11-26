@@ -97,6 +97,15 @@ export async function registrarAbertura({ pdvId, patch, ...resto }) {
   await atualizarPdv(pdvId, patch);
   return r;
 }
+// pedido para entrega enviado ao Bling antes da entrega: pedido sem visita (a visita entra quando a entrega for feita)
+export async function criarPedidoEntrega({ pdvId, usuarioId, pedido, itens }) {
+  pedido = await primeiraCompra(pdvId, pedido);
+  const ped = ok(await sb.from('pedidos').insert({ ...pedido, pdv_id: pdvId, criado_por: usuarioId }).select().single());
+  const its = itens.filter(i => i.quantidade > 0 || i.bonificado > 0);
+  if (its.length) ok(await sb.from('pedido_itens').insert(its.map(i => ({ ...i, pedido_id: ped.id }))));
+  return ped;
+}
+export async function atualizarPedidoCampos(id, patch) { return ok(await sb.from('pedidos').update(patch).eq('id', id)); }
 export async function registrarReposicao(dados) { return gravarContagemEPedido({ tipoVisita: 'reposicao', ...dados }); }
 export async function salvarRegra(chave, valor) { return ok(await sb.from('regras').upsert({ chave, valor, atualizado_em: new Date().toISOString() })); }
 export async function criarRegiao(obj) { return ok(await sb.from('regioes').upsert(obj, { onConflict: 'codigo', ignoreDuplicates: true }).select()); }
@@ -270,11 +279,11 @@ export async function ultimoPedidoItens(pdvId) {
 export async function agruparPedidos(ids) { const { data, error } = await sb.rpc('agrupar_pedidos', { ids }); if (error) throw new Error(error.message); return data; }
 
 // vendas lançadas antes da correção (sem visita): cria a visita de reposição na data do pedido
-export async function corrigirVendasSemVisita(dias = 30) {
+export async function corrigirVendasSemVisita(dias = 30, pular = []) {
   const desde = new Date(Date.now() - dias * 864e5).toISOString();
   const r = await sb.from('pedidos').select('id, pdv_id, criado_em, criado_por').eq('tipo', 'reposicao').is('visita_id', null).not('criado_por', 'is', null).gte('criado_em', desde);
   if (r.error || !r.data?.length) return 0; let n = 0;
-  for (const o of r.data) { const v = await sb.from('visitas').insert({ pdv_id: o.pdv_id, tipo: 'reposicao', em: o.criado_em, usuario_id: o.criado_por, observacao: 'Venda registrada sem contagem do expositor' }).select('id').single();
+  for (const o of r.data) { if (pular.includes(o.id)) continue; const v = await sb.from('visitas').insert({ pdv_id: o.pdv_id, tipo: 'reposicao', em: o.criado_em, usuario_id: o.criado_por, observacao: 'Venda registrada sem contagem do expositor' }).select('id').single();
     if (v.error) continue; await sb.from('pedidos').update({ visita_id: v.data.id }).eq('id', o.id); n++; }
   return n;
 }
