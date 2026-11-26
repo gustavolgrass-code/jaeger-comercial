@@ -141,6 +141,7 @@ async function iniciar() {
     if (!p) return telaPrimeiroAcesso(s.user);
     S.eu = p;
     S.base = await db.carregarBase();
+    setTimeout(sincCustos, 2000);
     await recarregar();
     montar();
     avaliarRisco();
@@ -1406,6 +1407,7 @@ function faixa(r) { const f = metasV2().faixas; if (r == null) return null; retu
 
 // prepara os dados: itens, unidades, custo e linha de cada pedido
 function prepararPainel(raw) {
+  raw.produtos.forEach(p => p.custo = custoAtual(p));
   const prod = {}, porCod = {}; raw.produtos.forEach(p => { prod[p.id] = p; if (p.bling_codigo) porCod[p.bling_codigo] = p; });
   const custoLinha = {}; LINHAS.forEach(l => { const ps = raw.produtos.filter(p => (p.bling_codigo || '').startsWith(l.k)); custoLinha[l.k] = ps.length ? ps.reduce((a, p) => a + Number(p.custo), 0) / ps.length : 2.5; });
   const pi = {}, bi = {}; raw.pitens.forEach(i => (pi[i.pedido_id] = pi[i.pedido_id] || []).push(i)); raw.bitens.forEach(i => (bi[i.pedido_id] = bi[i.pedido_id] || []).push(i));
@@ -1984,7 +1986,7 @@ function custoProducao(c, p) {
 function painelCustos() {
   const el = document.getElementById('custosPanel'); if (!el) return;
   const c = custosCfg(), R2 = v => brl(v), R4 = v => 'R$ ' + (+v).toFixed(4).replace('.', ',');
-  let tmr; const salvar = (msg) => { clearTimeout(tmr); tmr = setTimeout(async () => { try { await db.salvarRegra('custos_producao', c); S.base.regras.custos_producao = JSON.parse(JSON.stringify(c)); if (msg) toast(msg); pintar(); } catch (e) { erro(e); } }, 400); };
+  let tmr; const salvar = (msg) => { clearTimeout(tmr); tmr = setTimeout(async () => { try { await db.salvarRegra('custos_producao', c); S.base.regras.custos_producao = JSON.parse(JSON.stringify(c)); sincCustos(); PV.dados = null; if (msg) toast(msg); pintar(); } catch (e) { erro(e); } }, 400); };
   const pintar = () => {
     const prods = S.base.produtos, refsOpc = [...c.insumos.map(i => ['ins:' + i.id, i.nome]), ...c.receitas.map(r => ['rec:' + r.id, '🧾 ' + r.nome])];
     el.innerHTML = `<h3>Custos de produção</h3><p class="psub">Atualize o preço dos insumos quando mudar: o custo de cada brownie e a margem recalculam sozinhos. Os produtos de revenda (Baccaro) usam o custo de compra.</p>
@@ -2004,12 +2006,12 @@ function painelCustos() {
        <button class="mini" data-addri="${k}" style="margin-top:6px">+ ingrediente</button></details>`).join('')}
      <h4 style="margin:16px 0 6px">Adicional de cada sabor (por unidade, além da base)</h4><table class="dped"><tr><th>Sabor</th><th>Base</th><th>Adicional</th><th>Quantidade por unidade</th><th></th></tr>
       ${prods.filter(p => c.sabores[p.bling_codigo]).map(p => { const sb = c.sabores[p.bling_codigo]; return `<tr><td><b>${esc(nomeProd(p))}</b></td><td>${esc(nomeRef(c, sb.base))}</td><td colspan="3">${sb.add.map((x, j) => `<div class="row" style="gap:6px;margin:2px 0"><select class="cuS" data-c="${p.bling_codigo}" data-j="${j}" data-k="ref">${refsOpc.map(([v, n]) => `<option value="${v}" ${v === x.ref ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select><input type="number" step="0.01" class="cuS" data-c="${p.bling_codigo}" data-j="${j}" data-k="qtd" value="${x.qtd}" style="width:80px"> ${esc(unidRef(c, x.ref))}<button class="mini" data-dels="${p.bling_codigo}:${j}">✕</button></div>`).join('') || '<small style="color:var(--mute)">sem adicional</small>'} <button class="mini" data-adds="${p.bling_codigo}">+ adicional</button></td></tr>`; }).join('')}</table>
-     <h4 style="margin:16px 0 6px">Custo e margem por produto</h4><div style="overflow-x:auto"><table class="dped"><tr><th>Produto</th><th>Ingredientes</th><th>Embalagem</th><th>Mão de obra</th><th>CIF</th><th>Custo</th><th>No cadastro</th><th>Preço</th><th>Margem</th></tr>
+     <h4 style="margin:16px 0 6px">Custo e margem por produto</h4><div style="overflow-x:auto"><table class="dped"><tr><th>Produto</th><th>Ingredientes</th><th>Embalagem</th><th>Mão de obra</th><th>CIF</th><th>Custo</th><th>Preço</th><th>Margem</th></tr>
       ${prods.map(p => { const k = custoProducao(c, p), cu = k ? k.total : +p.custo || 0, mg = +p.preco ? (+p.preco - cu) / +p.preco : null; return `<tr><td>${esc(nomeProd(p))}${k ? '' : ' <small style="color:var(--mute)">revenda</small>'}</td>
         ${k ? `<td>${R2(k.ingr)}</td><td>${R2(k.emb)}</td><td>${R2(k.mo)}</td><td>${R2(k.cif)}</td><td><b>${R2(k.total)}</b></td>` : `<td colspan="4"><small style="color:var(--mute)">custo de compra →</small></td><td><input type="number" step="0.01" class="cuRev" data-p="${p.id}" value="${(+p.custo || 0).toFixed(2)}" style="width:80px"></td>`}
-        <td>${R2(+p.custo || 0)}${k && Math.abs(k.total - (+p.custo || 0)) > 0.005 ? ' <small style="color:var(--car-d)">≠</small>' : ''}</td><td>${R2(+p.preco || 0)}</td><td><b style="color:${mg == null ? 'inherit' : mg >= 0.45 ? 'var(--t-ok)' : mg >= 0.3 ? 'var(--car-d)' : 'var(--t-bad)'}">${mg == null ? '—' : Math.round(mg * 100) + '%'}</b></td></tr>`; }).join('')}</table></div>
-     <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn pri" id="cuAplicar">Aplicar estes custos no app e no Bling</button></div>
-     <small style="color:var(--mute)">O custo do cadastro é o que o Painel e o Financeiro usam para margem e perdas. "≠" = o cadastro está diferente do calculado.</small>`;
+        <td>${R2(+p.preco || 0)}</td><td><b style="color:${mg == null ? 'inherit' : mg >= 0.45 ? 'var(--t-ok)' : mg >= 0.3 ? 'var(--car-d)' : 'var(--t-bad)'}">${mg == null ? '—' : Math.round(mg * 100) + '%'}</b></td></tr>`; }).join('')}</table></div>
+     <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn pri" id="cuAplicar">Enviar estes custos para o Bling</button></div>
+     <small style="color:var(--mute)">A coluna Custo é a base do Painel e do Financeiro (margem, perdas, CAC). Muda sozinha quando você altera insumos, fichas ou premissas.</small>`;
     el.querySelectorAll('.cuP').forEach(i => i.onchange = () => { c.premissas[i.dataset.k] = +i.value || 0; salvar(); });
     el.querySelectorAll('.cuI').forEach(i => i.onchange = () => { const x = c.insumos[+i.dataset.i]; const v = ['preco', 'conteudo'].includes(i.dataset.k) ? +i.value || 0 : i.value; if (i.dataset.k === 'preco' && v !== x.preco) x.cotacao = hojeISO(); x[i.dataset.k] = v; salvar(); });
     el.querySelectorAll('[data-delins]').forEach(b => b.onclick = () => { const x = c.insumos[+b.dataset.delins]; const usa = c.receitas.some(r => r.itens.some(it => it.ref === 'ins:' + x.id)) || Object.values(c.sabores).some(s => s.add.some(a => a.ref === 'ins:' + x.id)); if (usa) return toast(x.nome + ' está numa ficha técnica: tire de lá primeiro'); c.insumos.splice(+b.dataset.delins, 1); salvar('Insumo removido'); });
@@ -2034,6 +2036,10 @@ function painelCustos() {
   pintar();
 }
 
+// custo do produto: o calculado pela ficha técnica (Regras e metas → Custos de produção); revenda, o custo de compra digitado
+function custoAtual(p) { const k = p && S.base?.regras?.custos_producao ? custoProducao(custosCfg(), p) : null; return k ? Math.round(k.total * 100) / 100 : +(p?.custo || 0); }
+// mantém o custo gravado no cadastro do app igual ao calculado (usado por relatórios e pelo Bling)
+function sincCustos() { (S.base?.produtos || []).forEach(p => { const v = custoAtual(p); if (Math.abs(v - (+p.custo || 0)) > 0.004) { p.custo = v; db.atualizarProduto(p.id, { custo: v }).catch(() => { }); } }); }
 function painelExpositores() {
   const el = document.getElementById('expPanel'); if (!el) return;
   const hist = S.base.regras.expositores_hist || {}, usa = {}; S.pdvs.forEach(p => { if (p.expositor_id) usa[p.expositor_id] = (usa[p.expositor_id] || 0) + 1; });
