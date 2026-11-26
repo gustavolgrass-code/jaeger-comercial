@@ -1958,12 +1958,37 @@ function painelLogistica() {
     try { await db.salvarRegra('fin_premissas', v); S.base.regras.fin_premissas = v; toast('Custo salvo'); painelLogistica(); } catch (e) { erro(e); } });
 }
 
+function painelTributos() {
+  const el = document.getElementById('tribPanel'); if (!el) return;
+  if (!PV.dados) { el.innerHTML = '<h3>Tributos · Simples Nacional</h3><small style="color:var(--mute)">calculando o faturamento dos últimos 12 meses…</small>'; db.painelDados().then(r => { PV.dados = prepararPainel(r); PV.t = Date.now(); painelTributos(); }).catch(e => erro(e)); return; }
+  const T = taxasTrib(PV.dados, new Date()), c = T.c, opA = (k, v) => `<select class="trC" data-k="${k}">${Object.entries(SIMPLES).map(([a, x]) => `<option value="${a}" ${v === a ? 'selected' : ''}>${x.n}</option>`).join('')}</select>`;
+  const tabela = a => `<table class="ftab" style="margin-top:6px"><tr><th>Faixa · RBT12 até</th><th>Nominal</th><th>Parcela a deduzir</th><th>Efetiva</th></tr>${SIMPLES[a].f.map((f, i) => `<tr style="${T.ap.faixa === i + 1 && a === c.anexo_prod || T.ar.faixa === i + 1 && a === c.anexo_rev ? 'font-weight:700' : ''}"><td>${i + 1}ª · ${brl(f[0])}</td><td>${pctS2(f[1])}</td><td>${brl(f[2])}</td><td>${T.ap.faixa === i + 1 ? pctS2(aliqSimples(a, T.rbt12.v).efetiva) + ' ◀' : ''}</td></tr>`).join('')}</table>`;
+  el.innerHTML = `<h3>Tributos · Simples Nacional</h3><p class="psub">O DAS é descontado da margem bruta, da margem por cliente, do LTV e do ponto de equilíbrio no Painel financeiro. Confirme o anexo e a alíquota com o seu contador.</p>
+   <div class="row" style="gap:14px;flex-wrap:wrap;align-items:flex-end">
+    <label><input type="checkbox" class="trC" data-k="ativo" ${c.ativo !== false ? 'checked' : ''}> Considerar impostos</label>
+    <label>Produção própria (brownie, cookie, palha)<br>${opA('anexo_prod', c.anexo_prod)}</label>
+    <label>Revenda (produtos sem ficha técnica)<br>${opA('anexo_rev', c.anexo_rev)}</label>
+    <label>Receita dos últimos 12 meses (RBT12)<br><span class="row" style="gap:6px"><input type="number" step="100" min="0" class="trC" data-k="rbt12_manual" value="${c.rbt12_manual || ''}" placeholder="${Math.round(rbt12De(PV.dados, new Date()).v)}" style="width:130px"> <small>vazio = calcula pelos pedidos</small></span></label></div>
+   <div class="row" style="gap:14px;flex-wrap:wrap;align-items:flex-end;margin-top:12px">
+    <div class="kpi" style="padding:8px 14px"><small>Produção · efetiva</small><b style="font-size:22px">${pctS2(T.prod)}</b><small class="sub">anexo ${c.anexo_prod} · faixa ${T.ap.faixa}</small></div>
+    <div class="kpi" style="padding:8px 14px"><small>Revenda · efetiva</small><b style="font-size:22px">${pctS2(T.rev)}</b><small class="sub">anexo ${c.anexo_rev} · faixa ${T.ar.faixa}</small></div>
+    <div class="kpi" style="padding:8px 14px"><small>RBT12</small><b style="font-size:22px">${brl(T.rbt12.v)}</b><small class="sub">${T.rbt12.manual ? 'informada' : T.rbt12.meses < 12 ? `média de ${T.rbt12.meses} ${T.rbt12.meses === 1 ? 'mês' : 'meses'} × 12 (início de atividade)` : 'pedidos dos últimos 12 meses'}</small></div>
+    <label>Alíquota efetiva do DAS · produção (%)<br><input type="number" step="0.01" min="0" class="trC" data-k="efetiva_prod" value="${c.efetiva_prod ?? ''}" placeholder="automática" style="width:110px"></label>
+    <label>Alíquota efetiva · revenda (%)<br><input type="number" step="0.01" min="0" class="trC" data-k="efetiva_rev" value="${c.efetiva_rev ?? ''}" placeholder="automática" style="width:110px"></label></div>
+   <details style="margin-top:12px"><summary><b>Tabelas do Simples Nacional</b> (faixas, alíquotas e parcela a deduzir)</summary><div class="fcols" style="margin-top:8px"><div><p class="ftit">${SIMPLES.II.n}</p>${tabela('II')}</div><div><p class="ftit">${SIMPLES.I.n}</p>${tabela('I')}</div></div></details>
+   <small style="color:var(--mute)">Alíquota efetiva = (RBT12 × nominal − parcela a deduzir) ÷ RBT12. Preencha a alíquota efetiva só se quiser usar a do DAS que o contador calculou. A partir de 2027 a reforma tributária muda o Simples (CBS/IBS): revise com o contador.</small>`;
+  el.querySelectorAll('.trC').forEach(i => i.onchange = async () => { const v = tribCfg(), k = i.dataset.k; v[k] = k === 'ativo' ? i.checked : ['anexo_prod', 'anexo_rev'].includes(k) ? i.value : i.value === '' ? null : +i.value;
+    try { await db.salvarRegra('tributos', v); S.base.regras.tributos = v; toast('Tributos salvos'); painelTributos(); } catch (e) { erro(e); } });
+}
+const pctS2 = v => (Math.round(v * 10000) / 100).toFixed(2).replace('.', ',') + '%';
+
 function telaRegras() {
   const r = regraAval(), cp = cadPadrao();
-  setTimeout(painelBling, 0); setTimeout(painelCustos, 0); setTimeout(painelLogistica, 0);
+  setTimeout(painelBling, 0); setTimeout(painelCustos, 0); setTimeout(painelLogistica, 0); setTimeout(painelTributos, 0);
   $('#main').innerHTML = `<section class="view on"><div class="dash">
   <div class="panel" id="custosPanel"></div>
   <div class="panel" id="logPanel"></div>
+  <div class="panel" id="tribPanel"></div>
   <div class="panel" id="blingPanel"><h3>Integração com o Bling</h3><small style="color:var(--mute)">verificando…</small></div>
   <div class="panel"><h3>Metas do comercial</h3><p style="color:var(--soft);margin-top:0">Aparecem no topo do CRM, com barra de progresso. Os dias de trabalho contam de segunda a sábado.</p>
    <div class="metas">${[['visitas_dia', 'Visitas de prospecção por dia', 'visitas'], ['vendas_dia', 'Vendas (novos clientes) por dia', 'vendas'], ['valor_mes', 'Valor em vendas novas por mês', 'R$'], ['cadastros_semana', 'Novos pontos cadastrados por semana', 'pontos']].map(([k, n, u]) => `<label><span>${n}</span><span class="row" style="gap:6px"><input type="number" min="0" class="rMeta" data-k="${k}" value="${metas()[k]}" style="width:110px"> <small>${u}</small></span></label>`).join('')}</div></div>
@@ -3169,6 +3194,22 @@ async function telaPedidos() {
 /* =================== financeiro (integrado ao Bling) =================== */
 /* =================== painel financeiro =================== */
 // 10 métricas: margem bruta, margem por cliente, perdas, CAC, payback/LTV, prazo de recebimento e mix, inadimplência, fluxo de caixa 30/60/90, ponto de equilíbrio e custo logístico
+// Simples Nacional (LC 123/2006, tabelas da LC 155/2016): alíquota efetiva = (RBT12 × nominal − parcela a deduzir) ÷ RBT12
+const SIMPLES = { I: { n: 'Anexo I · comércio (revenda)', f: [[180000, .04, 0], [360000, .073, 5940], [720000, .095, 13860], [1800000, .107, 22500], [3600000, .143, 87300], [4800000, .19, 378000]] },
+  II: { n: 'Anexo II · indústria (produção própria)', f: [[180000, .045, 0], [360000, .078, 5940], [720000, .10, 13860], [1800000, .112, 22500], [3600000, .147, 85500], [4800000, .30, 720000]] } };
+const tribCfg = () => ({ ativo: true, anexo_prod: 'II', anexo_rev: 'I', efetiva_prod: null, efetiva_rev: null, rbt12_manual: null, ...(S.base.regras.tributos || {}) });
+function aliqSimples(anexo, rbt12) { const t = SIMPLES[anexo] || SIMPLES.II, k = t.f.findIndex(f => rbt12 <= f[0]), i = k < 0 ? 5 : k, [, nom, pd] = t.f[i]; return { faixa: i + 1, nominal: nom, efetiva: rbt12 > 0 ? Math.max(0, (rbt12 * nom - pd) / rbt12) : nom }; }
+// RBT12: receita dos 12 meses anteriores ao mês de referência (início de atividade: média mensal × 12)
+function rbt12De(D, ref) { const c = tribCfg(); if (+c.rbt12_manual > 0) return { v: +c.rbt12_manual, manual: true };
+  const m0 = new Date(ref.getFullYear(), ref.getMonth(), 1), a = new Date(m0.getFullYear(), m0.getMonth() - 12, 1), ls = (D?.pedidos || []).filter(o => o.data >= a && o.data < m0 && o.valor > 0);
+  if (!ls.length) return { v: 0, meses: 0 }; const pri = ls.reduce((x, o) => o.data < x ? o.data : x, m0), meses = Math.min(12, Math.max(1, (m0.getFullYear() - pri.getFullYear()) * 12 + m0.getMonth() - pri.getMonth())), tot = ls.reduce((x, o) => x + o.valor, 0);
+  return { v: meses < 12 ? tot / meses * 12 : tot, meses }; }
+function taxasTrib(D, ref) { const c = tribCfg(), R = rbt12De(D, ref), ap = aliqSimples(c.anexo_prod, R.v), ar = aliqSimples(c.anexo_rev, R.v);
+  return { ativo: c.ativo !== false, c, rbt12: R, ap, ar, prod: c.ativo === false ? 0 : c.efetiva_prod != null && c.efetiva_prod !== '' ? +c.efetiva_prod / 100 : ap.efetiva, rev: c.ativo === false ? 0 : c.efetiva_rev != null && c.efetiva_rev !== '' ? +c.efetiva_rev / 100 : ar.efetiva }; }
+// imposto de um pedido: itens de produção própria × taxa do anexo de indústria, revenda (sem ficha técnica) × taxa do anexo de comércio
+function impostoPedido(D, o, T) { if (!T.ativo || !(o.valor > 0)) return 0; if (!o.itens?.length) return o.valor * T.prod; const cfg = custosCfg(), cache = D._rev = D._rev || {};
+  return o.itens.reduce((a, i) => { if (cache[i.cod] == null) { const p = D.porCod?.[i.cod]; cache[i.cod] = !!(p && !custoProducao(cfg, p)); } return a + i.rec * (cache[i.cod] ? T.rev : T.prod); }, 0); }
+
 // custo do km = gasolina ÷ consumo + desgaste (pneus, óleo, manutenção, depreciação); editado em Regras e metas
 const finPrem = () => { const r = S.base.regras.fin_premissas || {}, x = { gasolina: 6.3, consumo: 10, custo_visita: 15, ...r };
   if (r.desgaste == null) x.desgaste = Math.max(0, Math.round(((r.custo_km ?? 1.2) - x.gasolina / (x.consumo || 1)) * 100) / 100);
@@ -3189,6 +3230,11 @@ async function telaFinPainel() {
   const no = (o, a, b) => o.data >= a && o.data < b && o.valor > 0;
   const pp = D.pedidos.filter(o => no(o, ini, fim)), ppA = D.pedidos.filter(o => no(o, iniA, ini));
   const N = numeros(pp), NA = numeros(ppA);
+  // tributos do Simples Nacional: saem da margem (receita líquida − custo do produto)
+  const T = taxasTrib(D, new Date(+fim - DIA)), TA = taxasTrib(D, new Date(+ini - DIA)), impO = new Map();
+  const imp = o => { if (!impO.has(o.id)) impO.set(o.id, impostoPedido(D, o, o.data >= ini ? T : TA)); return impO.get(o.id); };
+  const impP = pp.reduce((a, o) => a + imp(o), 0), impA = ppA.reduce((a, o) => a + imp(o), 0);
+  N.imp = impP; N.margem -= impP; N.margemP = N.fat ? N.margem / N.fat : null; NA.margem -= impA;
   const pedInfo = Object.fromEntries(peds.map(o => [o.id, o]));
   // perdas: trocas (das contagens) e bonificações, a preço de custo
   const contP = (D.contagens || []).filter(c => c.visitas && new Date(c.visitas.em) >= ini && new Date(c.visitas.em) < fim);
@@ -3198,7 +3244,7 @@ async function telaFinPainel() {
   const freteCli = {}; let freteNosso = 0, freteTot = 0; pp.forEach(o => { const x = pedInfo[o.id]; if (!x?.frete) return; freteTot += +x.frete; if (!x.frete_cobrado) { freteNosso += +x.frete; freteCli[o.pdv_id] = (freteCli[o.pdv_id] || 0) + +x.frete; } });
   const perdas = custoTroca + custoBon;
   // 2. margem de contribuição por cliente
-  const mc = {}; pp.forEach(o => { const m = mc[o.pdv_id] = mc[o.pdv_id] || { fat: 0, cmv: 0 }; m.fat += o.valor; m.cmv += o.custo; });
+  const mc = {}; pp.forEach(o => { const m = mc[o.pdv_id] = mc[o.pdv_id] || { fat: 0, cmv: 0 }; m.fat += o.valor; m.cmv += o.custo + imp(o); });
   const MC = Object.entries(mc).map(([id, m]) => { const v = m.fat - m.cmv - (trocaCli[id] || 0) - (bonCli[id] || 0) - (freteCli[id] || 0); return { id, nome: S.pdvs.find(p => p.id === id)?.nome || 'Cliente', fat: m.fat, v, p: m.fat ? v / m.fat : 0 }; }).sort((a, b) => b.v - a.v);
   // 4. CAC: expositor deixado + bonificação da abertura + visitas de prospecção, por cliente novo
   const B = base(D, ini, fim, iniA), novos = B.novos || 0;
@@ -3207,7 +3253,7 @@ async function telaFinPainel() {
   const cacTot = custoExp + custoBonAb + custoProsp, CAC = novos ? cacTot / novos : null;
   // 5. payback e LTV: margem mensal média por cliente que comprou nos últimos 90 dias
   const u90 = D.pedidos.filter(o => o.data >= new Date(Date.now() - 90 * DIA) && o.valor > 0), cl90 = new Set(u90.map(o => o.pdv_id)).size;
-  const mMensal = cl90 ? u90.reduce((a, o) => a + o.valor - o.custo, 0) / cl90 / 3 : 0, payback = CAC != null && mMensal > 0 ? CAC / mMensal : null, LTV = mMensal * 12;
+  const mMensal = cl90 ? u90.reduce((a, o) => a + o.valor - o.custo - impostoPedido(D, o, T), 0) / cl90 / 3 : 0, payback = CAC != null && mMensal > 0 ? CAC / mMensal : null, LTV = mMensal * 12;
   // 6. prazo médio de recebimento e mix
   let somaPz = 0, somaV = 0; const mix = {}; pp.forEach(o => { const x = pedInfo[o.id]; if (!x) return; const parc = Array.isArray(x.pagamentos) && x.pagamentos.length ? x.pagamentos : [{ forma: (x.condicao || 'Outro').replace(/^\d+×\s*/, ''), valor: o.valor, vencimento: x.vencimento }];
     parc.forEach(pc => { const v = +pc.valor || 0, d = pc.vencimento ? Math.max(0, Math.round((new Date(pc.vencimento + 'T12:00') - new Date(isoDe(o.data) + 'T12:00')) / DIA)) : 0; somaPz += d * v; somaV += v; const f = /boleto/i.test(pc.forma) ? 'Boleto' : /pix/i.test(pc.forma) ? 'Pix' : /cart/i.test(pc.forma) ? 'Cartão' : /dinheiro/i.test(pc.forma) ? 'Dinheiro' : 'Outro'; mix[f] = (mix[f] || 0) + v; }); });
@@ -3238,7 +3284,7 @@ async function telaFinPainel() {
   const faixa = (v, ok, at, menor = true) => v == null || !isFinite(v) ? 'nd' : menor ? (v <= ok ? 'ok' : v <= at ? 'at' : 'cr') : (v >= ok ? 'ok' : v >= at ? 'at' : 'cr');
   const barra = (v, max, cor, marca) => `<div class="kbar"><i style="width:${Math.max(0, Math.min(100, (v || 0) / max * 100))}%;background:${cor}"></i>${marca != null ? `<em style="left:${Math.min(100, marca / max * 100)}%"></em>` : ''}</div>`;
   // últimos 6 meses (faturamento e margem bruta), para as tendências
-  const meses = [...Array(6)].map((_, k) => { const a = new Date(h0.getFullYear(), h0.getMonth() - 5 + k, 1), b = new Date(h0.getFullYear(), h0.getMonth() - 4 + k, 1); return { n: a.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', ''), ...numeros(D.pedidos.filter(o => no(o, a, b))) }; });
+  const meses = [...Array(6)].map((_, k) => { const a = new Date(h0.getFullYear(), h0.getMonth() - 5 + k, 1), b = new Date(h0.getFullYear(), h0.getMonth() - 4 + k, 1); const ls = D.pedidos.filter(o => no(o, a, b)), x = numeros(ls), Tm = taxasTrib(D, a); x.margem -= ls.reduce((s2, o) => s2 + impostoPedido(D, o, Tm), 0); return { n: a.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', ''), ...x }; });
   const spark = (vals, cor) => { const W = 120, H = 34, mx = Math.max(...vals, 1), mn = Math.min(...vals, 0), Y = v => H - 3 - (v - mn) / (mx - mn || 1) * (H - 6), X = i => i * W / (vals.length - 1 || 1);
     return `<svg class="fspk" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true"><path d="${vals.map((v, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1)).join('')}" fill="none" stroke="${cor}" stroke-width="2" vector-effect="non-scaling-stroke"/><circle cx="${X(vals.length - 1)}" cy="${Y(vals[vals.length - 1])}" r="3" fill="${cor}"/></svg>`; };
   const mcR = N.fat ? N.margem - perdas - freteNosso : 0, mcRA = NA.margem;
@@ -3256,12 +3302,12 @@ async function telaFinPainel() {
    ${blingOk ? '' : '<p class="esteira" style="margin:0 0 12px">⚠️ Não consegui ler o Bling agora: inadimplência, fluxo de caixa e ponto de equilíbrio ficam incompletos.</p>'}
    <div class="fheros">
     ${hero('Faturamento', brl(N.fat), `${N.pedidos} pedidos · ${N.compradores} clientes`, delta(N.fat, NA.fat), spark(meses.map(m => m.fat), COR.s1))}
-    ${hero('1 · Margem bruta', brl(N.margem), N.margemP == null ? '' : pctS(N.margemP) + ' do faturamento', delta(N.margem, NA.margem), spark(meses.map(m => m.margem), COR.bom))}
+    ${hero('1 · Margem bruta', brl(N.margem), N.margemP == null ? '' : pctS(N.margemP) + ' do faturamento · após impostos', delta(N.margem, NA.margem), spark(meses.map(m => m.margem), COR.bom))}
     ${hero('Margem de contribuição', brl(mcR), N.fat ? `${pctS(mcR / N.fat)} · depois de perdas e frete` : '', delta(mcR, mcRA), '')}
     ${hero('Caixa · próximos 30 dias', brl(FC[0].saldo), `entra ${brl(FC[0].ent)} · sai ${brl(FC[0].sai)}`, `<span class="fdl ${FC[0].saldo >= 0 ? 'up' : 'dn'}">${FC[0].saldo >= 0 ? '▲ positivo' : '▼ negativo'}</span>`, '', FC[0].saldo < 0 ? 'neg' : '')}
    </div>
    <div class="fgrid">
-    <div class="panel s8"><div class="fph"><h3>Faturamento e margem bruta · últimos 6 meses</h3>${legenda([{ nome: 'Faturamento', cor: COR.s1 }, { nome: 'Margem bruta', cor: COR.bom }])}</div>
+    <div class="panel s8"><div class="fph"><h3>Faturamento e margem bruta · últimos 6 meses</h3>${legenda([{ nome: 'Faturamento', cor: COR.s1 }, { nome: 'Margem bruta (após impostos)', cor: COR.bom }])}</div>
      ${grafBarras('fpMes', meses.map(m => m.n), [{ nome: 'Faturamento', cor: COR.s1, vals: meses.map(m => m.fat) }, { nome: 'Margem bruta', cor: COR.bom, vals: meses.map(m => m.margem) }], 'R$', { h: 210 })}</div>
     <div class="panel s4"><div class="fph"><h3>9 · Ponto de equilíbrio</h3>${st(peP == null ? 'nd' : peP >= 1 ? 'ok' : peP >= 0.7 ? 'at' : 'cr')}</div>
      ${PE == null ? `<div class="fvazio"><b>—</b><p>Marque as contas fixas (aluguel, salários, contador, sistemas) em Contas a pagar, coluna Classe.</p><button class="btn" id="fpIrPagar">Marcar contas fixas</button></div>`
@@ -3270,6 +3316,7 @@ async function telaFinPainel() {
        <dl class="fdl2"><div><dt>Custo fixo do mês</dt><dd>${brl(fixoMes)}</dd></div><div><dt>Margem de contribuição</dt><dd>${pctS(margemContrib)}</dd></div><div><dt>${peP >= 1 ? 'Acima do equilíbrio' : 'Falta faturar'}</dt><dd>${brl(Math.abs(fatMes - PE))}</dd></div></dl>`}</div>
    </div>
    <div class="fcards">
+    ${card('T', 'Impostos · Simples', T.ativo ? brl(impP) : '—', T.ativo ? `${N.fat ? pctS(impP / N.fat) + ' do faturamento · ' : ''}produção ${pctS(T.prod)} (anexo ${T.c.anexo_prod}${T.c.efetiva_prod != null && T.c.efetiva_prod !== '' ? ', informada' : ', faixa ' + T.ap.faixa}) · revenda ${pctS(T.rev)} (anexo ${T.c.anexo_rev}) · RBT12 ${brl(T.rbt12.v)}${T.rbt12.manual ? ' (informada)' : T.rbt12.meses < 12 ? ` (média de ${T.rbt12.meses} ${T.rbt12.meses === 1 ? 'mês' : 'meses'} × 12)` : ''}` : 'desligado em Regras e metas', T.ativo ? (T.ap.faixa <= 2 ? 'ok' : 'at') : 'nd', T.ativo ? `<div class="kmeta"><span>Faixa ${T.ap.faixa} de 6 · próxima a partir de ${brl(SIMPLES[T.c.anexo_prod].f[Math.min(5, T.ap.faixa - 1)][0])}</span></div>${barra(T.rbt12.v, SIMPLES[T.c.anexo_prod].f[Math.min(5, T.ap.faixa - 1)][0], COR.s1)}` : '')}
     ${card('3', 'Perdas', pctS(perdP), `${brl(perdas)} · trocas ${brl(custoTroca)} · bonificação ${brl(custoBon)}`, faixa(perdP, 0.03, 0.06), barra(perdP || 0, 0.1, perdP > 0.06 ? COR.ruim : perdP > 0.03 ? COR.aviso : COR.bom, 0.03))}
     ${card('4', 'CAC', CAC == null ? '—' : brl(CAC), `custo por cliente novo · ${novos} novo${novos === 1 ? '' : 's'} · expositores ${brl(custoExp)} · bonificação ${brl(custoBonAb)} · ${visProsp} visitas ${brl(custoProsp)}`, CAC == null ? 'nd' : payback <= 3 ? 'ok' : payback <= 6 ? 'at' : 'cr')}
     ${card('5', 'Payback', payback == null ? '—' : (payback < 1 ? Math.round(payback * 30) + ' dias' : dec(payback) + ' meses'), `margem por cliente ${brl(mMensal)}/mês · LTV 12 meses ${brl(LTV)}`, faixa(ltvCac, 3, 1.5, false), ltvCac ? `<div class="kmeta"><span>LTV ÷ CAC</span><b>${dec(ltvCac)}×</b></div>${barra(ltvCac, Math.max(10, ltvCac), ltvCac >= 3 ? COR.bom : COR.aviso, 3)}` : '')}
@@ -3286,7 +3333,7 @@ async function telaFinPainel() {
      ${venc.length ? `<table class="ftab"><tr><th>Quem está devendo</th><th>Atraso</th><th>Valor</th></tr>${venc.sort((a, b) => a.vencimento < b.vencimento ? -1 : 1).slice(0, 6).map(x => `<tr><td>${esc(nomeContato(x.contato))}</td><td>${atraso(x)} d</td><td><b>${brl(val(x.valor))}</b></td></tr>`).join('')}</table>` : '<p class="psub" style="margin-top:10px">Nenhuma conta vencida.</p>'}</div>
    </div>
    <div class="fgrid">
-    <div class="panel s7"><div class="fph"><h3>2 · Margem de contribuição por cliente</h3></div><p class="psub">Faturamento − custo do produto − trocas − bonificação − frete por nossa conta</p>
+    <div class="panel s7"><div class="fph"><h3>2 · Margem de contribuição por cliente</h3></div><p class="psub">Faturamento − impostos − custo do produto − trocas − bonificação − frete por nossa conta</p>
      <div class="fcols"><div><p class="ftit">Mais lucrativos</p>${ranking(MC.slice(0, 6).map(x => ({ n: x.nome, v: x.v, c: COR.bom, tip: `${Math.round(x.p * 100)}% de ${brl(x.fat)}` })), 'R$')}</div>
      <div>${MC.filter(x => x.v < 0).length ? `<p class="ftit" style="color:var(--t-bad)">Dando prejuízo</p>${ranking(MC.filter(x => x.v < 0).slice(-6).reverse().map(x => ({ n: x.nome, v: -x.v, c: COR.ruim, tip: `fatura ${brl(x.fat)}` })), 'R$')}` : `<p class="ftit">Menor margem</p>${ranking(MC.filter(x => x.v >= 0).slice(-6).reverse().map(x => ({ n: x.nome, v: x.v, c: COR.s2, tip: `${Math.round(x.p * 100)}% de ${brl(x.fat)}` })), 'R$')}`}</div></div></div>
     <div class="panel s5"><div class="fph"><h3>6 · Prazo de recebimento e mix</h3></div>
@@ -3294,7 +3341,7 @@ async function telaFinPainel() {
      <div class="fstack">${mixOrd.map(([n, v]) => `<i style="width:${v / totMix * 100}%;background:${corMix[n]}" data-tip="${n}: ${brl(v)}"></i>`).join('') || '<i style="width:100%;background:var(--sand)"></i>'}</div>
      <table class="ftab">${mixOrd.map(([n, v]) => `<tr><td><i class="fsq" style="background:${corMix[n]}"></i>${n}</td><td>${Math.round(v / totMix * 100)}%</td><td><b>${brl(v)}</b></td></tr>`).join('')}</table></div>
    </div>
-   <p class="fnota">Custo dos produtos: Regras e metas → Custos de produção. Km das rotas: linha reta × 1,35 a partir das paradas do Dia de rota, a ${brl(P.custo_km)}/km (gasolina ${brl(P.gasolina)}/L ÷ ${dec(P.consumo)} km/L + desgaste ${brl(P.desgaste)}/km). Visita de prospecção: ${brl(P.custo_visita)}. <a href="#" id="fpIrRegras">Editar em Regras e metas</a></p>
+   <p class="fnota">Impostos: DAS do Simples Nacional sobre o faturamento (sem ICMS-ST ou DIFAL, se houver). Custo dos produtos: Regras e metas → Custos de produção. Km das rotas: linha reta × 1,35 a partir das paradas do Dia de rota, a ${brl(P.custo_km)}/km (gasolina ${brl(P.gasolina)}/L ÷ ${dec(P.consumo)} km/L + desgaste ${brl(P.desgaste)}/km). Visita de prospecção: ${brl(P.custo_visita)}. <a href="#" id="fpIrRegras">Editar em Regras e metas</a></p>
   </div></section>`;
   document.querySelectorAll('[data-fper]').forEach(b => b.onclick = () => { F.per = b.dataset.fper; if (F.per === 'custom' && !F.de) { F.de = isoDe(new Date(Date.now() - 29 * DIA)); F.ate = hojeISO(); } telaFinPainel(); if (F.per === 'custom') setTimeout(() => $('#fpCal')?.click(), 60); });
   if ($('#fpCal')) $('#fpCal').onclick = e => { e.stopPropagation(); calendarioFaixa($('#fpCal'), F.de, F.ate, (a, b) => { F.de = a; F.ate = b; telaFinPainel(); }); };

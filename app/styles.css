@@ -689,7 +689,7 @@ section:fullscreen #mapa{height:100vh}
 .fdl2{margin:14px 0 0;display:flex;flex-direction:column;gap:0}
 .fdl2 div{display:flex;justify-content:space-between;padding:7px 0;border-top:1px solid var(--line);font-size:13px}
 .fdl2 dt{color:var(--mute)}.fdl2 dd{margin:0;font-weight:700}
-.fcards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.fcards{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
 .fcard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:6px;min-width:0}
 .fch{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .fch small{color:var(--mute);font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;display:flex;align-items:center;gap:6px}
@@ -714,5 +714,6 @@ section:fullscreen #mapa{height:100vh}
 .ftit{font-size:12px;font-weight:700;margin:4px 0 8px;color:var(--soft)}
 .fnota{font-size:12px;color:var(--mute);margin:4px 0 0}
 .fnota a{color:var(--choc);font-weight:600}
+@media (max-width:1400px){.fcards{grid-template-columns:repeat(3,1fr)}}
 @media (max-width:1200px){.fheros,.fcards{grid-template-columns:repeat(2,1fr)}.fgrid .s8,.fgrid .s7,.fgrid .s5,.fgrid .s4{grid-column:span 12}}
 @media (max-width:700px){.fheros,.fcards,.fmini,.fcols{grid-template-columns:1fr}.fspk{display:none}.fhs{max-width:none}}
