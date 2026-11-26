@@ -165,7 +165,7 @@ function telaPrimeiroAcesso(user) {
 
 /* =================== estrutura =================== */
 const ABAS = {
-  comercial: [['mapa', 'Mapa'], ['funil', 'Funil'], ['agenda', 'Agenda'], ['carteira', 'Negócios'], ['contatos', 'Contatos'], ['abertura', 'Cadastrar venda'], ['painel', 'Painel'], ['uploads', 'Uploads'], ['regras', 'Regras e metas']],
+  comercial: [['mapa', 'Mapa'], ['funil', 'Funil'], ['agenda', 'Agenda'], ['carteira', 'Negócios'], ['contatos', 'Contatos'], ['abertura', 'Cadastrar venda'], ['painel', 'Painel'], ['uploads', 'Uploads'], ['regras', 'Regras e metas'], ['pedidos', 'Pedidos']],
   operacao: [['rota', 'Dia de rota'], ['reposicao', 'Reposição'], ['resumo', 'Resumo do dia'], ['estoque', 'Estoque']],
   financeiro: [['freceber', 'Contas a receber'], ['fpagar', 'Contas a pagar'], ['fcaixa', 'Caixas e bancos']] };
 let lado = 'comercial';
@@ -186,10 +186,10 @@ const ICO = {
   menu: '<path d="M3 6h18M3 12h18M3 18h18"/>', lua: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>',
   sol: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   recolher: '<rect x="3" y="3" width="18" height="18"/><path d="M9 3v18M15 9l-3 3 3 3"/>', abrir: '<rect x="3" y="3" width="18" height="18"/><path d="M9 3v18M13 9l3 3-3 3"/>',
-  seta: '<path d="m6 9 6 6 6-6"/>', estoque: '<path d="M3 21V9l9-6 9 6v12"/><path d="M7 21v-8h10v8M7 17h10"/>', freceber: '<path d="M12 3v14M6 11l6 6 6-6M4 21h16"/>', fpagar: '<path d="M12 17V3M6 9l6-6 6 6M4 21h16"/>', fcaixa: '<rect x="3" y="6" width="18" height="13"/><path d="M3 10h18M7 15h4"/>', lupa: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>', filtro: '<path d="M4 6h16M7 12h10M10 18h4"/>',
+  seta: '<path d="m6 9 6 6 6-6"/>', pedidos: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 8h6M9 12h6"/>', estoque: '<path d="M3 21V9l9-6 9 6v12"/><path d="M7 21v-8h10v8M7 17h10"/>', freceber: '<path d="M12 3v14M6 11l6 6 6-6M4 21h16"/>', fpagar: '<path d="M12 17V3M6 9l6-6 6 6M4 21h16"/>', fcaixa: '<rect x="3" y="6" width="18" height="13"/><path d="M3 10h18M7 15h4"/>', lupa: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>', filtro: '<path d="M4 6h16M7 12h10M10 18h4"/>',
   pino: '<path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.5"/>' };
 const ico = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" stroke-linejoin="miter">${ICO[k] || ''}</svg>`;
-const MENU = [{ g: 'CRM', lado: 'comercial', it: ['funil', 'mapa', 'agenda', 'carteira', 'contatos', 'abertura', 'painel', 'uploads'] },
+const MENU = [{ g: 'CRM', lado: 'comercial', it: ['funil', 'mapa', 'agenda', 'carteira', 'contatos', 'abertura', 'pedidos', 'painel', 'uploads'] },
   { g: 'Reposição', lado: 'operacao', it: ['rota', 'reposicao', 'resumo'] }, { g: 'Estoque', lado: 'operacao', it: ['estoque'] }, { g: 'Financeiro', lado: 'comercial', it: ['freceber', 'fpagar', 'fcaixa'] }, { g: 'Ajustes', lado: 'comercial', it: ['regras'] }];
 const nomeAba = k => (Object.values(ABAS).flat().find(([x]) => x === k) || [, k])[1];
 const grupoDe = k => MENU.find(m => m.it.includes(k));
@@ -235,7 +235,7 @@ function irPara(a, semHist) {
   else if (!semHist && S.aba && !mesmo) { S.hist.push({ aba: S.aba, ...(S.histEnt || {}) }); if (S.hist.length > 40) S.hist.shift(); }
   S.aba = a; S.histEnt = ctx;
   pintarMenu();
-  ({ agenda: telaAgenda, perfil: telaPerfil, contato: telaContato, contatos: telaContatos, uploads: telaUploads, mapa: telaMapa, funil: telaFunil, carteira: telaCarteira, abertura: telaAbertura, painel: telaPainel, regras: telaRegras, rota: telaRota, reposicao: telaReposicao, pedcli: telaPedidosCliente, resumo: telaResumo, carteiramet: telaCarteiraMet, estoque: telaEstoque, freceber: () => telaContas('receber'), fpagar: () => telaContas('pagar'), fcaixa: telaCaixas })[a]();
+  ({ agenda: telaAgenda, perfil: telaPerfil, contato: telaContato, contatos: telaContatos, uploads: telaUploads, mapa: telaMapa, funil: telaFunil, carteira: telaCarteira, abertura: telaAbertura, painel: telaPainel, regras: telaRegras, rota: telaRota, reposicao: telaReposicao, pedcli: telaPedidosCliente, resumo: telaResumo, carteiramet: telaCarteiraMet, estoque: telaEstoque, pedidos: telaPedidos, freceber: () => telaContas('receber'), fpagar: () => telaContas('pagar'), fcaixa: telaCaixas })[a]();
 }
 window.irPara = irPara;
 // texto do botão Voltar: diz para onde vai (ex.: "← Almeida 68" quando veio do perfil do negócio)
@@ -2443,7 +2443,7 @@ document.addEventListener('click', e => { const b = e.target.closest('[data-copi
 // expositor de cada cliente: histórico (entregue na 1ª venda e trocas), para o custo de aquisição no financeiro
 async function registrarExpositor(pdvId, expId, tipo) { const h = { ...(S.base.regras.expositores_hist || {}) }; h[pdvId] = [...(h[pdvId] || []), { expositor_id: expId, tipo, em: new Date().toISOString(), por: S.eu.nome || '' }];
   try { await db.salvarRegra('expositores_hist', h); S.base.regras.expositores_hist = h; } catch (e) { } }
-function voltarDaRep() { const v = S.repVolta; S.repVolta = null; S.contando = null; if (v?.aba === 'abertura') irPara('abertura'); else if (v?.aba === 'perfil') abrirPerfil(v.id); else if (v?.aba === 'mapa') { S.sel = v.id; irPara('mapa'); } else irPara('rota'); }
+function voltarDaRep() { const v = S.repVolta; S.repVolta = null; S.contando = null; if (v?.aba === 'pedidos') irPara('pedidos'); else if (v?.aba === 'abertura') irPara('abertura'); else if (v?.aba === 'perfil') abrirPerfil(v.id); else if (v?.aba === 'mapa') { S.sel = v.id; irPara('mapa'); } else irPara('rota'); }
 async function telaReposicao() {
   const p = S.pdvs.find(x => x.id === S.contando);
   if (!p) { $('#main').innerHTML = '<section class="view on"><div class="empty">Escolha um cliente no <b>Dia de rota</b> para começar.</div></section>'; return; }
@@ -3000,6 +3000,49 @@ async function verPedido(id, p) {
       if (cs.length && d.visita?.tipo === 'reposicao') { S.reabrir = { pdvId: p.id, contagens: cs, condicao: o.condicao, vencimento: o.vencimento, bonif: bon }; S.contando = p.id; S.repVolta = { aba: 'perfil', id: p.id }; irPara('reposicao'); }
       else { S.prefillVenda = { pdv: p.id, q: Object.fromEntries(d.itens.filter(i => +i.quantidade > 0).map(i => [i.produto_id, +i.quantidade])) }; S.abPdv = p.id; S.vendaVolta = { aba: 'perfil', id: p.id }; irPara('abertura'); } }; };
   $('#vpExc').onclick = () => excluir(false); $('#vpRef').onclick = () => excluir(true);
+}
+
+/* =================== pedidos =================== */
+// histórico de todos os pedidos: em aberto, finalizados, cancelados, com erro no Bling e as entregas agendadas; tocar abre os detalhes
+const situacaoPed = o => { const s = (o.bling_situacao || '').toLowerCase();
+  if (/cancel/.test(s)) return { k: 'cancelado', n: 'Cancelado', c: 'var(--bg-bad)' };
+  if (o.bling_status === 'erro' || (o.bling_status === 'pendente' && !o.bling_id)) return { k: 'erro', n: o.bling_status === 'erro' ? 'Erro no Bling' : 'Não enviado', c: 'var(--bg-bad)' };
+  if (/atendid|finaliz|faturad|conclu|entregue/.test(s)) return { k: 'finalizado', n: o.bling_situacao, c: 'var(--bg-ok)' };
+  if (!o.bling_id && o.bling_status !== 'importado') return { k: 'app', n: 'Só no app', c: 'var(--sand)' };
+  return { k: 'aberto', n: o.bling_situacao || 'Em aberto', c: 'var(--bg-warn)' }; };
+async function telaPedidos() {
+  const F = S.pdF = S.pdF || { per: '30', sit: '', vend: '', tipo: '', q: '' };
+  const ate = new Date(Date.now() + DIA), de = F.per === 'tudo' ? new Date(2020, 0, 1) : new Date(Date.now() - +F.per * DIA);
+  $('#main').innerHTML = '<section class="view on"><div class="dash pnl"><div class="loading">Carregando os pedidos…</div></div></section>';
+  let ls, perfis; try { [ls, perfis] = await Promise.all([db.listarPedidos(de.toISOString(), ate.toISOString()), S.perfisCache || db.perfisLista()]); S.perfisCache = perfis; } catch (e) { return erro(e); }
+  const nomeP = id => (perfis.find(p => p.id === id)?.nome || '').split(' ')[0];
+  const encs = Object.entries(S.base.regras.encomendas || {}).map(([id, e]) => ({ id, e, p: S.pdvs.find(x => x.id === id) })).filter(x => x.p).sort((a, b) => String(a.e.data || '').localeCompare(String(b.e.data || '')));
+  const desenha = () => {
+    const q = F.q.toLowerCase(), f = ls.map(o => ({ ...o, st: situacaoPed(o) })).filter(o => (!F.sit || o.st.k === F.sit) && (!F.tipo || o.tipo === F.tipo) && (!F.vend || (F.vend === 'bling' ? !o.criado_por : o.criado_por === F.vend)) && (!q || (o.pdvs?.nome || '').toLowerCase().includes(q) || String(o.numero).includes(q) || String(o.bling_pedido_id || '').includes(q)));
+    const cont = k => ls.filter(o => situacaoPed(o).k === k).length, tot = f.filter(o => o.st.k !== 'cancelado').reduce((a, o) => a + (+o.valor || 0), 0);
+    $('#pdCorpo').innerHTML = `<div class="row" style="gap:6px;flex-wrap:wrap">${[['', 'Todos', ls.length], ['aberto', 'Em aberto', cont('aberto')], ['finalizado', 'Finalizados', cont('finalizado')], ['app', 'Só no app', cont('app')], ['erro', 'Erro / não enviado', cont('erro')], ['cancelado', 'Cancelados', cont('cancelado')]].map(([k, n, c]) => `<button class="mini ${F.sit === k ? 'on' : ''}" data-st="${k}">${n} (${c})</button>`).join('')}</div>
+     <div class="kpis"><div class="kpi"><small>Pedidos</small><b>${f.length}</b></div><div class="kpi"><small>Valor (sem cancelados)</small><b>${brl(tot)}</b></div><div class="kpi"><small>Ticket médio</small><b>${f.length ? brl(tot / Math.max(1, f.filter(o => o.st.k !== 'cancelado').length)) : '—'}</b></div><div class="kpi"><small>Unidades</small><b>${fmt(f.filter(o => o.st.k !== 'cancelado').reduce((a, o) => a + (+o.unidades || 0), 0))}</b></div></div>
+     ${encs.length && !F.sit ? `<div class="panel"><h3>📦 Entregas agendadas (${encs.length})</h3><p class="psub">Pedidos salvos para entrega: viram pedido quando você fechar no cliente</p><table class="dped"><tr><th>Entrega</th><th>Cliente</th><th>Tipo</th><th>Por</th><th></th></tr>${encs.map(x => `<tr><td>${x.e.data ? dstr(x.e.data + 'T12:00') : 'sem data'}${x.e.periodo && x.e.periodo !== 'dia_todo' ? ' · ' + PERIODOS_ENT[x.e.periodo].toLowerCase() : ''}</td><td><a href="#" data-cli="${x.id}"><b>${esc(x.p.nome)}</b></a></td><td>${x.e.tipo === 'venda' ? 'Venda' : 'Reposição'}${x.e.origem ? ' · ' + ORIGENS[x.e.origem] : ''}</td><td>${esc(x.e.por || '')}</td><td><button class="mini" data-abre="${x.id}" data-tp="${x.e.tipo}">abrir</button></td></tr>`).join('')}</table></div>` : ''}
+     <div class="panel" style="overflow-x:auto">${f.length ? `<table class="dped"><tr><th>Data</th><th>Nº</th><th>Cliente</th><th>Tipo</th><th>Pagamento</th><th>Vendedor</th><th>Situação</th><th style="text-align:right">Valor</th></tr>${f.map(o => `<tr class="lnk" data-ped="${o.id}" data-pdv="${o.pdv_id}"><td>${new Date(o.criado_em).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })}<br><small style="color:var(--mute)">${new Date(o.criado_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</small></td>
+       <td>${o.bling_pedido_id ? 'Bling ' + esc(o.bling_pedido_id) : ''}${o.criado_por ? `<br><small style="color:var(--mute)">app ${o.numero}</small>` : ''}</td><td><b>${esc(o.pdvs?.nome || '—')}</b>${o.pdvs?.bairro ? `<br><small style="color:var(--mute)">${esc(o.pdvs.bairro)}</small>` : ''}</td>
+       <td>${o.tipo === 'abertura' ? 'Abertura' : 'Reposição'}</td><td>${esc(o.condicao || '—')}${o.vencimento ? `<br><small style="color:var(--mute)">vence ${dstr(o.vencimento + 'T12:00')}</small>` : ''}</td><td>${o.criado_por ? esc(nomeP(o.criado_por)) : '<small style="color:var(--mute)">Bling</small>'}</td>
+       <td><span class="badge" style="background:${o.st.c}" title="${esc(o.bling_erro || '')}">${esc(o.st.n)}</span></td><td style="text-align:right"><b>${brl(+o.valor || 0)}</b><br><small style="color:var(--mute)">${fmt(+o.unidades || 0)} un.</small></td></tr>`).join('')}</table>` : '<p class="empty">Nenhum pedido com esses filtros.</p>'}</div>`;
+    document.querySelectorAll('[data-st]').forEach(b => b.onclick = () => { F.sit = b.dataset.st; desenha(); });
+    document.querySelectorAll('tr[data-ped]').forEach(tr => tr.onclick = () => { const p = S.pdvs.find(x => x.id === tr.dataset.pdv) || { id: tr.dataset.pdv, nome: ls.find(o => o.id === tr.dataset.ped)?.pdvs?.nome || 'Cliente' }; verPedido(tr.dataset.ped, p); });
+    document.querySelectorAll('[data-cli]').forEach(a => a.onclick = e => { e.preventDefault(); abrirPerfil(a.dataset.cli); });
+    document.querySelectorAll('[data-abre]').forEach(b => b.onclick = () => { const id = b.dataset.abre; if (b.dataset.tp === 'venda') { S.abPdv = id; S.vendaVolta = { aba: 'pedidos' }; irPara('abertura'); } else { S.contando = id; S.repVolta = { aba: 'pedidos' }; irPara('reposicao'); } });
+  };
+  $('#main').innerHTML = `<section class="view on"><div class="dash pnl">
+   <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
+    <div><label class="lb">Período</label><select id="pdPer">${[['7', 'Últimos 7 dias'], ['30', 'Últimos 30 dias'], ['90', 'Últimos 90 dias'], ['180', 'Últimos 6 meses'], ['365', 'Último ano'], ['tudo', 'Tudo']].map(([k, n]) => `<option value="${k}" ${F.per === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+    <div><label class="lb">Tipo</label><select id="pdTipo"><option value="">Todos</option><option value="abertura" ${F.tipo === 'abertura' ? 'selected' : ''}>Abertura</option><option value="reposicao" ${F.tipo === 'reposicao' ? 'selected' : ''}>Reposição</option></select></div>
+    <div><label class="lb">Vendedor</label><select id="pdVend"><option value="">Todos</option>${perfis.map(p => `<option value="${p.id}" ${F.vend === p.id ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}<option value="bling" ${F.vend === 'bling' ? 'selected' : ''}>Lançados no Bling</option></select></div>
+    <div style="flex:1;min-width:180px"><label class="lb">Buscar</label><input id="pdQ" placeholder="Cliente ou número do pedido" value="${esc(F.q)}" style="width:100%"></div>
+    <button class="btn pri" id="pdNova">+ Cadastrar venda</button></div><div id="pdCorpo"></div></div></section>`;
+  $('#pdPer').onchange = e => { F.per = e.target.value; telaPedidos(); };
+  $('#pdTipo').onchange = e => { F.tipo = e.target.value; desenha(); }; $('#pdVend').onchange = e => { F.vend = e.target.value; desenha(); }; $('#pdQ').oninput = e => { F.q = e.target.value; desenha(); };
+  $('#pdNova').onclick = () => irPara('abertura');
+  desenha();
 }
 
 /* =================== financeiro (integrado ao Bling) =================== */

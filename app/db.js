@@ -285,3 +285,7 @@ export async function estoqueMovs() { return tudo(() => sb.from('estoque_mov').s
 export async function lancarEstoque(rows) { return ok(await sb.from('estoque_mov').insert(rows).select('id')); }
 export async function apagarMovEstoque(id) { return ok(await sb.from('estoque_mov').delete().eq('id', id)); }
 export async function perfisLista() { return ok(await sb.from('perfis').select('id, nome, papel').order('nome')); }
+// aba Pedidos: todos os pedidos (do app e do Bling) de um período, com o nome do cliente
+export async function listarPedidos(de, ate) {
+  return tudo(() => sb.from('pedidos').select('id, numero, criado_em, valor, unidades, tipo, condicao, vencimento, bling_id, bling_pedido_id, bling_status, bling_situacao, bling_erro, criado_por, pdv_id, visita_id, pdvs(nome, bairro, regiao)').gte('criado_em', de).lt('criado_em', ate).order('criado_em', { ascending: false }));
+}
