@@ -2027,6 +2027,18 @@ function painelCustos() {
   pintar();
 }
 
+function painelExpositores() {
+  const el = document.getElementById('expPanel'); if (!el) return;
+  const hist = S.base.regras.expositores_hist || {}, usa = {}; S.pdvs.forEach(p => { if (p.expositor_id) usa[p.expositor_id] = (usa[p.expositor_id] || 0) + 1; });
+  el.innerHTML = `<h3>Expositores</h3><p class="psub">Custo de cada tipo de expositor. Entra no CAC do Painel financeiro pelo expositor que cada cliente novo recebeu.</p>
+   <table class="ftab" style="max-width:640px"><tr><th>Nome</th><th>Capacidade</th><th>Custo</th><th>Clientes com ele</th></tr>
+   ${S.base.expositores.map(e => `<tr><td><input class="exC" data-id="${e.id}" data-k="nome" value="${esc(e.nome)}" style="width:150px"></td><td><span class="row" style="gap:4px;justify-content:flex-end"><input type="number" min="1" class="exC" data-id="${e.id}" data-k="capacidade" value="${e.capacidade}" style="width:70px"> un</span></td><td><span class="row" style="gap:4px;justify-content:flex-end">R$ <input type="number" step="0.01" min="0" class="exC" data-id="${e.id}" data-k="custo" value="${e.custo ?? ''}" style="width:90px"></span></td><td>${usa[e.id] || 0}</td></tr>`).join('')}</table>
+   <button class="btn" id="exNovo" style="margin-top:10px">+ Novo tipo de expositor</button>`;
+  el.querySelectorAll('.exC').forEach(i => i.onchange = async () => { const k = i.dataset.k, v = k === 'nome' ? i.value.trim() : +i.value; if (k !== 'custo' && !v) return erro(new Error('Preencha o nome e a capacidade'));
+    try { const n = await db.salvarExpositor(+i.dataset.id, { [k]: v }); Object.assign(S.base.expositores.find(x => x.id === n.id), n); toast('Expositor salvo'); } catch (e) { erro(e); } });
+  $('#exNovo').onclick = async () => { const cap = parseInt(prompt('Capacidade do novo expositor (unidades)?'), 10); if (!(cap > 0)) return; const custo = parseFloat(String(prompt('Custo (R$)?') || '').replace(',', '.'));
+    try { const n = await db.criarExpositor({ nome: `${cap} unidades`, capacidade: cap, custo: isFinite(custo) ? custo : null }); S.base.expositores.push(n); S.base.expositores.sort((a, b) => a.capacidade - b.capacidade); toast('Expositor criado'); painelExpositores(); } catch (e) { erro(e); } };
+}
 function painelLogistica() {
   const el = document.getElementById('logPanel'); if (!el) return;
   const P = finPrem(), campo = (k, n, step, u) => `<label>${n}<br><span class="row" style="gap:6px"><input type="number" step="${step}" min="0" class="lgP" data-k="${k}" value="${P[k]}" style="width:100px"> <small>${u}</small></span></label>`;
@@ -2065,9 +2077,10 @@ const pctS2 = v => (Math.round(v * 10000) / 100).toFixed(2).replace('.', ',') + 
 
 function telaRegras() {
   const r = regraAval(), cp = cadPadrao();
-  setTimeout(painelBling, 0); setTimeout(painelCustos, 0); setTimeout(painelLogistica, 0); setTimeout(painelTributos, 0);
+  setTimeout(painelBling, 0); setTimeout(painelCustos, 0); setTimeout(painelLogistica, 0); setTimeout(painelExpositores, 0); setTimeout(painelTributos, 0);
   $('#main').innerHTML = `<section class="view on"><div class="dash">
   <div class="panel" id="custosPanel"></div>
+  <div class="panel" id="expPanel"></div>
   <div class="panel" id="logPanel"></div>
   <div class="panel" id="tribPanel"></div>
   <div class="panel" id="blingPanel"><h3>Integração com o Bling</h3><small style="color:var(--mute)">verificando…</small></div>
@@ -3339,7 +3352,12 @@ async function telaFinPainel() {
   const MC = Object.entries(mc).map(([id, m]) => { const v = m.fat - m.cmv - (trocaCli[id] || 0) - (bonCli[id] || 0) - (freteCli[id] || 0); return { id, nome: S.pdvs.find(p => p.id === id)?.nome || 'Cliente', fat: m.fat, v, p: m.fat ? v / m.fat : 0 }; }).sort((a, b) => b.v - a.v);
   // 4. CAC: expositor deixado + bonificação da abertura + visitas de prospecção, por cliente novo
   const B = base(D, ini, fim, iniA), novos = B.novos || 0;
-  const hist = S.base.regras.expositores_hist || {}, custoExp = Object.values(hist).flat().filter(h => new Date(h.em) >= ini && new Date(h.em) < fim).reduce((a, h) => a + +(S.base.expositores.find(x => x.id === h.expositor_id)?.custo || 0), 0);
+  // CAC: expositor que cada cliente novo do período recebeu (1º registro do histórico; sem histórico, o expositor do cadastro), pelo custo em Regras e metas
+  const hist = S.base.regras.expositores_hist || {}, expNovos = {};
+  Object.entries(D.porPdv).forEach(([id, ps]) => { if (!(ps[0].data >= ini && ps[0].data < fim)) return; const p = S.pdvs.find(x => x.id === id), h = (hist[id] || [])[0];
+    const eid = h ? h.expositor_id : p?.expositor_id; if (eid == null || eid === '') return; const e = S.base.expositores.find(x => String(x.id) === String(eid)); if (e) expNovos[e.id] = (expNovos[e.id] || 0) + 1; });
+  const custoExp = Object.entries(expNovos).reduce((a, [id, n]) => a + n * +(S.base.expositores.find(x => String(x.id) === id)?.custo || 0), 0);
+  const expTxt = Object.entries(expNovos).map(([id, n]) => { const e = S.base.expositores.find(x => String(x.id) === id); return `${n}× ${e.capacidade} un`; }).join(', ');
   const visProsp = (D.visitas || []).filter(v => v.tipo === 'prospeccao' && new Date(v.em) >= ini && new Date(v.em) < fim).length, custoProsp = visProsp * P.custo_visita;
   const cacTot = custoExp + custoBonAb + custoProsp, CAC = novos ? cacTot / novos : null;
   // 5. payback e LTV: margem mensal média por cliente que comprou nos últimos 90 dias
@@ -3409,7 +3427,7 @@ async function telaFinPainel() {
    <div class="fcards">
     ${card('T', 'Impostos · Simples', T.ativo ? brl(impP) : '—', T.ativo ? `${N.fat ? pctS(impP / N.fat) + ' do faturamento · ' : ''}produção ${pctS(T.prod)} (anexo ${T.c.anexo_prod}${T.c.efetiva_prod != null && T.c.efetiva_prod !== '' ? ', informada' : ', faixa ' + T.ap.faixa}) · revenda ${pctS(T.rev)} (anexo ${T.c.anexo_rev}) · RBT12 ${brl(T.rbt12.v)}${T.rbt12.manual ? ' (informada)' : T.rbt12.meses < 12 ? ` (média de ${T.rbt12.meses} ${T.rbt12.meses === 1 ? 'mês' : 'meses'} × 12)` : ''}` : 'desligado em Regras e metas', T.ativo ? (T.ap.faixa <= 2 ? 'ok' : 'at') : 'nd', T.ativo ? `<div class="kmeta"><span>Faixa ${T.ap.faixa} de 6 · vai até ${brl(SIMPLES[T.c.anexo_prod].f[Math.min(5, T.ap.faixa - 1)][0])}</span></div>${barra(T.rbt12.v, SIMPLES[T.c.anexo_prod].f[Math.min(5, T.ap.faixa - 1)][0], COR.s1)}` : '')}
     ${card('3', 'Perdas', pctS(perdP), `${brl(perdas)} · trocas ${brl(custoTroca)} · bonificação ${brl(custoBon)}`, faixa(perdP, 0.03, 0.06), barra(perdP || 0, 0.1, perdP > 0.06 ? COR.ruim : perdP > 0.03 ? COR.aviso : COR.bom, 0.03))}
-    ${card('4', 'CAC', CAC == null ? '—' : brl(CAC), `custo por cliente novo · ${novos} novo${novos === 1 ? '' : 's'} · expositores ${brl(custoExp)} · bonificação ${brl(custoBonAb)} · ${visProsp} visitas ${brl(custoProsp)}`, CAC == null ? 'nd' : payback <= 3 ? 'ok' : payback <= 6 ? 'at' : 'cr')}
+    ${card('4', 'CAC', CAC == null ? '—' : brl(CAC), `custo por cliente novo · ${novos} novo${novos === 1 ? '' : 's'} · expositores ${brl(custoExp)}${expTxt ? ` (${expTxt})` : ''} · bonificação ${brl(custoBonAb)} · ${visProsp} visitas ${brl(custoProsp)}`, CAC == null ? 'nd' : payback <= 3 ? 'ok' : payback <= 6 ? 'at' : 'cr')}
     ${card('5', 'Payback', payback == null ? '—' : (payback < 1 ? Math.round(payback * 30) + ' dias' : dec(payback) + ' meses'), `margem por cliente ${brl(mMensal)}/mês · LTV 12 meses ${brl(LTV)}`, faixa(ltvCac, 3, 1.5, false), ltvCac ? `<div class="kmeta"><span>LTV ÷ CAC</span><b>${dec(ltvCac)}×</b></div>${barra(ltvCac, Math.max(10, ltvCac), ltvCac >= 3 ? COR.bom : COR.aviso, 3)}` : '')}
     ${card('10', 'Logística', logP == null ? '—' : pctS(logP), `${brl(custoLog)} · ~${Math.round(km)} km × ${brl(P.custo_km)}/km + frete ${brl(freteNosso)}${paradas ? ` · ${brl(custoLog / paradas)} por parada` : ''}`, faixa(logP, 0.08, 0.12), barra(logP || 0, 0.25, logP > 0.12 ? COR.ruim : logP > 0.08 ? COR.aviso : COR.bom, 0.08))}
    </div>

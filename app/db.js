@@ -100,6 +100,8 @@ export async function registrarAbertura({ pdvId, patch, ...resto }) {
 export async function registrarReposicao(dados) { return gravarContagemEPedido({ tipoVisita: 'reposicao', ...dados }); }
 export async function salvarRegra(chave, valor) { return ok(await sb.from('regras').upsert({ chave, valor, atualizado_em: new Date().toISOString() })); }
 export async function criarRegiao(obj) { return ok(await sb.from('regioes').upsert(obj, { onConflict: 'codigo', ignoreDuplicates: true }).select()); }
+export async function salvarExpositor(id, patch) { return ok(await sb.from('expositores').update(patch).eq('id', id).select().single()); }
+export async function criarExpositor(e) { return ok(await sb.from('expositores').insert(e).select().single()); }
 export async function salvarRegiao(codigo, patch) { return ok(await sb.from('regioes').update(patch).eq('codigo', codigo)); }
 
 /* ---------- contatos ---------- */
