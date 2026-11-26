@@ -3224,7 +3224,7 @@ async function telaFinPainel() {
   // 9. ponto de equilíbrio: custo fixo do mês (contas a pagar marcadas como fixo) ÷ margem de contribuição %
   const mRef = new Date(+fim - DIA), mIni = isoDe(new Date(mRef.getFullYear(), mRef.getMonth(), 1)), mFim = isoDe(new Date(mRef.getFullYear(), mRef.getMonth() + 1, 0));
   const fixoMes = pag.filter(x => classeConta(x) === 'fixo' && +x.situacao !== 4 && x.vencimento >= mIni && x.vencimento <= mFim).reduce((s, x) => s + val(x.valor), 0);
-  const margemContrib = N.fat ? (N.margem - perdas - freteNosso) / N.fat : null, PE = margemContrib > 0 ? fixoMes / margemContrib : null;
+  const margemContrib = N.fat ? (N.margem - perdas - freteNosso) / N.fat : null, PE = fixoMes > 0 && margemContrib > 0 ? fixoMes / margemContrib : null;
   const fatMes = numeros(D.pedidos.filter(o => no(o, new Date(mRef.getFullYear(), mRef.getMonth(), 1), new Date(mRef.getFullYear(), mRef.getMonth() + 1, 1)))).fat;
   // 10. custo logístico: km das rotas (linha reta × 1,35, saindo e voltando da base) × custo do km + frete por nossa conta
   const bR = baseRota(), km2p = (a, b) => { const R = 6371, dLa = (b.lat - a.lat) * Math.PI / 180, dLo = (b.lng - a.lng) * Math.PI / 180, x = Math.sin(dLa / 2) ** 2 + Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.sin(dLo / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(x)); };
