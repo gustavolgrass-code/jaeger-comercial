@@ -170,7 +170,7 @@ function telaPrimeiroAcesso(user) {
 const ABAS = {
   comercial: [['mapa', 'Mapa'], ['funil', 'Funil'], ['agenda', 'Agenda'], ['carteira', 'Negócios'], ['contatos', 'Contatos'], ['abertura', 'Cadastrar venda'], ['painel', 'Painel'], ['uploads', 'Uploads'], ['regras', 'Regras e metas'], ['pedidos', 'Pedidos']],
   operacao: [['rota', 'Dia de rota'], ['reposicao', 'Reposição'], ['resumo', 'Resumo do dia'], ['estoque', 'Estoque']],
-  financeiro: [['freceber', 'Contas a receber'], ['fpagar', 'Contas a pagar'], ['fcaixa', 'Caixas e bancos']] };
+  financeiro: [['fpainel', 'Painel financeiro'], ['freceber', 'Contas a receber'], ['fpagar', 'Contas a pagar'], ['fcaixa', 'Caixas e bancos']] };
 let lado = 'comercial';
 // menu lateral: grupos (CRM, Reposição, Ajustes) com ícones; recolhe para só os ícones e lembra a escolha
 const ICO = {
@@ -189,11 +189,11 @@ const ICO = {
   menu: '<path d="M3 6h18M3 12h18M3 18h18"/>', lua: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>',
   sol: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   recolher: '<rect x="3" y="3" width="18" height="18"/><path d="M9 3v18M15 9l-3 3 3 3"/>', abrir: '<rect x="3" y="3" width="18" height="18"/><path d="M9 3v18M13 9l3 3-3 3"/>',
-  seta: '<path d="m6 9 6 6 6-6"/>', pedidos: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 8h6M9 12h6"/>', estoque: '<path d="M3 21V9l9-6 9 6v12"/><path d="M7 21v-8h10v8M7 17h10"/>', freceber: '<path d="M12 3v14M6 11l6 6 6-6M4 21h16"/>', fpagar: '<path d="M12 17V3M6 9l6-6 6 6M4 21h16"/>', fcaixa: '<rect x="3" y="6" width="18" height="13"/><path d="M3 10h18M7 15h4"/>', lupa: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>', filtro: '<path d="M4 6h16M7 12h10M10 18h4"/>',
+  seta: '<path d="m6 9 6 6 6-6"/>', pedidos: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 8h6M9 12h6"/>', estoque: '<path d="M3 21V9l9-6 9 6v12"/><path d="M7 21v-8h10v8M7 17h10"/>', freceber: '<path d="M12 3v14M6 11l6 6 6-6M4 21h16"/>', fpainel: '<path d="M3 3v18h18"/><path d="M7 14l3-3 3 3 5-6"/><circle cx="18" cy="8" r="1.5"/>', fpagar: '<path d="M12 17V3M6 9l6-6 6 6M4 21h16"/>', fcaixa: '<rect x="3" y="6" width="18" height="13"/><path d="M3 10h18M7 15h4"/>', lupa: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>', filtro: '<path d="M4 6h16M7 12h10M10 18h4"/>',
   pino: '<path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.5"/>' };
 const ico = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" stroke-linejoin="miter">${ICO[k] || ''}</svg>`;
 const MENU = [{ g: 'CRM', lado: 'comercial', it: ['funil', 'mapa', 'agenda', 'carteira', 'contatos', 'abertura', 'pedidos', 'painel', 'uploads'] },
-  { g: 'Reposição', lado: 'operacao', it: ['rota', 'reposicao', 'resumo'] }, { g: 'Estoque', lado: 'operacao', it: ['estoque'] }, { g: 'Financeiro', lado: 'comercial', it: ['freceber', 'fpagar', 'fcaixa'] }, { g: 'Ajustes', lado: 'comercial', it: ['regras'] }];
+  { g: 'Reposição', lado: 'operacao', it: ['rota', 'reposicao', 'resumo'] }, { g: 'Estoque', lado: 'operacao', it: ['estoque'] }, { g: 'Financeiro', lado: 'comercial', it: ['fpainel', 'freceber', 'fpagar', 'fcaixa'] }, { g: 'Ajustes', lado: 'comercial', it: ['regras'] }];
 const nomeAba = k => (Object.values(ABAS).flat().find(([x]) => x === k) || [, k])[1];
 const grupoDe = k => MENU.find(m => m.it.includes(k));
 const guardar = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { } };
@@ -238,7 +238,7 @@ function irPara(a, semHist) {
   else if (!semHist && S.aba && !mesmo) { S.hist.push({ aba: S.aba, ...(S.histEnt || {}) }); if (S.hist.length > 40) S.hist.shift(); }
   S.aba = a; S.histEnt = ctx;
   pintarMenu();
-  ({ agenda: telaAgenda, perfil: telaPerfil, contato: telaContato, contatos: telaContatos, uploads: telaUploads, mapa: telaMapa, funil: telaFunil, carteira: telaCarteira, abertura: telaAbertura, painel: telaPainel, regras: telaRegras, rota: telaRota, reposicao: telaReposicao, pedcli: telaPedidosCliente, resumo: telaResumo, carteiramet: telaCarteiraMet, estoque: telaEstoque, pedidos: telaPedidos, freceber: () => telaContas('receber'), fpagar: () => telaContas('pagar'), fcaixa: telaCaixas })[a]();
+  ({ agenda: telaAgenda, perfil: telaPerfil, contato: telaContato, contatos: telaContatos, uploads: telaUploads, mapa: telaMapa, funil: telaFunil, carteira: telaCarteira, abertura: telaAbertura, painel: telaPainel, regras: telaRegras, rota: telaRota, reposicao: telaReposicao, pedcli: telaPedidosCliente, resumo: telaResumo, carteiramet: telaCarteiraMet, estoque: telaEstoque, pedidos: telaPedidos, fpainel: telaFinPainel, freceber: () => telaContas('receber'), fpagar: () => telaContas('pagar'), fcaixa: telaCaixas })[a]();
 }
 window.irPara = irPara;
 // texto do botão Voltar: diz para onde vai (ex.: "← Almeida 68" quando veio do perfil do negócio)
@@ -3154,6 +3154,106 @@ async function telaPedidos() {
 }
 
 /* =================== financeiro (integrado ao Bling) =================== */
+/* =================== painel financeiro =================== */
+// 10 métricas: margem bruta, margem por cliente, perdas, CAC, payback/LTV, prazo de recebimento e mix, inadimplência, fluxo de caixa 30/60/90, ponto de equilíbrio e custo logístico
+const finPrem = () => ({ custo_km: 1.2, custo_visita: 15, ...(S.base.regras.fin_premissas || {}) });
+async function telaFinPainel() {
+  const F = S.fpF = S.fpF || { per: 'mes' }, h0 = new Date(); h0.setHours(0, 0, 0, 0);
+  const ini = F.per === 'mes' ? new Date(h0.getFullYear(), h0.getMonth(), 1) : F.per === 'mesant' ? new Date(h0.getFullYear(), h0.getMonth() - 1, 1) : F.per === '3m' ? new Date(h0.getFullYear(), h0.getMonth() - 3, h0.getDate() + 1) : new Date((F.de || hojeISO()) + 'T00:00');
+  const fim = F.per === 'mesant' ? new Date(h0.getFullYear(), h0.getMonth(), 1) : F.per === 'custom' ? new Date(new Date((F.ate || hojeISO()) + 'T00:00').getTime() + DIA) : new Date(+h0 + DIA);
+  const len = +fim - +ini, iniA = new Date(+ini - len), dias = Math.max(1, Math.round(len / DIA));
+  $('#main').innerHTML = '<section class="view on"><div class="dash pnl"><div class="loading">Calculando o financeiro (pedidos, contagens, rotas e Bling)…</div></div></section>';
+  let D, peds, rec = [], pag = [], blingOk = true;
+  try {
+    if (!PV.dados || Date.now() - (PV.t || 0) > 10 * 60000) { PV.dados = prepararPainel(await db.painelDados()); PV.t = Date.now(); } D = PV.dados;
+    peds = await db.listarPedidos(new Date(+iniA - 120 * DIA).toISOString(), new Date(Date.now() + DIA).toISOString());
+    [rec, pag] = await Promise.all([finLer('/contas/receber', 20), finLer('/contas/pagar', 20)]).catch(() => { blingOk = false; return [[], []]; });
+  } catch (e) { return erro(e); }
+  const P = finPrem(), prod = D.prod, custoP = id => +(prod[id]?.custo || 0), hojeS = hojeISO();
+  const no = (o, a, b) => o.data >= a && o.data < b && o.valor > 0;
+  const pp = D.pedidos.filter(o => no(o, ini, fim)), ppA = D.pedidos.filter(o => no(o, iniA, ini));
+  const N = numeros(pp), NA = numeros(ppA);
+  const pedInfo = Object.fromEntries(peds.map(o => [o.id, o]));
+  // perdas: trocas (das contagens) e bonificações, a preço de custo
+  const contP = (D.contagens || []).filter(c => c.visitas && new Date(c.visitas.em) >= ini && new Date(c.visitas.em) < fim);
+  const trocaCli = {}; let custoTroca = 0; contP.forEach(c => { const v = (+c.troca || 0) * custoP(c.produto_id); custoTroca += v; trocaCli[c.visitas.pdv_id] = (trocaCli[c.visitas.pdv_id] || 0) + v; });
+  const idsP = new Set(pp.map(o => o.id)), bonCli = {}; let custoBon = 0, custoBonAb = 0;
+  (D.pitens || []).forEach(i => { if (!idsP.has(i.pedido_id) || !+i.bonificado) return; const o = D.pedidos.find(x => x.id === i.pedido_id), v = +i.bonificado * custoP(i.produto_id); custoBon += v; bonCli[o.pdv_id] = (bonCli[o.pdv_id] || 0) + v; if (o.tipo === 'abertura') custoBonAb += v; });
+  const freteCli = {}; let freteNosso = 0, freteTot = 0; pp.forEach(o => { const x = pedInfo[o.id]; if (!x?.frete) return; freteTot += +x.frete; if (!x.frete_cobrado) { freteNosso += +x.frete; freteCli[o.pdv_id] = (freteCli[o.pdv_id] || 0) + +x.frete; } });
+  const perdas = custoTroca + custoBon;
+  // 2. margem de contribuição por cliente
+  const mc = {}; pp.forEach(o => { const m = mc[o.pdv_id] = mc[o.pdv_id] || { fat: 0, cmv: 0 }; m.fat += o.valor; m.cmv += o.custo; });
+  const MC = Object.entries(mc).map(([id, m]) => { const v = m.fat - m.cmv - (trocaCli[id] || 0) - (bonCli[id] || 0) - (freteCli[id] || 0); return { id, nome: S.pdvs.find(p => p.id === id)?.nome || 'Cliente', fat: m.fat, v, p: m.fat ? v / m.fat : 0 }; }).sort((a, b) => b.v - a.v);
+  // 4. CAC: expositor deixado + bonificação da abertura + visitas de prospecção, por cliente novo
+  const B = base(D, ini, fim, iniA), novos = B.novos || 0;
+  const hist = S.base.regras.expositores_hist || {}, custoExp = Object.values(hist).flat().filter(h => new Date(h.em) >= ini && new Date(h.em) < fim).reduce((a, h) => a + +(S.base.expositores.find(x => x.id === h.expositor_id)?.custo || 0), 0);
+  const visProsp = (D.visitas || []).filter(v => v.tipo === 'prospeccao' && new Date(v.em) >= ini && new Date(v.em) < fim).length, custoProsp = visProsp * P.custo_visita;
+  const cacTot = custoExp + custoBonAb + custoProsp, CAC = novos ? cacTot / novos : null;
+  // 5. payback e LTV: margem mensal média por cliente que comprou nos últimos 90 dias
+  const u90 = D.pedidos.filter(o => o.data >= new Date(Date.now() - 90 * DIA) && o.valor > 0), cl90 = new Set(u90.map(o => o.pdv_id)).size;
+  const mMensal = cl90 ? u90.reduce((a, o) => a + o.valor - o.custo, 0) / cl90 / 3 : 0, payback = CAC != null && mMensal > 0 ? CAC / mMensal : null, LTV = mMensal * 12;
+  // 6. prazo médio de recebimento e mix
+  let somaPz = 0, somaV = 0; const mix = {}; pp.forEach(o => { const x = pedInfo[o.id]; if (!x) return; const parc = Array.isArray(x.pagamentos) && x.pagamentos.length ? x.pagamentos : [{ forma: (x.condicao || 'Outro').replace(/^\d+×\s*/, ''), valor: o.valor, vencimento: x.vencimento }];
+    parc.forEach(pc => { const v = +pc.valor || 0, d = pc.vencimento ? Math.max(0, Math.round((new Date(pc.vencimento + 'T12:00') - new Date(isoDe(o.data) + 'T12:00')) / DIA)) : 0; somaPz += d * v; somaV += v; const f = /boleto/i.test(pc.forma) ? 'Boleto' : /pix/i.test(pc.forma) ? 'Pix' : /cart/i.test(pc.forma) ? 'Cartão' : /dinheiro/i.test(pc.forma) ? 'Dinheiro' : 'Outro'; mix[f] = (mix[f] || 0) + v; }); });
+  const PMR = somaV ? somaPz / somaV : null;
+  // 7. inadimplência (Bling) e 8. fluxo de caixa
+  const aberto = x => [1, 3].includes(+x.situacao), recA = rec.filter(aberto), pagA = pag.filter(aberto), atraso = x => Math.floor((new Date(hojeS) - new Date(x.vencimento)) / DIA);
+  const venc = recA.filter(x => x.vencimento < hojeS), fx = [['Até 15 dias', 1, 15], ['16 a 30 dias', 16, 30], ['Mais de 30 dias', 31, 99999]].map(([n, a, b]) => { const ls = venc.filter(x => atraso(x) >= a && atraso(x) <= b); return { n, v: ls.reduce((s, x) => s + val(x.valor), 0), q: ls.length }; });
+  const totRec = recA.reduce((s, x) => s + val(x.valor), 0), totVenc = venc.reduce((s, x) => s + val(x.valor), 0);
+  const prev = peds.filter(o => o.bling_id && /em aberto/i.test(o.bling_situacao || '') && !rec.some(x => String(x.origem?.id) === String(o.bling_id)));
+  const janela = (a, b) => { const de = isoDe(new Date(+h0 + a * DIA)), ate = isoDe(new Date(+h0 + b * DIA)); const dentro = v => a === 0 ? v <= ate : v > de && v <= ate;
+    const ent = recA.filter(x => dentro(x.vencimento)).reduce((s, x) => s + val(x.valor), 0) + prev.filter(o => dentro(o.vencimento || hojeS)).reduce((s, o) => s + (+o.valor || 0), 0);
+    const sai = pagA.filter(x => dentro(x.vencimento)).reduce((s, x) => s + val(x.valor), 0); return { ent, sai, saldo: ent - sai }; };
+  const FC = [['Próximos 30 dias', 0, 30], ['31 a 60 dias', 30, 60], ['61 a 90 dias', 60, 90]].map(([n, a, b]) => ({ n, ...janela(a, b) })); let acum = 0; FC.forEach(x => { acum += x.saldo; x.acum = acum; });
+  // 9. ponto de equilíbrio: custo fixo do mês (contas a pagar marcadas como fixo) ÷ margem de contribuição %
+  const mRef = new Date(+fim - DIA), mIni = isoDe(new Date(mRef.getFullYear(), mRef.getMonth(), 1)), mFim = isoDe(new Date(mRef.getFullYear(), mRef.getMonth() + 1, 0));
+  const fixoMes = pag.filter(x => classeConta(x) === 'fixo' && +x.situacao !== 4 && x.vencimento >= mIni && x.vencimento <= mFim).reduce((s, x) => s + val(x.valor), 0);
+  const margemContrib = N.fat ? (N.margem - perdas - freteNosso) / N.fat : null, PE = margemContrib > 0 ? fixoMes / margemContrib : null;
+  const fatMes = numeros(D.pedidos.filter(o => no(o, new Date(mRef.getFullYear(), mRef.getMonth(), 1), new Date(mRef.getFullYear(), mRef.getMonth() + 1, 1)))).fat;
+  // 10. custo logístico: km das rotas (linha reta × 1,35, saindo e voltando da base) × custo do km + frete por nossa conta
+  const bR = baseRota(), km2p = (a, b) => { const R = 6371, dLa = (b.lat - a.lat) * Math.PI / 180, dLo = (b.lng - a.lng) * Math.PI / 180, x = Math.sin(dLa / 2) ** 2 + Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.sin(dLo / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(x)); };
+  let km = 0, paradas = 0; (D.rotas || []).filter(r => r.data && new Date(r.data + 'T12:00') >= ini && new Date(r.data + 'T12:00') < fim && new Date(r.data + 'T12:00') <= new Date()).forEach(r => { const pts = (r.paradas || []).map(s => S.pdvs.find(p => p.id === s.id)).filter(p => p?.lat); if (!pts.length) return; paradas += pts.length; let a = bR; pts.forEach(p => { km += km2p(a, p) * 1.35; a = p; }); km += km2p(a, bR) * 1.35; });
+  const custoLog = km * P.custo_km + freteNosso, logP = N.fat ? custoLog / N.fat : null;
+  // ---- desenho
+  const var_ = (a, b) => b ? `<small class="sub ${a >= b ? 'up' : 'dn'}">${a >= b ? '▲' : '▼'} ${Math.abs(Math.round((a / b - 1) * 100))}% vs período anterior</small>` : '';
+  const kp = (n, v, sub, extra = '') => `<div class="kpi"><small>${n}</small><b>${v}</b>${sub ? `<small class="sub">${sub}</small>` : ''}${extra}</div>`;
+  const totMix = Object.values(mix).reduce((a, b) => a + b, 0);
+  $('#main').innerHTML = `<section class="view on"><div class="dash pnl">
+   <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end"><div><label class="lb">Período</label><select id="fpPer">${[['mes', 'Mês'], ['mesant', 'Mês passado'], ['3m', 'Últimos 3 meses'], ['custom', 'Personalizado']].map(([k, n]) => `<option value="${k}" ${F.per === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+    ${F.per === 'custom' ? `<div><label class="lb">&nbsp;</label><button class="btn" id="fpCal">📅 ${dstr((F.de || hojeISO()) + 'T12:00')} – ${dstr((F.ate || hojeISO()) + 'T12:00')}</button></div>` : ''}
+    <small style="color:var(--mute);margin-left:4px">${ini.toLocaleDateString('pt-BR')} a ${new Date(+fim - DIA).toLocaleDateString('pt-BR')} · comparado com os ${dias} dias anteriores</small>
+    <div style="margin-left:auto" class="row"><label class="lb" style="margin:0">Custo do km (R$)</label><input type="number" step="0.05" id="fpKm" value="${P.custo_km}" style="width:70px"><label class="lb" style="margin:0">Custo por visita de prospecção (R$)</label><input type="number" step="1" id="fpVis" value="${P.custo_visita}" style="width:70px"></div></div>
+   ${blingOk ? '' : '<p class="esteira" style="margin:0">⚠️ Não consegui ler o Bling agora: inadimplência, fluxo de caixa e ponto de equilíbrio ficam incompletos.</p>'}
+   <h2 class="psec">Resultado</h2><div class="kpis">
+    ${kp('1 · Margem bruta', brl(N.margem), `${N.margemP == null ? '—' : Math.round(N.margemP * 100) + '%'} de ${brl(N.fat)} faturados`, var_(N.margem, NA.margem))}
+    ${kp('3 · Custo de perdas', N.fat ? Math.round(perdas / N.fat * 1000) / 10 + '%' : '—', `${brl(perdas)}: trocas ${brl(custoTroca)} · bonificação ${brl(custoBon)}`)}
+    ${kp('9 · Ponto de equilíbrio', PE == null ? '—' : brl(PE), fixoMes ? `custo fixo ${brl(fixoMes)} ÷ margem de contribuição ${Math.round(margemContrib * 100)}% · faturado no mês ${brl(fatMes)} (${PE ? Math.round(fatMes / PE * 100) : 0}%)` : 'marque as contas fixas em Contas a pagar (coluna Classe)')}
+    ${kp('10 · Custo logístico', logP == null ? '—' : Math.round(logP * 1000) / 10 + '% das vendas', `${brl(custoLog)}: ~${Math.round(km)} km × ${brl(P.custo_km)} + frete ${brl(freteNosso)}${paradas ? ` · ${brl(custoLog / paradas)} por parada` : ''}`)}</div>
+   <h2 class="psec">Clientes</h2><div class="kpis">
+    ${kp('4 · CAC (custo por cliente novo)', CAC == null ? '—' : brl(CAC), `${novos} cliente${novos === 1 ? '' : 's'} novo${novos === 1 ? '' : 's'} · expositores ${brl(custoExp)} · bonificação de abertura ${brl(custoBonAb)} · ${visProsp} visitas de prospecção ${brl(custoProsp)}`)}
+    ${kp('5 · Payback / LTV ÷ CAC', payback == null ? '—' : (payback < 1 ? Math.round(payback * 30) + ' dias' : dec(payback) + ' meses'), `margem por cliente ${brl(mMensal)}/mês · LTV 12 meses ${brl(LTV)}${CAC ? ' · LTV ÷ CAC ' + dec(LTV / CAC) + '×' : ''}`)}</div>
+   <div class="pgrid"><div class="panel"><h3>2 · Margem de contribuição por cliente</h3><p class="psub">Faturamento − custo do produto − trocas − bonificação − frete por nossa conta</p>
+     <p class="psub" style="margin-top:8px"><b>Mais lucrativos</b></p>${ranking(MC.slice(0, 6).map(x => ({ n: x.nome, v: x.v, c: COR.bom, tip: `${Math.round(x.p * 100)}% de ${brl(x.fat)}` })), 'R$')}
+     ${MC.filter(x => x.v < 0).length ? `<p class="psub" style="margin-top:8px;color:var(--t-bad)"><b>Dando prejuízo</b></p>${ranking(MC.filter(x => x.v < 0).slice(-6).reverse().map(x => ({ n: x.nome, v: -x.v, c: COR.ruim, tip: `fatura ${brl(x.fat)}` })), 'R$')}` : `<p class="psub" style="margin-top:8px">Nenhum cliente com margem negativa no período.</p>`}
+     <p class="psub" style="margin-top:8px"><b>Menor margem</b></p>${ranking(MC.filter(x => x.v >= 0).slice(-5).reverse().map(x => ({ n: x.nome, v: x.v, c: COR.s2, tip: `${Math.round(x.p * 100)}% de ${brl(x.fat)}` })), 'R$')}</div>
+    <div class="panel"><h3>6 · Prazo médio de recebimento e mix</h3><div class="kpis k2">${kp('Prazo médio', PMR == null ? '—' : Math.round(PMR) + ' dias', 'ponderado pelo valor')}${kp('Vendido a prazo', totMix ? Math.round((mix.Boleto || 0) / totMix * 100) + '%' : '—', 'boleto')}</div>
+     ${ranking(Object.entries(mix).sort((a, b) => b[1] - a[1]).map(([n, v]) => ({ n, v: totMix ? v / totMix : 0, c: n === 'Boleto' ? COR.s2 : COR.s1, tip: brl(v) })), '%', { max: 1 })}</div></div>
+   <h2 class="psec">Caixa</h2><div class="pgrid">
+    <div class="panel"><h3>7 · Inadimplência</h3><p class="psub">Contas a receber vencidas no Bling, por tempo de atraso</p><div class="kpis k2">${kp('Vencido', brl(totVenc), totRec ? Math.round(totVenc / totRec * 100) + '% do que há para receber' : '')}${kp('A receber em aberto', brl(totRec), recA.length + ' contas')}</div>
+     ${ranking(fx.map(x => ({ n: x.n + ` (${x.q})`, v: x.v, c: x.n.startsWith('Mais') ? COR.ruim : COR.s2 })), 'R$')}
+     ${venc.length ? `<p class="psub" style="margin-top:8px">Quem está devendo: ${venc.sort((a, b) => a.vencimento < b.vencimento ? -1 : 1).slice(0, 6).map(x => `<b>${esc(nomeContato(x.contato))}</b> ${brl(val(x.valor))} (${atraso(x)} d)`).join(' · ')}</p>` : ''}</div>
+    <div class="panel"><h3>8 · Fluxo de caixa projetado</h3><p class="psub">Entradas: contas a receber + pedidos em aberto ainda sem conta. Saídas: contas a pagar em aberto. Os vencidos entram nos primeiros 30 dias.</p>
+     <table class="dped"><tr><th>Período</th><th style="text-align:right">Entra</th><th style="text-align:right">Sai</th><th style="text-align:right">Saldo</th><th style="text-align:right">Acumulado</th></tr>${FC.map(x => `<tr><td>${x.n}</td><td style="text-align:right;color:var(--t-ok)">${brl(x.ent)}</td><td style="text-align:right;color:var(--t-bad)">${brl(x.sai)}</td><td style="text-align:right"><b>${brl(x.saldo)}</b></td><td style="text-align:right;color:${x.acum < 0 ? 'var(--t-bad)' : 'inherit'}"><b>${brl(x.acum)}</b></td></tr>`).join('')}</table>
+     ${grafBarras('fpFC', FC.map(x => x.n.replace('Próximos ', '')), [{ nome: 'Entra', cor: COR.bom, vals: FC.map(x => x.ent) }, { nome: 'Sai', cor: COR.ruim, vals: FC.map(x => x.sai) }], 'R$', { h: 170 })}${legenda([{ nome: 'Entra', cor: COR.bom }, { nome: 'Sai', cor: COR.ruim }])}</div></div>
+   <small style="color:var(--mute)">Custos dos produtos: cadastro (Regras e metas → Custos de produção). Km das rotas: estimado em linha reta × 1,35 a partir das paradas salvas no Dia de rota. CAC e custo logístico dependem do custo do km e do custo por visita acima.</small>
+  </div></section>`;
+  $('#fpPer').onchange = e => { F.per = e.target.value; if (F.per === 'custom' && !F.de) { F.de = isoDe(new Date(Date.now() - 29 * DIA)); F.ate = hojeISO(); } telaFinPainel(); if (F.per === 'custom') setTimeout(() => $('#fpCal')?.click(), 60); };
+  if ($('#fpCal')) $('#fpCal').onclick = e => { e.stopPropagation(); calendarioFaixa($('#fpCal'), F.de, F.ate, (a, b) => { F.de = a; F.ate = b; telaFinPainel(); }); };
+  const salvarP = async () => { const v = { ...finPrem(), custo_km: +$('#fpKm').value || 0, custo_visita: +$('#fpVis').value || 0 }; try { await db.salvarRegra('fin_premissas', v); S.base.regras.fin_premissas = v; telaFinPainel(); } catch (e) { erro(e); } };
+  $('#fpKm').onchange = salvarP; $('#fpVis').onchange = salvarP;
+  ligarGraficos($('#main section'));
+}
+
 // contas a receber, contas a pagar e caixas e bancos: leitura direto do Bling; criar conta, baixa total e lançamento no caixa gravam lá
 const FIN = { nomes: (() => { try { return JSON.parse(localStorage.getItem('jg-fin-nomes') || '{}'); } catch (e) { return {}; } })() };
 // classe de cada conta a pagar (para o ponto de equilíbrio e a margem): marcada na conta ou no fornecedor (vale para todas dele)

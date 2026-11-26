@@ -174,7 +174,7 @@ export async function painelDados() {
   const [pedidos, bitens, pitens, contagens, visitas, perfis, produtos] = await Promise.all([
     tudo(() => sb.from('pedidos').select('id, pdv_id, criado_em, valor, unidades, criado_por, tipo, bling_id').order('criado_em')),
     tudo(() => sb.from('bling_itens').select('pedido_id, codigo, descricao, quantidade, valor, desconto')).catch(() => []),
-    tudo(() => sb.from('pedido_itens').select('pedido_id, produto_id, quantidade, preco_unit')),
+    tudo(() => sb.from('pedido_itens').select('pedido_id, produto_id, quantidade, preco_unit, bonificado')),
     tudo(() => sb.from('contagens').select('produto_id, troca, encontrado, deixado_anterior, sellout, reposto, visita_id, visitas(em, pdv_id, usuario_id)')).catch(() => []),
     tudo(() => sb.from('visitas').select('id, pdv_id, em, tipo, usuario_id, resultado')),
     sb.from('perfis').select('id, nome, papel').then(ok),
@@ -299,7 +299,7 @@ export async function apagarMovEstoque(id) { return ok(await sb.from('estoque_mo
 export async function perfisLista() { return ok(await sb.from('perfis').select('id, nome, papel').order('nome')); }
 // aba Pedidos: todos os pedidos (do app e do Bling) de um período, com o nome do cliente
 export async function listarPedidos(de, ate) {
-  return tudo(() => sb.from('pedidos').select('id, numero, criado_em, valor, unidades, tipo, condicao, vencimento, bling_id, bling_pedido_id, bling_status, bling_situacao, bling_erro, criado_por, pdv_id, visita_id, pdvs(nome, bairro, regiao)').gte('criado_em', de).lt('criado_em', ate).order('criado_em', { ascending: false }));
+  return tudo(() => sb.from('pedidos').select('*, pdvs(nome, bairro, regiao)').gte('criado_em', de).lt('criado_em', ate).order('criado_em', { ascending: false }));
 }
 // edita um pedido do app sem excluir: itens, preços, bonificação e pagamento; acerta a contagem da visita e a baixa do estoque
 export async function editarPedido(pedidoId, { itens, condicao, vencimento }) {
