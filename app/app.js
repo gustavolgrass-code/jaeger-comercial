@@ -4446,10 +4446,10 @@ async function baixarNoBling(pedidoId) {
 }
 function blocoFinPedido(o) {
   if (!o.bling_id) return `<div class="pfin"><button class="btn" id="vpPdf">📄 Pedido em PDF</button></div>`;
-  const F = pedFin(o.id), n = F.nfe, temBol = /boleto/i.test(o.condicao || ''), bols = (F.contas || []).filter(c => c.linkBoleto);
+  const F = pedFin(o.id), n0 = F.nfe, n = n0 && ![4, 2].includes(+n0.situacao) ? n0 : null, temBol = /boleto/i.test(o.condicao || ''), bols = (F.contas || []).filter(c => c.linkBoleto);
   return `<div class="pfin"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
     <button class="btn" id="vpPdf">📄 Pedido em PDF</button>
-    ${n ? `<span class="fst" style="--c:${nfeOk(n) ? COR.bom : COR.aviso}">NF-e ${esc(n.numero || '')} · ${NFE_SIT[n.situacao] || 'enviada'}</span>${n.linkDanfe || n.linkPDF ? `<a class="btn" href="${esc(n.linkDanfe || n.linkPDF)}" target="_blank" rel="noopener">📄 DANFE</a>` : ''}${!nfeOk(n) ? '<button class="btn" id="vpNfe">🧾 Autorizar a nota de novo</button>' : ''}` : '<button class="btn" id="vpNfe">🧾 Gerar nota fiscal</button>'}
+    ${n ? `<span class="fst" style="--c:${nfeOk(n) ? COR.bom : COR.aviso}">NF-e ${esc(n.numero || '')} · ${NFE_SIT[n.situacao] || 'enviada'}</span>${nfeOk(n) && (n.linkDanfe || n.linkPDF) ? `<a class="btn" href="${esc(n.linkDanfe || n.linkPDF)}" target="_blank" rel="noopener">📄 DANFE</a>` : ''}${!nfeOk(n) ? '<button class="btn" id="vpNfe">🧾 Emitir a nota de novo</button>' : ''}` : `<button class="btn" id="vpNfe">🧾 Gerar nota fiscal</button>${n0 ? `<small style="color:var(--mute)">tentativa anterior (nº ${esc(n0.numero || '')}) ${NFE_SIT[n0.situacao]?.toLowerCase() || ''}</small>` : ''}`}
     ${temBol ? (bols.length ? bols.map((c, i) => `<a class="btn" href="${esc(c.linkBoleto)}" target="_blank" rel="noopener">💳 Boleto${bols.length > 1 ? ' ' + (i + 1) : ''} · ${brl(c.valor)}</a><button class="mini" data-cpy="${esc(c.linkBoleto)}">copiar link</button>`).join('') : '<button class="btn" id="vpBol">💳 Gerar boleto</button>') : ''}
     ${F.pago ? `<span class="fst" style="--c:${COR.bom}">Pago · baixado no Bling${F.pago_em ? ' em ' + dstr(F.pago_em + 'T12:00') : ''}</span>` : /^(pix|dinheiro|cart)/i.test(o.condicao || '') || (o.condicao || '').includes('+') ? '<button class="btn" id="vpPago">✅ Marcar como pago</button>' : ''}
    </div>${F.pago_erro ? `<small style="color:var(--t-bad);display:block;margin-top:6px">Pagamento não baixado no Bling: ${esc(F.pago_erro)}</small>` : ''}${n?.erro ? `<small style="color:var(--t-bad);display:block;margin-top:6px">${esc(n.erro)}</small>` : ''}</div>`;
@@ -4457,13 +4457,17 @@ function blocoFinPedido(o) {
 function ligarFinPedido(o, p) {
   const volta = () => verPedido(o.id, p);
   if ($('#vpPdf')) $('#vpPdf').onclick = e => baixarPedidoPDF(o.id, p, e.currentTarget);
-  if ($('#vpNfe')) $('#vpNfe').onclick = () => { const n = pedFin(o.id).nfe;
-    modal(`<h3>${n ? 'Autorizar a nota de novo?' : 'Gerar a nota fiscal deste pedido?'}</h3><p>${esc(p.nome)} · pedido ${esc(o.bling_pedido_id || o.numero || '')} · <b>${brl(o.valor)}</b></p><p style="color:var(--soft)">O Bling cria a NF-e com os dados do pedido e transmite para a SEFAZ. Nota autorizada não se desfaz pelo app: só cancelando no Bling.</p>
-     <div class="row" style="justify-content:flex-end;gap:8px"><button class="btn" id="nfNao">Voltar</button><button class="btn pri" id="nfSim">${n ? 'Autorizar' : 'Gerar e autorizar'}</button></div>`);
+  if ($('#vpNfe')) $('#vpNfe').onclick = async () => { const n = pedFin(o.id).nfe, reusa = n && !nfeOk(n) ? n.id : null;
+    modal('<div class="loading">Buscando o número da próxima nota…</div>');
+    let px = null; try { px = await db.bling('nfe_proximo', n?.serie != null ? { serie: n.serie } : {}); } catch (e) { }
+    modal(`<h3>Emitir a nota fiscal deste pedido?</h3><p>${esc(p.nome)} · pedido ${esc(o.bling_pedido_id || o.numero || '')} · <b>${brl(o.valor)}</b></p>
+     <label class="lb">Número da nota</label><div class="row" style="gap:8px;align-items:center"><input id="nfNum" type="number" min="1" value="${px?.numero || ''}" style="width:130px"><small style="color:var(--mute)">${px ? `última emitida: ${String(px.ultimo).padStart(6, '0')}${px.serie != null ? ' · série ' + px.serie : ''}` : 'não consegui ler a última nota: confira no Bling'}</small></div>
+     <p style="color:var(--soft)">O Bling ${reusa ? 'reaproveita a nota rejeitada com este número' : 'cria a NF-e com os dados do pedido'} e transmite para a SEFAZ. Nota autorizada não se desfaz pelo app: só cancelando no Bling.</p>
+     <div class="row" style="justify-content:flex-end;gap:8px"><button class="btn" id="nfNao">Voltar</button><button class="btn pri" id="nfSim">Emitir</button></div>`);
     $('#nfNao').onclick = volta;
-    $('#nfSim').onclick = async () => { $('#nfSim').disabled = true; $('#nfSim').textContent = 'Falando com o Bling…';
-      try { const r = await db.bling('gerar_nfe', { pedido_id: o.id, ...(n?.id ? { nfe_id: n.id } : {}) }); await salvarPedFin(o.id, { nfe: r }); toast(nfeOk(r) ? `NF-e ${r.numero} autorizada` : `Nota ${r.numero || ''} criada: ${NFE_SIT[r.situacao] || 'confira no Bling'}`); }
-      catch (e) { toast('Nota não gerada: ' + msgBling(e)); await salvarPedFin(o.id, { nfe: { ...(n || {}), erro: msgBling(e).slice(0, 400) } }); }
+    $('#nfSim').onclick = async () => { const num = +$('#nfNum').value; if (!(num > 0)) return toast('Informe o número da nota'); $('#nfSim').disabled = true; $('#nfSim').textContent = 'Falando com o Bling…';
+      try { const r = await db.bling('gerar_nfe', { pedido_id: o.id, numero: num, ...(reusa ? { nfe_id: reusa } : {}) }); await salvarPedFin(o.id, { nfe: r }); toast(nfeOk(r) ? `NF-e ${r.numero} autorizada` : `Nota ${r.numero || ''}: ${NFE_SIT[r.situacao] || 'confira no Bling'}`); }
+      catch (e) { toast('Nota não emitida: ' + msgBling(e)); await salvarPedFin(o.id, { nfe: { ...(n || {}), erro: msgBling(e).slice(0, 400) } }); }
       volta(); }; };
   if ($('#vpBol')) $('#vpBol').onclick = async () => { $('#vpBol').disabled = true; $('#vpBol').textContent = 'Gerando…';
     try { const r = await db.bling('contas_pedido', { pedido_id: o.id }); await salvarPedFin(o.id, { contas: r.contas }); const b = (r.contas || []).filter(c => c.linkBoleto);
