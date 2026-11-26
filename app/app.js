@@ -1164,7 +1164,7 @@ function telaAbertura() {
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
    <div style="position:relative"><label class="lb">Cliente</label><input id="oBusca" autocomplete="off" placeholder="Digite o nome, razão social ou bairro…" value="${p ? esc(p.nome) + ' · ' + etapa(p.etapa).n : ''}" style="width:100%"><div id="oSug" class="sugs"></div></div>
    ${jaCliente ? `<div style="align-self:end;color:var(--soft);font-size:13px">Já é cliente (${etapa(p.etapa).n}): lança só o pedido, sem mexer na etapa nem no expositor.</div><div style="display:none">` : '<div style="display:contents">'}
-   <div><label class="lb">Expositor</label><select id="oExp" style="width:100%">${ex.map(e => `<option value="${e.id}">${esc(e.nome)} · ${e.capacidade} un.</option>`).join('')}</select></div>
+   <div><label class="lb">Expositor</label><select id="oExp" style="width:100%">${ex.map(e => `<option value="${e.id}">${esc(e.nome)} · ${e.capacidade} un.</option>`).join('')}<option value="">Sem expositor</option></select></div>
    <div><label class="lb">Pedido mínimo combinado (R$)</label><input id="oMin" type="number" step="10" value="150" style="width:100%"></div>
    <div><label class="lb">Repor a cada</label><select id="oCad" style="width:100%"><option value="">${cadPadrao().avaliacao || 7} dias (padrão da avaliação)</option><option value="10">10 dias</option><option value="14">14 dias</option></select></div></div></div>
   <h3 style="margin:16px 0 6px">Pagamento</h3><div class="row" style="flex-wrap:wrap;gap:14px;align-items:flex-end"><div class="pay" style="margin:0">${FORMAS.map((c, i) => `<label><input type="radio" name="oc" value="${c}" ${i === 0 ? 'checked' : ''}> ${c}</label>`).join('')}</div>
@@ -1244,7 +1244,7 @@ function telaAbertura() {
   if (p && S.prefillVenda?.pdv === p.id) { const q = S.prefillVenda.q; S.prefillVenda = null; document.querySelectorAll('.oq').forEach(i => i.value = q[i.dataset.p] || 0); calc(); toast('Itens do pedido excluído já preenchidos: corrija e lance de novo'); }
   // venda guardada para entrega: volta preenchida (itens, preços, pagamento); ao lançar, sai da rota
   const encV = p && encVenda(p.id);
-  if (encV) { if (encV.exp) $('#oExp').value = encV.exp; fill(); Object.entries(encV.precos || {}).forEach(([pid, v]) => { const o = document.querySelector(`.opr[data-p="${pid}"]`); if (o) o.value = v; });
+  if (encV) { $('#oExp').value = encV.exp || ''; fill(); Object.entries(encV.precos || {}).forEach(([pid, v]) => { const o = document.querySelector(`.opr[data-p="${pid}"]`); if (o) o.value = v; });
     document.querySelectorAll('.olp').forEach(i => { const o = document.querySelector(`.opr[data-linha="${i.dataset.linha}"]`); if (o) i.value = (+o.value).toFixed(2); });
     document.querySelectorAll('.oq').forEach(i => i.value = encV.q?.[i.dataset.p] || 0);
     const r = document.querySelector(`input[name=oc][value="${encV.forma}"]`); if (r) r.checked = true; if (encV.vencimento) $('#oVenc').value = encV.vencimento; if (encV.min) $('#oMin').value = encV.min;
@@ -1267,7 +1267,7 @@ function telaAbertura() {
     if (entO.on()) { const e = entO.ler(); if (!e.data) return toast('Escolha a data da entrega');
       const q = {}, precos = {}; itens.forEach(i => { if (i.quantidade) q[i.produto_id] = i.quantidade; precos[i.produto_id] = i.preco_unit; });
       $('#oSave').disabled = true;
-      try { await salvarEncomenda(p.id, { tipo: 'venda', q, precos, forma: div ? f1 : c, vencimento: venc, exp: +$('#oExp').value, min: +$('#oMin').value || null, ...e });
+      try { await salvarEncomenda(p.id, { tipo: 'venda', q, precos, forma: div ? f1 : c, vencimento: venc, exp: $('#oExp').value ? +$('#oExp').value : null, min: +$('#oMin').value || null, ...e });
         toast(`📦 Venda para entrega salva para ${dstr(e.data + 'T12:00')}: entra na rota desse dia`); S.abPdv = null; const volta = S.vendaVolta; S.vendaVolta = null;
         if (volta?.aba === 'perfil') abrirPerfil(p.id); else if (volta?.aba === 'mapa') { S.sel = p.id; irPara('mapa'); } else if (volta?.aba === 'rota') irPara('rota'); else telaAbertura(); } catch (er) { erro(er); $('#oSave').disabled = false; } return; }
     $('#oSave').disabled = true;
@@ -1278,8 +1278,8 @@ function telaAbertura() {
         contagens: itens.filter(i => i.quantidade).map(i => ({ produto_id: i.produto_id, deixado_anterior: 0, encontrado: 0, troca: 0, reposto: i.quantidade })),
         pedido: { tipo: 'abertura', condicao: c, unidades: t.un, valor: t.tot, pago_na_hora: c === 'Dinheiro', vencimento: venc, ...pagExtra },
         itens,
-        patch: { etapa: 'avaliacao', avaliacao_inicio: hoje.toISOString().slice(0, 10), expositor_id: +$('#oExp').value, condicao: div ? f1 : c, pedido_minimo: +$('#oMin').value || 150, cadencia_dias: $('#oCad').value ? +$('#oCad').value : null } });
-      if (!jaCliente) registrarExpositor(p.id, +$('#oExp').value, 'primeira venda');
+        patch: { etapa: 'avaliacao', avaliacao_inicio: hoje.toISOString().slice(0, 10), expositor_id: $('#oExp').value ? +$('#oExp').value : null, condicao: div ? f1 : c, pedido_minimo: +$('#oMin').value || 150, cadencia_dias: $('#oCad').value ? +$('#oCad').value : null } });
+      if (!jaCliente && $('#oExp').value) registrarExpositor(p.id, +$('#oExp').value, 'primeira venda');
       if (encVenda(p.id)) await apagarEncomenda(p.id);
       await atualizarUm(p.id); const n = S.pdvs.find(x => x.id === p.id);
       toast(jaCliente ? `Venda lançada para ${p.nome}.` : `Venda lançada para ${p.nome}. Primeira reposição em ${dstr(n.proxima_reposicao)}.`);
