@@ -289,3 +289,24 @@ export async function perfisLista() { return ok(await sb.from('perfis').select('
 export async function listarPedidos(de, ate) {
   return tudo(() => sb.from('pedidos').select('id, numero, criado_em, valor, unidades, tipo, condicao, vencimento, bling_id, bling_pedido_id, bling_status, bling_situacao, bling_erro, criado_por, pdv_id, visita_id, pdvs(nome, bairro, regiao)').gte('criado_em', de).lt('criado_em', ate).order('criado_em', { ascending: false }));
 }
+// edita um pedido do app sem excluir: itens, preços, bonificação e pagamento; acerta a contagem da visita e a baixa do estoque
+export async function editarPedido(pedidoId, { itens, condicao, vencimento }) {
+  const o = ok(await sb.from('pedidos').select('id, visita_id, criado_por').eq('id', pedidoId).single());
+  const antes = ok(await sb.from('pedido_itens').select('produto_id, quantidade, bonificado').eq('pedido_id', pedidoId));
+  const novos = itens.filter(i => i.quantidade > 0 || i.bonificado > 0);
+  ok(await sb.from('pedido_itens').delete().eq('pedido_id', pedidoId));
+  if (novos.length) ok(await sb.from('pedido_itens').insert(novos.map(i => ({ ...i, pedido_id: pedidoId }))));
+  const valor = Math.round(novos.reduce((a, i) => a + i.quantidade * i.preco_unit, 0) * 100) / 100, unidades = novos.reduce((a, i) => a + i.quantidade, 0);
+  ok(await sb.from('pedidos').update({ valor, unidades, condicao, vencimento: vencimento || null, pagamentos: null }).eq('id', pedidoId));
+  if (o.visita_id) {
+    const cs = ok(await sb.from('contagens').select('produto_id, reposto, deixado_agora').eq('visita_id', o.visita_id));
+    for (const c of cs) { const a = antes.find(x => x.produto_id === c.produto_id), n = novos.find(x => x.produto_id === c.produto_id);
+      const d = ((n?.quantidade || 0) + (n?.bonificado || 0)) - ((a?.quantidade || 0) + (a?.bonificado || 0));
+      if (d) await sb.from('contagens').update({ reposto: Math.max(0, (+c.reposto || 0) + d) }).eq('visita_id', o.visita_id).eq('produto_id', c.produto_id); }
+  }
+  try { const refs = ['pedido:' + pedidoId, ...(o.visita_id ? ['visita:' + o.visita_id] : [])], ref = refs[refs.length - 1];
+    await sb.from('estoque_mov').delete().in('ref', refs).in('tipo', ['venda', 'bonificacao']);
+    const rows = []; novos.forEach(i => { if (i.quantidade > 0) rows.push({ produto_id: i.produto_id, local: 'carro:' + o.criado_por, qtd: -i.quantidade, tipo: 'venda', ref, usuario_id: o.criado_por }); if (i.bonificado > 0) rows.push({ produto_id: i.produto_id, local: 'carro:' + o.criado_por, qtd: -i.bonificado, tipo: 'bonificacao', ref, usuario_id: o.criado_por }); });
+    if (rows.length && o.criado_por) await sb.from('estoque_mov').insert(rows); } catch (e) { }
+  return { valor, unidades };
+}

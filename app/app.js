@@ -2964,6 +2964,31 @@ async function telaPedidosCliente() {
       catch (e) { fecharModal(); erro(/agrupar_pedidos|function/.test(e.message) ? new Error('Rode o 025_pagamento_dividido_agrupar.sql no Supabase') : e); } }; };
 }
 
+// editar sem excluir: quantidades, preços, bonificação e pagamento; se já está no Bling, atualiza o mesmo pedido lá
+function editarPedidoModal(o, d, p) {
+  const its = Object.fromEntries(d.itens.map(i => [i.produto_id, i])), linhaPr = {};
+  const prods = S.base.produtos;
+  modal(`<h3 style="margin-top:0">Editar pedido ${esc(o.bling_pedido_id || o.numero || '')} · ${esc(p.nome)}</h3>
+   <p class="psub" style="margin:0 0 8px">${o.bling_id ? `Ao salvar, o pedido nº ${esc(o.bling_pedido_id || '')} é atualizado no Bling (o mesmo número, sem excluir).` : 'Este pedido ainda não está no Bling.'}${o.visita_id ? ' A contagem da visita e a baixa do estoque acompanham.' : ''}</p>
+   <div style="max-height:44vh;overflow:auto"><table class="dped"><tr><th>Produto</th><th>Qtd.</th><th>Bonif.</th><th>Preço un.</th><th style="text-align:right">Total</th></tr>
+   ${prods.map(pr => { const i = its[pr.id]; return `<tr><td>${esc(nomeProd(pr))}</td><td><input type="number" min="0" class="epQ" data-p="${pr.id}" value="${i ? +i.quantidade : 0}" style="width:64px"></td><td><input type="number" min="0" class="epB" data-p="${pr.id}" value="${i ? +i.bonificado || 0 : 0}" style="width:56px"></td><td><input type="number" step="0.05" min="0" class="epP" data-p="${pr.id}" value="${(i ? +i.preco_unit : (S.precosCli?.[pr.id] ?? +pr.preco)).toFixed(2)}" style="width:76px"></td><td class="epT" data-p="${pr.id}" style="text-align:right"></td></tr>`; }).join('')}</table></div>
+   <div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:10px"><div><label>Pagamento</label><select id="epF">${[...new Set([...FORMAS, o.condicao].filter(Boolean))].map(f => `<option ${f === o.condicao ? 'selected' : ''}>${esc(f)}</option>`).join('')}</select></div>
+    <div><label>Vencimento</label><input type="date" id="epV" value="${o.vencimento || ''}"></div><div style="margin-left:auto;text-align:right"><small style="color:var(--mute)">Total</small><br><b id="epTot" style="font-size:20px"></b></div></div>
+   ${caixaPix()}
+   <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="epOk">Salvar${o.bling_id ? ' e atualizar no Bling' : ''}</button></div>`);
+  const tot = () => { let t = 0; prods.forEach(pr => { const q = +document.querySelector(`.epQ[data-p="${pr.id}"]`).value || 0, v = +document.querySelector(`.epP[data-p="${pr.id}"]`).value || 0; t += q * v; document.querySelector(`.epT[data-p="${pr.id}"]`).textContent = q ? brl(q * v) : ''; }); $('#epTot').textContent = brl(t); };
+  document.querySelectorAll('.epQ,.epP,.epB').forEach(i => i.oninput = tot); tot(); atualizaPix();
+  $('#epOk').onclick = async () => {
+    const itens = prods.map(pr => ({ produto_id: pr.id, quantidade: +document.querySelector(`.epQ[data-p="${pr.id}"]`).value || 0, bonificado: +document.querySelector(`.epB[data-p="${pr.id}"]`).value || 0, preco_unit: +document.querySelector(`.epP[data-p="${pr.id}"]`).value || 0 }));
+    if (!itens.some(i => i.quantidade > 0)) return toast('O pedido precisa ter pelo menos um item cobrado (para zerar, use Excluir)');
+    $('#epOk').disabled = true; $('#epOk').textContent = 'Salvando…';
+    try { const r = await db.editarPedido(o.id, { itens, condicao: $('#epF').value, vencimento: $('#epV').value || null });
+      let msg = `Pedido editado: ${brl(r.valor)} · ${r.unidades} un.`;
+      if (o.bling_id) { try { await db.bling('atualizar_pedido', { pedido_id: o.id }); msg += ` · atualizado no Bling (nº ${o.bling_pedido_id || o.bling_id})`; }
+        catch (e) { fecharModal(); await recarregar(); return modal(`<h3>Salvo no app, mas o Bling não aceitou a edição</h3><p style="font-size:13px;color:var(--t-bad)">${esc(e.message)}</p><p style="color:var(--soft)">Se o pedido já foi atendido/faturado no Bling, ele pode não aceitar mudanças. Ajuste por lá ou use "Excluir e refazer".</p><div class="row" style="justify-content:flex-end"><button class="btn pri" onclick="fecharModal()">Ok</button></div>`); } }
+      fecharModal(); toast(msg); await recarregar(); if (S.aba === 'pedidos') telaPedidos(); else if (S.aba === 'pedcli') telaPedidosCliente(); }
+    catch (e) { $('#epOk').disabled = false; $('#epOk').textContent = 'Salvar'; erro(e); } };
+}
 // um pedido em detalhe: itens, pagamento e a contagem do expositor (tinha, vendeu, trocas, repôs, bonificação, ficou); dá para excluir e refazer
 async function verPedido(id, p) {
   modal('<div class="loading">Abrindo o pedido…</div>');
@@ -2987,7 +3012,7 @@ async function verPedido(id, p) {
    <h4 style="margin:14px 0 6px">Itens cobrados</h4>${its.length ? `<table class="dped"><tr><th>Produto</th><th>Qtd.</th><th>Preço</th><th style="text-align:right">Valor</th></tr>${its.map(i => `<tr><td>${esc(i.n)}</td><td>${i.q}</td><td>${brl(i.u)}</td><td style="text-align:right">${brl(i.v)}</td></tr>`).join('')}<tr style="font-weight:700"><td>Total</td><td>${its.reduce((a, i) => a + i.q, 0)}</td><td></td><td style="text-align:right">${brl(o.valor)}</td></tr></table>` : '<small style="color:var(--mute)">sem itens detalhados</small>'}
    ${tabC}${d.visita?.observacao ? `<p style="background:var(--sand);padding:8px 10px;border-radius:8px;margin:10px 0 0">${esc(d.visita.observacao)}</p>` : ''}
    <div class="row" style="margin-top:16px;justify-content:space-between;flex-wrap:wrap;gap:8px">
-    ${doBling ? '<small style="color:var(--mute)">Pedido importado do Bling: exclua por lá.</small>' : '<div class="row" style="gap:8px"><button class="btn" id="vpExc" style="color:var(--t-bad)">Excluir pedido</button><button class="btn car" id="vpRef">Excluir e refazer</button></div>'}
+    ${doBling ? '<small style="color:var(--mute)">Pedido importado do Bling: edite ou exclua por lá.</small>' : '<div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn car" id="vpEdit">✏️ Editar pedido</button><button class="btn" id="vpExc" style="color:var(--t-bad)">Excluir pedido</button><button class="btn" id="vpRef">Excluir e refazer</button></div>'}
     <button class="btn pri" onclick="fecharModal()">Fechar</button></div>`);
   if (doBling) return;
   const excluir = async refazer => {
@@ -3001,6 +3026,7 @@ async function verPedido(id, p) {
       if (cs.length && d.visita?.tipo === 'reposicao') { S.reabrir = { pdvId: p.id, contagens: cs, condicao: o.condicao, vencimento: o.vencimento, bonif: bon }; S.contando = p.id; S.repVolta = { aba: 'perfil', id: p.id }; irPara('reposicao'); }
       else { S.prefillVenda = { pdv: p.id, q: Object.fromEntries(d.itens.filter(i => +i.quantidade > 0).map(i => [i.produto_id, +i.quantidade])) }; S.abPdv = p.id; S.vendaVolta = { aba: 'perfil', id: p.id }; irPara('abertura'); } }; };
   $('#vpExc').onclick = () => excluir(false); $('#vpRef').onclick = () => excluir(true);
+  $('#vpEdit').onclick = () => editarPedidoModal(o, d, p);
 }
 
 /* =================== pedidos =================== */
@@ -3012,8 +3038,10 @@ const situacaoPed = o => { const s = (o.bling_situacao || '').toLowerCase();
   if (!o.bling_id && o.bling_status !== 'importado') return { k: 'app', n: 'Só no app', c: 'var(--sand)' };
   return { k: 'aberto', n: o.bling_situacao || 'Em aberto', c: 'var(--bg-warn)' }; };
 async function telaPedidos() {
-  const F = S.pdF = S.pdF || { per: '30', sit: '', vend: '', tipo: '', q: '' };
-  const ate = new Date(Date.now() + DIA), de = F.per === 'tudo' ? new Date(2020, 0, 1) : new Date(Date.now() - +F.per * DIA);
+  const F = S.pdF = S.pdF || { per: 'hoje', sit: '', vend: '', tipo: '', q: '' };
+  const h0 = new Date(); h0.setHours(0, 0, 0, 0);
+  const de = F.per === 'hoje' ? h0 : F.per === 'ontem' ? new Date(+h0 - DIA) : F.per === 'tudo' ? new Date(2020, 0, 1) : F.per === 'custom' ? new Date((F.de || hojeISO()) + 'T00:00') : new Date(+h0 - (+F.per - 1) * DIA);
+  const ate = F.per === 'ontem' ? h0 : F.per === 'custom' ? new Date(new Date((F.ate || hojeISO()) + 'T00:00').getTime() + DIA) : new Date(+h0 + DIA);
   $('#main').innerHTML = '<section class="view on"><div class="dash pnl"><div class="loading">Carregando os pedidos…</div></div></section>';
   let ls, perfis; try { [ls, perfis] = await Promise.all([db.listarPedidos(de.toISOString(), ate.toISOString()), S.perfisCache || db.perfisLista()]); S.perfisCache = perfis; } catch (e) { return erro(e); }
   const nomeP = id => (perfis.find(p => p.id === id)?.nome || '').split(' ')[0];
@@ -3035,12 +3063,14 @@ async function telaPedidos() {
   };
   $('#main').innerHTML = `<section class="view on"><div class="dash pnl">
    <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
-    <div><label class="lb">Período</label><select id="pdPer">${[['7', 'Últimos 7 dias'], ['30', 'Últimos 30 dias'], ['90', 'Últimos 90 dias'], ['180', 'Últimos 6 meses'], ['365', 'Último ano'], ['tudo', 'Tudo']].map(([k, n]) => `<option value="${k}" ${F.per === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+    <div><label class="lb">Período</label><select id="pdPer">${[['hoje', 'Hoje'], ['ontem', 'Ontem'], ['7', 'Últimos 7 dias'], ['30', 'Últimos 30 dias'], ['90', 'Últimos 90 dias'], ['180', 'Últimos 6 meses'], ['365', 'Último ano'], ['tudo', 'Tudo'], ['custom', 'Personalizado']].map(([k, n]) => `<option value="${k}" ${F.per === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+    ${F.per === 'custom' ? `<div><label class="lb">&nbsp;</label><button class="btn" id="pdCal">📅 ${dstr((F.de || hojeISO()) + 'T12:00')} – ${dstr((F.ate || hojeISO()) + 'T12:00')}</button></div>` : ''}
     <div><label class="lb">Tipo</label><select id="pdTipo"><option value="">Todos</option><option value="abertura" ${F.tipo === 'abertura' ? 'selected' : ''}>Abertura</option><option value="reposicao" ${F.tipo === 'reposicao' ? 'selected' : ''}>Reposição</option></select></div>
     <div><label class="lb">Vendedor</label><select id="pdVend"><option value="">Todos</option>${perfis.map(p => `<option value="${p.id}" ${F.vend === p.id ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}<option value="bling" ${F.vend === 'bling' ? 'selected' : ''}>Lançados no Bling</option></select></div>
     <div style="flex:1;min-width:180px"><label class="lb">Buscar</label><input id="pdQ" placeholder="Cliente ou número do pedido" value="${esc(F.q)}" style="width:100%"></div>
     <button class="btn pri" id="pdNova">+ Cadastrar venda</button></div><div id="pdCorpo"></div></div></section>`;
-  $('#pdPer').onchange = e => { F.per = e.target.value; telaPedidos(); };
+  $('#pdPer').onchange = e => { F.per = e.target.value; if (F.per === 'custom' && !F.de) { F.de = isoDe(new Date(Date.now() - 6 * DIA)); F.ate = hojeISO(); } telaPedidos(); if (F.per === 'custom') setTimeout(() => $('#pdCal')?.click(), 60); };
+  if ($('#pdCal')) $('#pdCal').onclick = e => { e.stopPropagation(); calendarioFaixa($('#pdCal'), F.de, F.ate, (a, b) => { F.de = a; F.ate = b; telaPedidos(); }); };
   $('#pdTipo').onchange = e => { F.tipo = e.target.value; desenha(); }; $('#pdVend').onchange = e => { F.vend = e.target.value; desenha(); }; $('#pdQ').oninput = e => { F.q = e.target.value; desenha(); };
   $('#pdNova').onclick = () => irPara('abertura');
   desenha();

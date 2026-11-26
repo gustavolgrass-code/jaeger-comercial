@@ -233,11 +233,12 @@ async function idForma(nome: string, cfg: Record<string, any>, token: string): P
   return achou ? Number(achou.id) : null;
 }
 
-async function enviarPedido(pedidoId: string) {
+async function enviarPedido(pedidoId: string, atualizar = false) { // atualizar: reescreve no Bling o pedido já enviado (mesmo número), sem excluir
   const token = await tokenValido();
   const { data: ped, error } = await db.from('pedidos').select('*, pdvs(*, contatos!pdvs_contato_id_fkey(nome, telefone, whatsapp, email)), pedido_itens(quantidade, bonificado, preco_unit, produtos(id, linha, sabor, preco, bling_produto_id, bling_codigo))').eq('id', pedidoId).single();
   if (error || !ped) { const msg = 'Não consegui ler o pedido no banco: ' + (error?.message || 'pedido não encontrado'); await db.from('pedidos').update({ bling_status: 'erro', bling_erro: msg }).eq('id', pedidoId); throw new Error(msg); }
-  if (ped.bling_id) return { ja_enviado: true, bling_id: ped.bling_id, numero: ped.bling_pedido_id };
+  if (ped.bling_id && !atualizar) return { ja_enviado: true, bling_id: ped.bling_id, numero: ped.bling_pedido_id };
+  if (atualizar && !ped.bling_id) atualizar = false;
   const { data: rg } = await db.from('regras').select('valor').eq('chave', 'bling').maybeSingle();
   const cfg = (rg?.valor ?? {}) as Record<string, any>;
   // contato no Bling: id guardado ou busca pelo CNPJ/CPF
@@ -293,6 +294,14 @@ async function enviarPedido(pedidoId: string) {
     observacoesInternas: `Lançado pelo app Jaeger Comercial · pedido ${ped.numero} · ${ped.condicao}${frete > 0 ? ` · entrega terceirizada R$ ${frete.toFixed(2).replace('.', ',')} ${freteCobrado ? 'cobrada do cliente' : 'por nossa conta'}` : ''}`,
   };
   try {
+    if (atualizar) { const dOrig = new Date(new Date(ped.criado_em).getTime() - 3 * 3600e3).toISOString().slice(0, 10); corpo.data = dOrig; corpo.dataSaida = dOrig; corpo.dataPrevista = dOrig; if (ped.bling_pedido_id) corpo.numero = Number(ped.bling_pedido_id) || undefined;
+      corpo.observacoesInternas = String(corpo.observacoesInternas) + ' · editado no app';
+      const r = await fetch(`${API}/pedidos/vendas/${ped.bling_id}`, { method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json', 'enable-jwt': '1' }, body: JSON.stringify(corpo) });
+      const res = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(`Bling recusou a edição (${r.status}): ${JSON.stringify(res?.error ?? res).slice(0, 600)}`);
+      await db.from('pedidos').update({ bling_status: 'enviado', bling_erro: null }).eq('id', pedidoId);
+      return { ok: true, atualizado: true, bling_id: ped.bling_id, numero: ped.bling_pedido_id };
+    }
     const r = await fetch(`${API}/pedidos/vendas`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json', 'enable-jwt': '1' }, body: JSON.stringify(corpo) });
     const res = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(`Bling recusou o pedido (${r.status}): ${JSON.stringify(res?.error ?? res).slice(0, 600)}`);
@@ -303,7 +312,8 @@ async function enviarPedido(pedidoId: string) {
     await db.from('pdvs').update({ bling_contato_id: String(contatoId) }).eq('id', ped.pdvs.id).is('bling_contato_id', null);
     return { ok: true, bling_id: id, numero, alertas: res?.data?.alertas ?? [], enviado: corpo };
   } catch (e) {
-    await db.from('pedidos').update({ bling_status: 'erro', bling_erro: String((e as Error).message).slice(0, 900) }).eq('id', pedidoId);
+    if (!atualizar) await db.from('pedidos').update({ bling_status: 'erro', bling_erro: String((e as Error).message).slice(0, 900) }).eq('id', pedidoId);
+    else await db.from('pedidos').update({ bling_erro: 'Edição não foi para o Bling: ' + String((e as Error).message).slice(0, 860) }).eq('id', pedidoId);
     throw e;
   }
 }
@@ -409,6 +419,7 @@ Deno.serve(async (req) => {
     if (acao === 'fin_escrever') return json(await escreverFin(String(metodo || ''), String(caminho || ''), corpo));
     if (acao === 'itens') return json(await puxarItens());
     if (acao === 'enviar_pedido') return json(await enviarPedido(String(pedido_id || '')));
+    if (acao === 'atualizar_pedido') return json(await enviarPedido(String(pedido_id || ''), true));
     if (acao === 'excluir_pedido') return json(await excluirPedido(String(pedido_id || '')));
     if (acao === 'atualizar_contato') return json(await atualizarContatoBling(String(contato_id || '')));
     return json({ erro: 'ação desconhecida' }, 400);
