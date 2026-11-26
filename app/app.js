@@ -31,6 +31,9 @@ const ROTA_ETAPAS = ['ativo', 'avaliacao', 'risco', 'revisao'];
 // consumidor final: cliente que compra, mas não entra na reposição automática
 const repoe = p => !!p && ROTA_ETAPAS.includes(p.etapa) && !p.consumidor_final;
 const FORMAS = ['Boleto', 'Pix', 'Cartão', 'Dinheiro'];
+// prazo padrão: só boleto tem prazo (7 dias, com atalho para 14); Pix, cartão e dinheiro vencem hoje
+const prazoDe = f => f === 'Boleto' ? 7 : 0, vencPadrao = (f, dias) => isoDe(new Date(Date.now() + (dias ?? prazoDe(f)) * DIA));
+const atalhoPrazo = cls => `<span class="przb ${cls}"><button type="button" class="mini" data-prz="7">7 dias</button><button type="button" class="mini" data-prz="14">14 dias</button></span>`;
 // kits mais pedidos (pelos pedidos do Bling): código do produto no Bling → quantidade
 // também são as caixas da carga do carro: 1 cx de brownie = 32, de cookie = 36, de palha = 45
 const KITS = [{ n: 'Brownie 32', q: { B1: 8, B2: 8, B3: 8, B4: 8 } }, { n: 'Cookies 36', q: { C1: 9, C2: 9, C3: 9, C4: 9 } }, { n: 'Palha 45', q: { P1: 18, P2: 18, P3: 9 } }];
@@ -1168,7 +1171,7 @@ function telaAbertura() {
    <div><label class="lb">Pedido mínimo combinado (R$)</label><input id="oMin" type="number" step="10" value="150" style="width:100%"></div>
    <div><label class="lb">Repor a cada</label><select id="oCad" style="width:100%"><option value="">${cadPadrao().avaliacao || 7} dias (padrão da avaliação)</option><option value="10">10 dias</option><option value="14">14 dias</option></select></div></div></div>
   <h3 style="margin:16px 0 6px">Pagamento</h3><div class="row" style="flex-wrap:wrap;gap:14px;align-items:flex-end"><div class="pay" style="margin:0">${FORMAS.map((c, i) => `<label><input type="radio" name="oc" value="${c}" ${i === 0 ? 'checked' : ''}> ${c}</label>`).join('')}</div>
-   <div id="oVencBox"><label class="lb">Vencimento</label><input id="oVenc" type="date" value="${isoDe(new Date(Date.now() + 7 * DIA))}"></div>
+   <div id="oVencBox"><label class="lb">Vencimento</label><div class="row" style="gap:6px;flex-wrap:nowrap"><input id="oVenc" type="date" value="${vencPadrao(FORMAS[0])}">${atalhoPrazo('oprz')}</div></div>
    <div id="oNBol"><label class="lb">Boletos</label><div class="nbol">${[1, 2, 3, 4].map(n => `<button type="button" data-nbol="${n}" class="${n === 1 ? 'on' : ''}">${n}×</button>`).join('')}</div></div></div>
   <label class="chkcomp"><input type="checkbox" id="oDiv"> Dividir o pagamento (entrada, vários boletos, Pix + cartão…)</label>
   <label class="chkcomp"><input type="checkbox" id="oFrete"> 🚚 Entrega terceirizada</label>
@@ -1198,7 +1201,7 @@ function telaAbertura() {
     $('#oInfo').textContent = tot && tot < (+$('#oMin').value || 0) ? 'abaixo do pedido mínimo' : '';
     restoParc(tot); return { un, tot, c }; };
   // parcelas: cada linha com forma, valor e vencimento; a última fica com o restante
-  const vencDe = (f, i) => isoDe(new Date(Date.now() + (f === 'Boleto' ? 7 * (i + 1) : 0) * DIA));
+  const vencDe = (f, i) => vencPadrao(f, f === 'Boleto' ? 7 * (i + 1) : 0);
   const linhaParc = (f, i, v = '') => `<div class="row parc" data-i="${i}"><select class="pf">${FORMAS.map(x => `<option ${x === f ? 'selected' : ''}>${x}</option>`).join('')}</select>
     <input class="pv" type="number" step="0.01" min="0" inputmode="decimal" placeholder="Valor" value="${v}"><b class="pr" hidden></b><input class="pd" type="date" value="${vencDe(f, i)}"><button type="button" class="mini px" title="Tirar parcela">✕</button></div>`;
   function montarParc(lista) { $('#oParc').innerHTML = lista.map((x, i) => linhaParc(x.f, i, x.v ?? '')).join(''); ligarParc(); calc(); }
@@ -1222,7 +1225,9 @@ function telaAbertura() {
     if (n === 1) { abrirDiv(false); $('#oParc').innerHTML = ''; return; }
     const tot = calc().tot, cada = tot ? Math.floor(tot / n * 100) / 100 : ''; abrirDiv(true); montarParc(Array.from({ length: n }, () => ({ f: 'Boleto', v: cada }))); });
   const mostraNBol = () => { $('#oNBol').hidden = cond() !== 'Boleto'; }; mostraNBol();
-  document.querySelectorAll('input[name=oc]').forEach(x => x.onchange = () => { mostraNBol(); $('#oVenc').value = isoDe(new Date(Date.now() + (cond() === 'Dinheiro' ? 0 : 7) * DIA)); });
+  document.querySelectorAll('input[name=oc]').forEach(x => x.onchange = () => { mostraNBol(); $('#oVenc').value = vencPadrao(cond()); document.querySelector('.oprz').hidden = cond() !== 'Boleto'; });
+  document.querySelector('.oprz').hidden = cond() !== 'Boleto';
+  document.querySelectorAll('.oprz [data-prz]').forEach(b => b.onclick = () => { $('#oVenc').value = vencPadrao('Boleto', +b.dataset.prz); });
   document.querySelectorAll('[data-kit]').forEach(b => b.onclick = () => { const k = KITS[+b.dataset.kit]; Object.entries(k.q).forEach(([cod, q]) => { const pr = S.base.produtos.find(x => x.bling_codigo === cod), inp = pr && document.querySelector(`.oq[data-p="${pr.id}"]`); if (inp) inp.value = (+inp.value || 0) + q; }); calc(); });
   $('#oZera').onclick = () => { document.querySelectorAll('.oq').forEach(i => i.value = 0); calc(); };
   if ($('#oUlt')) $('#oUlt').onclick = async () => { const b = $('#oUlt'); b.disabled = true; b.textContent = 'Buscando…';
@@ -2356,7 +2361,7 @@ async function caminhoRuas(pts) {
 /* =================== pagamento (mesmo jeito da Nova venda: forma, boletos, dividir, entrega) =================== */
 function blocoPag(px, forma, venc) {
   return `<div id="${px}Pag"><div class="row" style="flex-wrap:wrap;gap:14px;align-items:flex-end"><div class="pay pgf" style="margin:0">${FORMAS.map(c => `<label><input type="radio" name="${px}c" value="${c}" ${c === forma ? 'checked' : ''}> ${c}</label>`).join('')}</div>
-   <div class="pgvb"><label class="lb">Vencimento</label><input class="pgv" type="date" value="${venc || isoDe(new Date(Date.now() + (forma === 'Dinheiro' ? 0 : 7) * DIA))}"></div>
+   <div class="pgvb"><label class="lb">Vencimento</label><div class="row" style="gap:6px;flex-wrap:nowrap"><input class="pgv" type="date" value="${venc || vencPadrao(forma)}">${atalhoPrazo('pgprz')}</div></div>
    <div class="pgnb"><label class="lb">Boletos</label><div class="nbol">${[1, 2, 3, 4].map(n => `<button type="button" data-nb="${n}" class="${n === 1 ? 'on' : ''}">${n}×</button>`).join('')}</div></div></div>
   <label class="chkcomp"><input type="checkbox" class="pgdiv"> Dividir o pagamento (entrada, vários boletos, Pix + cartão…)</label>
   <label class="chkcomp"><input type="checkbox" class="pgfr"> 🚚 Entrega terceirizada</label>
@@ -2370,7 +2375,7 @@ function ligarPag(px, base, muda = () => { }) {
   const cond = () => R.querySelector(`input[name=${px}c]:checked`).value;
   const frete = () => { const on = q('.pgfr').checked, v = on ? Math.round((+q('.pgfrv').value || 0) * 100) / 100 : 0; return { v, cobrado: on && v > 0 && R.querySelector(`input[name=${px}fq]:checked`)?.value === '1' }; };
   const total = () => { const f = frete(); return Math.round((base() + (f.cobrado ? f.v : 0)) * 100) / 100; };
-  const vencDe = (f, i) => isoDe(new Date(Date.now() + (f === 'Boleto' ? 7 * (i + 1) : 0) * DIA));
+  const vencDe = (f, i) => vencPadrao(f, f === 'Boleto' ? 7 * (i + 1) : 0);
   const linha = (f, i, v = '', d) => `<div class="row parc"><select class="pf">${FORMAS.map(x => `<option ${x === f ? 'selected' : ''}>${x}</option>`).join('')}</select><input class="pv" type="number" step="0.01" min="0" inputmode="decimal" placeholder="Valor" value="${v}"><b class="pr" hidden></b><input class="pd" type="date" value="${d || vencDe(f, i)}"><button type="button" class="mini px" title="Tirar parcela">✕</button></div>`;
   const resto = () => { const ls = qa('.parc'); if (!ls.length) return; const tot = total(), pagos = ls.slice(0, -1).reduce((a, l) => a + (+l.querySelector('.pv').value || 0), 0), r = Math.round((tot - pagos) * 100) / 100;
     ls[ls.length - 1].querySelector('.pr').textContent = brl(Math.max(0, r)); q('.pginfo').textContent = r < 0 ? 'as parcelas passam do total' : `${ls.length} parcelas · total ${brl(tot)}`; };
@@ -2380,7 +2385,7 @@ function ligarPag(px, base, muda = () => { }) {
       l.querySelector('.px').onclick = () => { l.remove(); ligarParc(); resto(); muda(); }; }); };
   const montar = lista => { q('.pgparc').innerHTML = lista.map((x, i) => linha(x.f, i, x.v ?? '', x.d)).join(''); ligarParc(); resto(); };
   const abrirDiv = on => { q('.pgdiv').checked = on; q('.pgdivbox').hidden = !on; q('.pgf').classList.toggle('apagado', on); q('.pgvb').classList.toggle('apagado', on); };
-  const mostraNB = () => { q('.pgnb').hidden = cond() !== 'Boleto'; };
+  const mostraNB = () => { q('.pgnb').hidden = cond() !== 'Boleto'; q('.pgprz').hidden = cond() !== 'Boleto'; };
   q('.pgdiv').onchange = () => { abrirDiv(q('.pgdiv').checked); if (q('.pgdiv').checked && !qa('.parc').length) montar([{ f: 'Pix', v: '' }, { f: cond() === 'Boleto' ? 'Boleto' : 'Cartão' }]); muda(); };
   q('.pgfr').onchange = () => { q('.pgfrbox').hidden = !q('.pgfr').checked; resto(); muda(); }; q('.pgfrv').oninput = () => { resto(); muda(); };
   qa(`input[name=${px}fq]`).forEach(x => x.onchange = () => { resto(); muda(); });
@@ -2388,7 +2393,8 @@ function ligarPag(px, base, muda = () => { }) {
   qa('[data-nb]').forEach(b => b.onclick = () => { const n = +b.dataset.nb; qa('[data-nb]').forEach(x => x.classList.toggle('on', x === b));
     if (n === 1) { abrirDiv(false); q('.pgparc').innerHTML = ''; muda(); return; }
     const tot = total(), cada = tot ? Math.floor(tot / n * 100) / 100 : ''; abrirDiv(true); montar(Array.from({ length: n }, () => ({ f: 'Boleto', v: cada }))); muda(); });
-  qa(`input[name=${px}c]`).forEach(x => x.onchange = () => { mostraNB(); q('.pgv').value = isoDe(new Date(Date.now() + (cond() === 'Dinheiro' ? 0 : 7) * DIA)); muda(); });
+  qa(`input[name=${px}c]`).forEach(x => x.onchange = () => { mostraNB(); q('.pgv').value = vencPadrao(cond()); muda(); });
+  qa('.pgprz [data-prz]').forEach(b => b.onclick = () => { q('.pgv').value = vencPadrao('Boleto', +b.dataset.prz); muda(); });
   mostraNB();
   // lê o que foi escolhido: condição (ex.: "2× Boleto", "Pix + Boleto"), vencimento final e os campos extras do pedido
   const ler = () => { const tot = total(), ls = qa('.parc'), div = q('.pgdiv').checked && ls.length > 1; let soma = 0;

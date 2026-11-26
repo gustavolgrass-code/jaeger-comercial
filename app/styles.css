@@ -657,3 +657,4 @@ section:fullscreen #mapa{height:100vh}
 .atalhos>b{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);margin-right:4px}
 .atalhos .atsep{flex:1}
 .atalhos .kq{color:var(--car-d)}
+.przb[hidden]{display:none}.przb{display:inline-flex;gap:4px}
