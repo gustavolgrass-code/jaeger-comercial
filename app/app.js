@@ -4440,9 +4440,9 @@ const pedFin = id => (S.base.regras.pedidos_fin || {})[id] || {};
 async function salvarPedFin(id, patch) { const t = { ...(S.base.regras.pedidos_fin || {}) }; t[id] = { ...(t[id] || {}), ...patch, em: new Date().toISOString() }; S.base.regras.pedidos_fin = t; await db.salvarRegra('pedidos_fin', t).catch(() => { }); }
 const msgBling = e => /ação desconhecida/.test(e.message) ? 'publique a função bling-oauth nova (Supabase → Edge Functions)' : e.message;
 async function baixarNoBling(pedidoId) {
-  const r = await db.bling('baixar_pedido', { pedido_id: pedidoId }), cs = r.contas || [], falha = cs.filter(c => !c.ok), bol = cs.filter(c => c.boleto);
-  await salvarPedFin(pedidoId, { pago: !falha.length && cs.some(c => !c.boleto), pago_erro: falha.length ? falha.map(c => c.erro).join(' · ').slice(0, 400) : null, pago_em: hojeISO() });
-  return { r, falha, bol };
+  const r = await db.bling('baixar_pedido', { pedido_id: pedidoId }), cs = r.contas || [], falha = cs.filter(c => !c.ok), bol = cs.filter(c => c.boleto), auto = cs.filter(c => c.automatico);
+  await salvarPedFin(pedidoId, { pago: !falha.length && cs.some(c => !c.boleto), pago_auto: auto.length > 0, pix: auto.map(c => c.linkPix).filter(Boolean)[0] || null, pago_erro: falha.length ? falha.map(c => c.erro).join(' · ').slice(0, 400) : null, pago_em: hojeISO() });
+  return { r, falha, bol, auto };
 }
 function blocoFinPedido(o) {
   if (!o.bling_id) return `<div class="pfin"><button class="btn" id="vpPdf">📄 Pedido em PDF</button></div>`;
@@ -4451,7 +4451,7 @@ function blocoFinPedido(o) {
     <button class="btn" id="vpPdf">📄 Pedido em PDF</button>
     ${n ? `<span class="fst" style="--c:${nfeOk(n) ? COR.bom : COR.aviso}">NF-e ${esc(n.numero || '')} · ${NFE_SIT[n.situacao] || 'enviada'}</span>${nfeOk(n) && (n.linkDanfe || n.linkPDF) ? `<a class="btn" href="${esc(n.linkDanfe || n.linkPDF)}" target="_blank" rel="noopener">📄 DANFE</a>` : ''}${!nfeOk(n) ? '<button class="btn" id="vpNfe">🧾 Emitir a nota de novo</button>' : ''}` : `<button class="btn" id="vpNfe">🧾 Gerar nota fiscal</button>${n0 ? `<small style="color:var(--mute)">tentativa anterior (nº ${esc(n0.numero || '')}) ${NFE_SIT[n0.situacao]?.toLowerCase() || ''}</small>` : ''}`}
     ${temBol ? (bols.length ? bols.map((c, i) => `<a class="btn" href="${esc(c.linkBoleto)}" target="_blank" rel="noopener">💳 Boleto${bols.length > 1 ? ' ' + (i + 1) : ''} · ${brl(c.valor)}</a><button class="mini" data-cpy="${esc(c.linkBoleto)}">copiar link</button>`).join('') : '<button class="btn" id="vpBol">💳 Gerar boleto</button>') : ''}
-    ${F.pago ? `<span class="fst" style="--c:${COR.bom}">Pago · baixado no Bling${F.pago_em ? ' em ' + dstr(F.pago_em + 'T12:00') : ''}</span>` : /^(pix|dinheiro|cart)/i.test(o.condicao || '') || (o.condicao || '').includes('+') ? '<button class="btn" id="vpPago">✅ Marcar como pago</button>' : ''}
+    ${F.pago ? `<span class="fst" style="--c:${COR.bom}">Pago${F.pago_auto ? ' · Pix na Bling Conta (o Bling baixa sozinho)' : ' · baixado no Bling'}${F.pago_em ? ' em ' + dstr(F.pago_em + 'T12:00') : ''}</span>${F.pix ? `<a class="btn" href="${esc(F.pix)}" target="_blank" rel="noopener">QR Code Pix</a>` : ''}` : /^(pix|dinheiro|cart)/i.test(o.condicao || '') || (o.condicao || '').includes('+') ? '<button class="btn" id="vpPago">✅ Marcar como pago</button>' : ''}
    </div>${F.pago_erro ? `<small style="color:var(--t-bad);display:block;margin-top:6px">Pagamento não baixado no Bling: ${esc(F.pago_erro)}</small>` : ''}${n?.erro ? `<small style="color:var(--t-bad);display:block;margin-top:6px">${esc(n.erro)}</small>` : ''}</div>`;
 }
 function ligarFinPedido(o, p) {
@@ -4474,13 +4474,13 @@ function ligarFinPedido(o, p) {
       toast(b.length ? `Boleto${b.length > 1 ? 's' : ''} pronto${b.length > 1 ? 's' : ''}` : 'Conta lançada no Bling, mas sem boleto: confira se a forma do pedido é "Boleto - Bling Conta"'); }
     catch (e) { toast('Boleto não gerado: ' + msgBling(e)); } volta(); };
   if ($('#vpPago')) $('#vpPago').onclick = async () => { $('#vpPago').disabled = true; $('#vpPago').textContent = 'Dando baixa…';
-    try { const { falha } = await baixarNoBling(o.id); toast(falha.length ? 'O Bling não aceitou a baixa: veja o aviso no pedido' : 'Pagamento baixado no Bling ✓'); } catch (e) { await salvarPedFin(o.id, { pago_erro: msgBling(e).slice(0, 400) }); toast('Baixa não feita: ' + msgBling(e)); } volta(); };
+    try { const { falha, auto } = await baixarNoBling(o.id); toast(falha.length ? 'O Bling não aceitou a baixa: veja o aviso no pedido' : auto.length ? 'Pago: Pix na Bling Conta, o Bling dá a baixa quando o Pix entra' : 'Pagamento baixado no Bling ✓'); } catch (e) { await salvarPedFin(o.id, { pago_erro: msgBling(e).slice(0, 400) }); toast('Baixa não feita: ' + msgBling(e)); } volta(); };
   document.querySelectorAll('[data-cpy]').forEach(b => b.onclick = () => { navigator.clipboard?.writeText(b.dataset.cpy).then(() => toast('Link copiado')).catch(() => prompt('Copie o link', b.dataset.cpy)); });
 }
 async function enviarAoBling(pedidoId, nome, pago) {
   toast('Criando o pedido no Bling…');
   try { const r = await db.bling('enviar_pedido', { pedido_id: pedidoId });
-    let pagoTxt = ''; if (pago) { try { const { falha, bol } = await baixarNoBling(pedidoId); pagoTxt = falha.length ? `<p style="color:var(--t-bad)">⚠️ Pagamento não baixado no Bling: ${esc(falha[0].erro || '')}. Dá para tentar de novo nos detalhes do pedido.</p>` : `<p style="color:var(--t-ok)">✅ Pagamento recebido: conta a receber lançada e baixada no Bling${bol.length ? ' (o boleto ficou em aberto)' : ''}.</p>`; } catch (e) { await salvarPedFin(pedidoId, { pago_erro: msgBling(e).slice(0, 400) }); pagoTxt = `<p style="color:var(--t-bad)">⚠️ Pagamento não baixado no Bling: ${esc(msgBling(e))}</p>`; } }
+    let pagoTxt = ''; if (pago) { try { const { falha, bol, auto } = await baixarNoBling(pedidoId); pagoTxt = falha.length ? `<p style="color:var(--t-bad)">⚠️ Pagamento não baixado no Bling: ${esc(falha[0].erro || '')}. Dá para tentar de novo nos detalhes do pedido.</p>` : `<p style="color:var(--t-ok)">✅ Pagamento registrado: conta a receber lançada no Bling${auto.length ? ' (Pix na Bling Conta: o Bling dá a baixa quando o Pix entra)' : ' e baixada'}${bol.length ? ' (o boleto ficou em aberto)' : ''}.</p>`; } catch (e) { await salvarPedFin(pedidoId, { pago_erro: msgBling(e).slice(0, 400) }); pagoTxt = `<p style="color:var(--t-bad)">⚠️ Pagamento não baixado no Bling: ${esc(msgBling(e))}</p>`; } }
     modal(`<h3>Pedido criado no Bling ✓</h3><p>${esc(nome)} · <b>pedido nº ${esc(r.numero || r.bling_id)}</b>, situação Em aberto.</p>${pagoTxt}<p style="color:var(--soft)">O Moisés já encontra o pedido no Bling para conferir e emitir a nota.</p>${(r.alertas || []).length ? `<p style="color:var(--car-d);font-size:13px">Avisos do Bling: ${esc(JSON.stringify(r.alertas))}</p>` : ''}<div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn pri" onclick="fecharModal()">Ok</button></div>`);
   } catch (e) { modal(`<h3>O Bling não aceitou o pedido</h3><p style="color:var(--soft)">A venda ficou salva no app. Corrija o que o Bling pediu e reenvie pelo perfil do cliente.</p><p style="font-size:13px;color:var(--t-bad)">${esc(e.message)}</p><div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn pri" onclick="fecharModal()">Ok</button></div>`); }
 }
