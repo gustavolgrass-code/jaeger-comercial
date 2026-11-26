@@ -312,14 +312,15 @@ async function baixarPedido(pedidoId: string) {
 async function lerNfe(id: number | string, token: string) { const n: any = (await chamar(`/nfe/${id}`, token))?.data ?? {}; return { id: n.id, numero: n.numero, serie: n.serie, situacao: n.situacao, chave: n.chaveAcesso || null, linkDanfe: n.linkDanfe || null, linkPDF: n.linkPDF || null, valor: n.valorNota }; }
 // próximo número de NF-e: o maior número já usado (autorizada, emitida, cancelada ou denegada) + 1, na mesma série
 async function proximoNumeroNfe(token: string, serie?: number | string) {
-  let max = 0, ser = serie != null ? Number(serie) : null, ultima: any = null;
+  // a listagem do Bling não traz a série: considera todas as notas de saída e, se vier série, só as da mesma série
+  let max = 0; const ser = serie != null && serie !== '' ? Number(serie) : null;
   for (let pg = 1; pg <= 20; pg++) {
-    const r: any = await chamar(`/nfe?tipo=1&limite=100&pagina=${pg}${ser != null ? `&serie=${ser}` : ''}`, token), d = r?.data ?? [];
-    d.forEach((n: any) => { const num = parseInt(String(n.numero || '0'), 10) || 0, sit = Number(n.situacao);
-      if ([2, 5, 6, 7, 9].includes(sit) && (ser == null || Number(n.serie) === ser)) { if (num > max) { max = num; ultima = n; } } });
+    const r: any = await chamar(`/nfe?tipo=1&limite=100&pagina=${pg}`, token), d = r?.data ?? [];
+    d.forEach((n: any) => { const num = parseInt(String(n.numero || '0'), 10) || 0, sit = Number(n.situacao), sn = n.serie === '' || n.serie == null ? null : Number(n.serie);
+      if ([2, 5, 6, 7, 9].includes(sit) && (ser == null || sn == null || sn === ser) && num > max) max = num; });
     if (d.length < 100) break;
   }
-  return { numero: max + 1, serie: ser ?? (ultima ? Number(ultima.serie) : null), ultimo: max };
+  return { numero: max + 1, serie: ser, ultimo: max };
 }
 async function gerarNfe(pedidoId: string, nfeId?: string, numero?: number) {
   const token = await tokenValido(); let id = nfeId ? Number(nfeId) : 0;
