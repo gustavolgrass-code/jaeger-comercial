@@ -259,14 +259,14 @@ async function atualizarPrecos(itens: { id: string | number; preco: number }[]) 
 // ---------- financeiro do pedido: contas a receber, baixa e nota fiscal ----------
 const hojeBR = () => new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
 async function pedidoBling(pedidoId: string) {
-  const { data: ped } = await db.from('pedidos').select('id, numero, bling_id, condicao, valor').eq('id', pedidoId).maybeSingle();
+  const { data: ped } = await db.from('pedidos').select('id, numero, bling_id, condicao, valor, criado_em').eq('id', pedidoId).maybeSingle();
   if (!ped) throw new Error('Pedido não encontrado'); if (!ped.bling_id) throw new Error('Este pedido ainda não foi enviado ao Bling'); return ped;
 }
 // contas a receber geradas pelo pedido (com link do boleto e do Pix)
-async function contasDoPedido(bid: string, token: string) {
+async function contasDoPedido(bid: string, token: string, dataPed?: string) {
   let ids: number[] = [];
   try { const r: any = await chamar(`/contas/receber/boletos?idOrigem=${bid}`, token); const d = r?.data ?? r; ids = (d?.contas ?? (Array.isArray(d) ? d.flatMap((x: any) => x.contas ?? []) : [])).map((c: any) => Number(c.id)).filter(Boolean); } catch { /* segue */ }
-  if (!ids.length) { const de = new Date(Date.now() - 200 * 864e5).toISOString().slice(0, 10), ate = new Date(Date.now() + 400 * 864e5).toISOString().slice(0, 10);
+  if (!ids.length) { const base = dataPed ? new Date(dataPed).getTime() : Date.now(), de = new Date(base - 15 * 864e5).toISOString().slice(0, 10), ate = new Date(base + 340 * 864e5).toISOString().slice(0, 10); // o Bling aceita no máximo 366 dias
     for (let pg = 1; pg <= 10; pg++) { const r: any = await chamar(`/contas/receber?dataInicial=${de}&dataFinal=${ate}&pagina=${pg}&limite=100`, token); const d = r?.data ?? [];
       d.filter((c: any) => String(c.origem?.id ?? '') === String(bid)).forEach((c: any) => ids.push(Number(c.id))); if (d.length < 100) break; } }
   const out: any[] = [];
@@ -277,11 +277,11 @@ async function contasDoPedido(bid: string, token: string) {
 // lança as contas do pedido no Bling (se ainda não tiver) e devolve as contas
 async function contasPedido(pedidoId: string) {
   const token = await tokenValido(), ped = await pedidoBling(pedidoId);
-  let contas = await contasDoPedido(String(ped.bling_id), token), lancou = false;
+  let contas = await contasDoPedido(String(ped.bling_id), token, ped.criado_em), lancou = false;
   if (!contas.length) {
     const r = await enviarBling('POST', `/pedidos/vendas/${ped.bling_id}/lancar-contas`, {}, token);
     if (!r.ok && !/lan[cç]ad/i.test(r.txt)) throw new Error(`O Bling não lançou as contas (${r.status}): ${r.txt}`);
-    lancou = true; await new Promise(res => setTimeout(res, 1200)); contas = await contasDoPedido(String(ped.bling_id), token);
+    lancou = true; await new Promise(res => setTimeout(res, 1200)); contas = await contasDoPedido(String(ped.bling_id), token, ped.criado_em);
   }
   return { pedido: ped.numero, lancou, contas };
 }
