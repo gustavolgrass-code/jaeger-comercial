@@ -2008,7 +2008,7 @@ function painelCustos() {
       ${prods.map(p => { const k = custoProducao(c, p), cu = k ? k.total : +p.custo || 0, mg = +p.preco ? (+p.preco - cu) / +p.preco : null; return `<tr><td>${esc(nomeProd(p))}${k ? '' : ' <small style="color:var(--mute)">revenda</small>'}</td>
         ${k ? `<td>${R2(k.ingr)}</td><td>${R2(k.emb)}</td><td>${R2(k.mo)}</td><td>${R2(k.cif)}</td><td><b>${R2(k.total)}</b></td>` : `<td colspan="4"><small style="color:var(--mute)">custo de compra →</small></td><td><input type="number" step="0.01" class="cuRev" data-p="${p.id}" value="${(+p.custo || 0).toFixed(2)}" style="width:80px"></td>`}
         <td>${R2(+p.custo || 0)}${k && Math.abs(k.total - (+p.custo || 0)) > 0.005 ? ' <small style="color:var(--car-d)">≠</small>' : ''}</td><td>${R2(+p.preco || 0)}</td><td><b style="color:${mg == null ? 'inherit' : mg >= 0.45 ? 'var(--t-ok)' : mg >= 0.3 ? 'var(--car-d)' : 'var(--t-bad)'}">${mg == null ? '—' : Math.round(mg * 100) + '%'}</b></td></tr>`; }).join('')}</table></div>
-     <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn pri" id="cuAplicar">Aplicar estes custos no cadastro dos produtos</button></div>
+     <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn pri" id="cuAplicar">Aplicar estes custos no app e no Bling</button></div>
      <small style="color:var(--mute)">O custo do cadastro é o que o Painel e o Financeiro usam para margem e perdas. "≠" = o cadastro está diferente do calculado.</small>`;
     el.querySelectorAll('.cuP').forEach(i => i.onchange = () => { c.premissas[i.dataset.k] = +i.value || 0; salvar(); });
     el.querySelectorAll('.cuI').forEach(i => i.onchange = () => { const x = c.insumos[+i.dataset.i]; const v = ['preco', 'conteudo'].includes(i.dataset.k) ? +i.value || 0 : i.value; if (i.dataset.k === 'preco' && v !== x.preco) x.cotacao = hojeISO(); x[i.dataset.k] = v; salvar(); });
@@ -2022,7 +2022,14 @@ function painelCustos() {
     el.querySelectorAll('[data-dels]').forEach(b => b.onclick = () => { const [cod, j] = b.dataset.dels.split(':'); c.sabores[cod].add.splice(+j, 1); salvar(); });
     el.querySelectorAll('[data-adds]').forEach(b => b.onclick = () => { c.sabores[b.dataset.adds].add.push({ ref: 'ins:' + c.insumos[0].id, qtd: 0 }); salvar(); });
     el.querySelectorAll('.cuRev').forEach(i => i.onchange = async () => { try { await db.atualizarProduto(+i.dataset.p, { custo: +i.value || 0 }); S.base.produtos.find(p => p.id === +i.dataset.p).custo = +i.value || 0; toast('Custo de compra salvo'); pintar(); } catch (e) { erro(e); } });
-    el.querySelector('#cuAplicar').onclick = async () => { const ls = S.base.produtos.map(p => [p, custoProducao(c, p)]).filter(([, k]) => k); try { for (const [p, k] of ls) { const v = Math.round(k.total * 100) / 100; await db.atualizarProduto(p.id, { custo: v }); p.custo = v; } toast(`Custo atualizado em ${ls.length} produtos`); pintar(); } catch (e) { erro(e); } };
+    el.querySelector('#cuAplicar').onclick = async () => { const b = el.querySelector('#cuAplicar'), ls = S.base.produtos.map(p => [p, custoProducao(c, p)]).filter(([, k]) => k); b.disabled = true; b.textContent = 'Atualizando…';
+      try { for (const [p, k] of ls) { const v = Math.round(k.total * 100) / 100; await db.atualizarProduto(p.id, { custo: v }); p.custo = v; }
+        const noBling = ls.filter(([p]) => p.bling_produto_id).map(([p]) => ({ id: p.bling_produto_id, custo: p.custo }));
+        let msg = `Custo atualizado em ${ls.length} produtos no app`;
+        if (noBling.length) { try { const r = await db.bling('atualizar_custos', { itens: noBling }), ok = (r.itens || []).filter(x => x.ok).length, falha = (r.itens || []).filter(x => !x.ok);
+            msg += ` · Bling: ${ok} de ${noBling.length} atualizados`; if (falha.length) console.warn('custos Bling', falha); if (falha.length) msg += ` (falhou: ${falha.map(x => x.nome || x.id).join(', ')}${falha[0]?.erro ? ' — ' + falha[0].erro.slice(0, 120) : ''})`; }
+          catch (e) { msg += ` · Bling não atualizado: ${/ação desconhecida/.test(e.message) ? 'publique a função bling-oauth nova' : e.message}`; } }
+        toast(msg); } catch (e) { erro(e); } pintar(); };
   };
   pintar();
 }

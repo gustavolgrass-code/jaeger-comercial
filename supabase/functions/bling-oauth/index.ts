@@ -202,6 +202,24 @@ async function escreverFin(metodo: string, caminho: string, corpo: unknown) {
   return j;
 }
 
+// custo dos produtos: grava o preço de custo (fornecedor.precoCusto) de cada produto e confere lendo de volta
+async function atualizarCustos(itens: { id: string | number; custo: number }[]) {
+  const token = await tokenValido(), out: unknown[] = [];
+  for (const it of (itens || []).slice(0, 50)) {
+    const id = String(it.id || '').replace(/\D/g, ''), custo = Math.round(Number(it.custo) * 100) / 100;
+    if (!id || !(custo >= 0)) { out.push({ id, ok: false, erro: 'dados inválidos' }); continue; }
+    try {
+      const atual = (await chamar(`/produtos/${id}`, token) as any)?.data ?? {}, f = atual.fornecedor ?? {}, antes = Number(f.precoCusto ?? 0);
+      const corpo = { fornecedor: { ...(f.id ? { id: f.id } : {}), ...(f.contato?.id ? { contato: { id: f.contato.id } } : {}), precoCusto: custo } };
+      const r = await fetch(`${API}/produtos/${id}`, { method: 'PATCH', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json', 'enable-jwt': '1' }, body: JSON.stringify(corpo) });
+      const txt = await r.text(); if (!r.ok) throw new Error(`Bling (${r.status}): ${txt.slice(0, 400)}`);
+      const depois = Number(((await chamar(`/produtos/${id}`, token) as any)?.data?.fornecedor?.precoCusto) ?? NaN);
+      out.push({ id, nome: atual.nome, codigo: atual.codigo, antes, depois, ok: Math.abs(depois - custo) < 0.005 });
+    } catch (e) { out.push({ id, ok: false, erro: String((e as Error).message || e) }); }
+  }
+  return { itens: out };
+}
+
 // cliente novo: procura pelo nome exato e, se não existir, cria o cadastro no Bling com os dados do app
 async function criarContatoBling(p: any, doc: string, token: string): Promise<number | null> {
   if (!p?.nome) return null;
@@ -398,7 +416,7 @@ Deno.serve(async (req) => {
   const jwt = (req.headers.get('Authorization') ?? '').replace('Bearer ', '');
   const { data: u } = await db.auth.getUser(jwt);
   if (!u?.user) return json({ erro: 'não autorizado' }, 401);
-  const { acao, inicio, caminho, pedido_id, contato_id, metodo, corpo, paginas } = await req.json().catch(() => ({}));
+  const { acao, inicio, caminho, pedido_id, contato_id, metodo, corpo, paginas, itens } = await req.json().catch(() => ({}));
   try {
     if (acao === 'status') {
       const { data } = await db.from('bling_conexao').select('conectado_em, ultima_sync, ultimo_resultado, ultimo_erro, refresh_token').eq('id', 1).maybeSingle();
@@ -418,6 +436,7 @@ Deno.serve(async (req) => {
     if (acao === 'fin_listar') return json(await listarTudo(String(caminho || ''), Math.min(50, Number(paginas) || 20)));
     if (acao === 'fin_escrever') return json(await escreverFin(String(metodo || ''), String(caminho || ''), corpo));
     if (acao === 'itens') return json(await puxarItens());
+    if (acao === 'atualizar_custos') return json(await atualizarCustos(itens));
     if (acao === 'enviar_pedido') return json(await enviarPedido(String(pedido_id || '')));
     if (acao === 'atualizar_pedido') return json(await enviarPedido(String(pedido_id || ''), true));
     if (acao === 'excluir_pedido') return json(await excluirPedido(String(pedido_id || '')));
