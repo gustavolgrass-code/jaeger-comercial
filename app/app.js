@@ -1333,7 +1333,7 @@ function telaAbertura() {
   if (p && S.prefillVenda?.pdv === p.id) { const q = S.prefillVenda.q; S.prefillVenda = null; document.querySelectorAll('.oq').forEach(i => i.value = q[i.dataset.p] || 0); calc(); toast('Itens do pedido excluído já preenchidos: corrija e lance de novo'); }
   // venda guardada para entrega: volta preenchida (itens, preços, pagamento); ao lançar, sai da rota
   const encV = p && encVenda(p.id);
-  if (encV) { $('#oExp').value = encV.exp || ''; fill(); Object.entries(encV.precos || {}).forEach(([pid, v]) => { const o = document.querySelector(`.opr[data-p="${pid}"]`); if (o) o.value = v; });
+  if (encV) { $('#oExp').value = encV.exp || ''; fill(); if (encV.pago != null && $('#oPago')) $('#oPago').checked = !!encV.pago; if (encV.obsV && $('#oObs')) $('#oObs').value = encV.obsV; Object.entries(encV.precos || {}).forEach(([pid, v]) => { const o = document.querySelector(`.opr[data-p="${pid}"]`); if (o) o.value = v; });
     document.querySelectorAll('.olp').forEach(i => { const o = document.querySelector(`.opr[data-linha="${i.dataset.linha}"]`); if (o) i.value = (+o.value).toFixed(2); });
     document.querySelectorAll('.oq').forEach(i => i.value = encV.q?.[i.dataset.p] || 0);
     const r = document.querySelector(`input[name=oc][value="${encV.forma}"]`); if (r) r.checked = true; if (encV.vencimento) $('#oVenc').value = encV.vencimento; if (encV.min) $('#oMin').value = encV.min;
@@ -1356,7 +1356,7 @@ function telaAbertura() {
     if (entO.on()) { const e = entO.ler(); if (!e.data) return toast('Escolha a data da entrega');
       const q = {}, precos = {}; itens.forEach(i => { if (i.quantidade) q[i.produto_id] = i.quantidade; precos[i.produto_id] = i.preco_unit; });
       $('#oSave').disabled = true;
-      try { await salvarEncomenda(p.id, { tipo: 'venda', q, precos, forma: div ? f1 : c, vencimento: venc, exp: $('#oExp').value ? +$('#oExp').value : null, min: +$('#oMin').value || null, ...e });
+      try { await salvarEncomenda(p.id, { tipo: 'venda', q, precos, pago: $('#oPago')?.checked, obsV: $('#oObs')?.value || '', forma: div ? f1 : c, vencimento: venc, exp: $('#oExp').value ? +$('#oExp').value : null, min: +$('#oMin').value || null, ...e });
         toast(`📦 Venda para entrega salva para ${dstr(e.data + 'T12:00')}: entra na rota desse dia`); S.abPdv = null; const volta = S.vendaVolta; S.vendaVolta = null;
         if (volta?.aba === 'perfil') abrirPerfil(p.id); else if (volta?.aba === 'mapa') { S.sel = p.id; irPara('mapa'); } else if (volta?.aba === 'rota') irPara('rota'); else telaAbertura(); } catch (er) { erro(er); $('#oSave').disabled = false; } return; }
     $('#oSave').disabled = true;
@@ -2650,7 +2650,7 @@ function ligarPag(px, base, muda = () => { }) {
     return { ok: !div || parc.every(x => x.valor > 0), pago: q('.pgpago').checked, condicao, forma: cond(), total: tot, vencimento: div ? parc.map(x => x.vencimento).filter(Boolean).sort().pop() || null : (q('.pgv').value || null), parcelas: parc, frete: f,
       extra: { ...(div ? { pagamentos: parc } : {}), ...(f.v ? { frete: f.v, frete_cobrado: f.cobrado } : {}) } }; };
   // repõe um pagamento guardado (encomenda)
-  const preencher = g => { if (!g) return; const r = R.querySelector(`input[name=${px}c][value="${g.forma}"]`); if (r) r.checked = true; mostraNB(); if (g.vencimento) q('.pgv').value = g.vencimento;
+  const preencher = g => { if (!g) return; const r = R.querySelector(`input[name=${px}c][value="${g.forma}"]`); if (r) r.checked = true; mostraNB(); if (g.vencimento) q('.pgv').value = g.vencimento; if (g.pago != null) { q('.pgpago').checked = !!g.pago; pagoMexeu = true; }
     if (g.frete?.v) { q('.pgfr').checked = true; q('.pgfrbox').hidden = false; q('.pgfrv').value = g.frete.v; const fq = R.querySelector(`input[name=${px}fq][value="${g.frete.cobrado ? 1 : 0}"]`); if (fq) fq.checked = true; }
     if (g.parcelas?.length > 1) { abrirDiv(true); montar(g.parcelas.map(x => ({ f: x.forma, v: x.valor, d: x.vencimento }))); } };
   return { total, ler, preencher, resto };
@@ -2719,8 +2719,8 @@ async function telaReposicao() {
     const a = ant[pr.id] ?? 0, rc = reC[pr.id];
     h += `<div class="lin" data-p="${pr.id}" data-ant="${a}" data-alvo="${alvo(ex.id, pr.id)}" data-pre="${preco(pr)}">
      <div class="sab"><b>${esc(pr.sabor)}</b><small>deixado: ${a}${precos[pr.id] != null ? ` · ${brl(preco(pr))}` : ''}</small></div>
-     <div class="cel"><small>Encontrado</small>${stepper('enc', rc ? rc.encontrado : a)}</div>
-     <div class="cel"><small>Troca</small>${stepper('trc', rc ? rc.troca : 0, true)}</div>
+     <div class="cel"><small>Encontrado</small>${stepper('enc', rc ? rc.encontrado : encL[pr.id]?.enc != null ? encL[pr.id].enc : a)}</div>
+     <div class="cel"><small>Troca</small>${stepper('trc', rc ? rc.troca : encL[pr.id]?.trc || 0, true)}</div>
      <div class="cel"><small>Repor</small>${stepper('rep', rc ? Math.max(0, rc.reposto - rc.troca - (reB[pr.id] || 0)) : encL[pr.id] ? encL[pr.id].rep || 0 : 0, false, rc || enc ? 'data-mexeu="1"' : '')}</div>
      <div class="cel"><small>Bonificação</small>${stepper('bon', rc ? reB[pr.id] || 0 : encL[pr.id]?.bon || 0, true)}</div>
      <div class="res"><small>sell-out</small><b class="so">0</b><small class="val">—</small></div></div>`; });
@@ -2756,7 +2756,7 @@ async function telaReposicao() {
     kitsUsados[i] = (kitsUsados[i] || 0) + 1; document.querySelector(`[data-kq="${i}"]`).textContent = '×' + kitsUsados[i]; calc(); });
   const zerar = cls => { linhas().forEach(r => cls.forEach(c => { const i = r.querySelector('.' + c); if (i) { i.value = 0; i.dataset.mexeu = 1; } })); if (cls.includes('rep')) Object.keys(kitsUsados).forEach(k => { delete kitsUsados[k]; document.querySelector(`[data-kq="${k}"]`).textContent = ''; }); calc(); };
   $('#kZerar').onclick = () => zerar(['rep']); $('#kZerEnc').onclick = () => zerar(['enc']); $('#kZerTudo').onclick = () => zerar(['rep', 'enc', 'trc', 'bon']);
-  pag = ligarPag('rp', () => valItens, () => calc()); pag.preencher(enc?.pag); calc();
+  pag = ligarPag('rp', () => valItens, () => calc()); pag.preencher(enc?.pag); if (enc && enc.bling === false && $('#rBling')) $('#rBling').checked = false; calc();
   // pedido para entrega: em vez de fechar, guarda como encomenda para o dia escolhido
   const ent = re ? null : ligarEntrega('rp', on => { $('#fechar').textContent = on ? '📦 Salvar para entrega' : 'Fechar reposição'; $('#rBlingL').style.display = on ? 'none' : ''; });
   atualizaPix();
@@ -2766,9 +2766,9 @@ async function telaReposicao() {
   $('#fechar').onclick = async () => {
     const t = calc(), g = pag.ler(), pg = g.condicao, venc = g.vencimento, mandar = $('#rBling').checked;
     if (!g.ok) return toast('Cada parcela precisa ter valor, e a soma não pode passar do total');
-    if (ent?.on()) { const e = ent.ler(), ln = {}; linhas().forEach(r => { const rp = +r.querySelector('.rep').value || 0, bn = +r.querySelector('.bon').value || 0; if (rp || bn) ln[r.dataset.p] = { rep: rp, bon: bn }; });
-      if (!Object.keys(ln).length) return toast('Coloque os itens do pedido em Repor'); if (!e.data) return toast('Escolha a data da entrega');
-      try { await salvarEncomenda(p.id, { tipo: 'reposicao', linhas: ln, pag: { forma: g.forma, vencimento: g.vencimento, parcelas: g.parcelas, frete: g.frete }, ...e });
+    if (ent?.on()) { const e = ent.ler(), ln = {}; linhas().forEach(r => { const v = c => r.querySelector('.' + c).value, rp = +v('rep') || 0, bn = +v('bon') || 0, en = v('enc'), tr = +v('trc') || 0; ln[r.dataset.p] = { rep: rp, bon: bn, trc: tr, enc: en === '' ? null : +en }; });
+      if (!Object.values(ln).some(x => x.rep || x.bon)) return toast('Coloque os itens do pedido em Repor'); if (!e.data) return toast('Escolha a data da entrega');
+      try { await salvarEncomenda(p.id, { tipo: 'reposicao', linhas: ln, pag: { forma: g.forma, vencimento: g.vencimento, parcelas: g.parcelas, frete: g.frete, pago: g.pago }, bling: mandar, ...e });
         toast(`📦 Entrega salva para ${dstr(e.data + 'T12:00')}: entra na rota desse dia`); S.contando = null; voltarDaRep(); } catch (er) { erro(er); } return; }
     // reposto (físico) = vendido + trocas repostas; o pedido cobra só o vendido
     // bonificação: vai para o expositor (entra no reposto e sai do carro), mas não é cobrada
