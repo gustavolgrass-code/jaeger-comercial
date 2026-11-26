@@ -128,6 +128,7 @@ export async function tarefasDoPdv(pdvId) { return ok(await sb.from('tarefas').s
 export async function tarefasDoContato(id) { return ok(await sb.from('tarefas').select('*').eq('contato_id', id).order('data')); }
 export async function criarTarefa(obj) { return ok(await sb.from('tarefas').insert(obj).select().single()); }
 export async function atualizarTarefa(id, patch) { return ok(await sb.from('tarefas').update(patch).eq('id', id).select().single()); }
+export async function tarefasComMarca(data, marca) { return ok(await sb.from('tarefas').select('id, pdv_id, dono').eq('data', data).ilike('descricao', '%' + marca + '%')); }
 export async function excluirTarefa(id) { return ok(await sb.from('tarefas').delete().eq('id', id)); }
 export async function carregarEtapasTodas() { return ok(await sb.from('pdv_etapas').select('pdv_id, para, em')); }
 const dia0 = d => new Date(d + 'T00:00:00').toISOString(), diaFim = d => new Date(new Date(d + 'T00:00:00').getTime() + 864e5).toISOString();

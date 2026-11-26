@@ -145,6 +145,7 @@ async function iniciar() {
     montar();
     avaliarRisco();
     limparPedidook();
+    setTimeout(gerarLigacoesEstoque, 4000);
     if (location.hash.startsWith('#bling=')) { const h = new URLSearchParams(location.hash.slice(1)); history.replaceState(null, '', location.pathname); if (h.get('bling') === 'ok') { toast('Bling conectado! Lendo os pedidos…'); irPara('regras'); try { const r = await db.bling('sincronizar'); S.blingSync = Date.now(); await recarregar(); toast('Bling: ' + resumoSync(r)); irPara('regras'); } catch (e) { erro(e); } } else { irPara('regras'); toast('Não conectou ao Bling: ' + (h.get('msg') || 'erro')); } }
     else setTimeout(syncBlingAuto, 3000);
   } catch (e) { $('#raiz').innerHTML = `<div class="loading">Não foi possível carregar: ${esc(e.message)}</div>`; }
@@ -1072,6 +1073,48 @@ async function telaFunil() {
     c.ondrop = e => { e.preventDefault(); c.classList.remove('drop'); if (arr) mudarEtapa(arr, c.dataset.et, telaFunil); arr = null; }; });
 }
 
+
+/* =================== ligações de estoque na véspera da rota =================== */
+// todo dia: para cada região cuja rota é amanhã, uma tarefa sem horário "Ligar: como está o estoque?" para quem vence até a rota seguinte dela
+const MARCA_EST = '[estoque]';
+const ehLigEst = t => String(t?.descricao || '').includes(MARCA_EST);
+function ligacoesDeHoje() {
+  const h = hojeISO(), am = isoDe(new Date(new Date(h + 'T12:00').getTime() + DIA)), dowAm = new Date(am + 'T12:00').getDay();
+  const regAm = new Set(S.base.regioes.filter(g => g.dia_rota === dowAm).map(g => g.codigo)), semDia = new Set(S.base.regioes.filter(g => g.dia_rota == null).map(g => g.codigo));
+  const limite = isoDe(new Date(new Date(am + 'T12:00').getTime() + 6 * DIA));
+  return { am, lista: S.pdvs.filter(p => repoe(p) && !adiadoAte(p, am) && p.proxima_reposicao && !(S.base.regras.encomendas || {})[p.id] && (
+    regAm.has(p.regiao) ? ymd(p.proxima_reposicao) <= limite : (semDia.has(p.regiao) || !p.regiao) && ymd(p.proxima_reposicao) === am)) };
+}
+async function gerarLigacoesEstoque() {
+  const h = hojeISO(), chave = 'jg-ligest-' + h; if (lerG(chave) || !S.eu?.id) return;
+  try {
+    const { am, lista } = ligacoesDeHoje(); if (!lista.length) { guardar(chave, '1'); return; }
+    const ja = new Set((await db.tarefasComMarca(h, MARCA_EST)).map(t => t.pdv_id));
+    let n = 0; for (const p of lista.filter(p => !ja.has(p.id))) {
+      const dias = Math.round((new Date(ymd(p.proxima_reposicao) + 'T12:00') - new Date(am + 'T12:00')) / DIA);
+      await db.criarTarefa({ titulo: 'Ligar: como está o estoque?', tipo: 'ligacao', data: h, hora: null, duracao_min: 15, pdv_id: p.id, contato_id: p.contato_id || null, dono: S.eu.id,
+        descricao: `${MARCA_EST} Rota de amanhã (${dstr(am + 'T12:00')}). Reposição ${dias <= 0 ? 'vence até amanhã' : `vence em ${dias + 1} dias`}.` }); n++; }
+    guardar(chave, '1'); if (n) toast(`📞 ${n} ligaç${n === 1 ? 'ão' : 'ões'} de estoque na Agenda de hoje (rota de amanhã)`);
+  } catch (e) { console.warn('ligações de estoque', e); }
+}
+// respostas: guardadas por cliente para sugerir a frequência
+const RESP_EST = { repor: '✅ Precisa repor', zerou: '🔴 Zerou / quase zerando', tem: '📦 Ainda tem bastante', nao: '📵 Não atendeu' };
+async function responderLigEst(t, r, dias) {
+  const p = S.pdvs.find(x => x.id === t.pdv_id), am = isoDe(new Date(new Date(ymd(t.data) + 'T12:00').getTime() + DIA)); if (!p) return;
+  if (r === 'repor' || r === 'zerou') await salvarEncomenda(p.id, { tipo: 'reposicao', data: am, periodo: 'dia_todo', origem: 'ligacao', obs: r === 'zerou' ? 'Zerou ou quase zerando (ligação de estoque)' : 'Confirmou a reposição (ligação de estoque)', linhas: {} });
+  let ate = null; if (r === 'tem') { ate = isoDe(new Date(new Date(am + 'T12:00').getTime() + dias * DIA)); const ad = { ...(S.base.regras.adiados || {}), [p.id]: ate }; await db.salvarRegra('adiados', ad); S.base.regras.adiados = ad; }
+  const hist = { ...(S.base.regras.resp_estoque || {}) }; hist[p.id] = [...(hist[p.id] || []), { d: hojeISO(), r }].slice(-6); await db.salvarRegra('resp_estoque', hist).catch(() => { }); S.base.regras.resp_estoque = hist;
+  const txt = `📞 Ligação de estoque: ${RESP_EST[r]}${r === 'tem' ? ` · volta para a rota em ${dstr(ate + 'T12:00')}` : r === 'nao' ? '' : ` · entra na rota de ${dstr(am + 'T12:00')}${r === 'zerou' ? ' com prioridade' : ''}`}`;
+  await db.criarNota(p.id, txt, S.eu.id).catch(() => { });
+  await db.atualizarTarefa(t.id, { concluida: true, concluida_em: new Date().toISOString(), descricao: `${t.descricao || ''}\nResposta: ${RESP_EST[r]}${ate ? ' (até ' + dstr(ate + 'T12:00') + ')' : ''}` });
+  toast(txt.replace('📞 Ligação de estoque: ', p.nome + ': '));
+}
+// sugestão de frequência a partir das últimas respostas
+function sugestaoFreq(p) { const rs = (S.base.regras.resp_estoque || {})[p.id] || [], ult = rs.filter(x => x.r !== 'nao').slice(-2), atual = +p.cadencia_dias || p.cadencia_efetiva || ritmoCompra(p.id) || 14;
+  if (ult.length === 2 && ult.every(x => x.r === 'tem')) return { d: Math.min(60, atual + 7), txt: 'nas 2 últimas ligações ainda tinha estoque' };
+  if (ult.length === 2 && ult.every(x => x.r === 'zerou')) return { d: Math.max(7, atual - 3), txt: 'nas 2 últimas ligações estava zerando' };
+  return null; }
+
 /* =================== agenda =================== */
 const TIPOS = { visita: { n: 'Visita', c: '#D08A3C' }, ligacao: { n: 'Ligação', c: '#3F6FA8' }, whatsapp: { n: 'WhatsApp', c: '#2F7D4E' }, reuniao: { n: 'Reunião', c: '#6B4FA0' }, outro: { n: 'Outro', c: '#8C7E74' } };
 const H0 = 7, H1 = 21, HPX = 56;
@@ -1119,6 +1162,9 @@ function modalTarefa(t = {}, depois) {
   <div class="row"><div style="flex:1"><label>Data</label><input id="tData" type="date" value="${ymd(t.data) || hojeISO()}"></div><div style="flex:1"><label>Hora</label><input id="tHora" type="time" value="${t.hora ? String(t.hora).slice(0, 5) : ''}"></div><div style="flex:1"><label>Duração</label><select id="tDur">${[15, 30, 45, 60, 90, 120].map(m => `<option value="${m}" ${(t.duracao_min || 30) === m ? 'selected' : ''}>${m} min</option>`).join('')}</select></div></div>
   <label>Negócio (opcional)</label><input id="tPdv" list="lPdv" value="${esc((S.pdvs.find(p => p.id === t.pdv_id) || {}).nome || '')}" placeholder="Digite para buscar"><datalist id="lPdv">${S.pdvs.map(p => `<option value="${esc(p.nome)}">`).join('')}</datalist>
   <label>Contato (opcional)</label><input id="tCt" list="lCt" value="${esc((S.contatos.find(c => c.id === t.contato_id) || {}).nome || '')}" placeholder="Digite para buscar"><datalist id="lCt">${S.contatos.map(c => `<option value="${esc(c.nome)}">`).join('')}</datalist>
+  ${!novo && ehLigEst(t) && !t.concluida ? `<div class="ligest"><b>Como está o estoque?</b><div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px"><button class="btn pri" data-le="repor">${RESP_EST.repor}</button><button class="btn" data-le="zerou" style="color:var(--t-bad)">${RESP_EST.zerou}</button><button class="btn" data-le="nao">${RESP_EST.nao}</button></div>
+   <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center"><span>${RESP_EST.tem}: tirar da rota por</span>${[3, 5, 7].map(d => `<button class="btn" data-le="tem" data-dias="${d}">${d} dias</button>`).join('')}</div>
+   <small style="color:var(--mute);display:block;margin-top:6px">Precisa repor e zerou entram na rota de amanhã como entrega combinada (zerou com prioridade). A resposta fica no histórico do cliente.</small></div>` : ''}
   <label>Detalhes</label><textarea id="tDesc" rows="2">${esc(t.descricao || '')}</textarea>
   <div class="row" style="margin-top:14px;justify-content:space-between;flex-wrap:wrap">
    <div class="row">${novo ? '' : `<button class="btn" id="tDel" style="color:var(--t-bad)">Excluir</button><button class="btn" id="tFeita">${t.concluida ? 'Reabrir' : '✓ Concluir'}</button>`}</div>
@@ -1135,6 +1181,8 @@ function modalTarefa(t = {}, depois) {
       if (novo) await db.criarTarefa({ ...o, dono: S.eu.id }); else await db.atualizarTarefa(t.id, o);
       if (o.pdv_id) await atualizarUm(o.pdv_id); if (t.pdv_id && t.pdv_id !== o.pdv_id) await atualizarUm(t.pdv_id);
       toast('Tarefa salva'); fim(); } catch (e) { toast(e.message); } };
+  document.querySelectorAll('[data-le]').forEach(b => b.onclick = async () => { document.querySelectorAll('[data-le]').forEach(x => x.disabled = true);
+    try { await responderLigEst(t, b.dataset.le, +b.dataset.dias || 0); if (t.pdv_id) await atualizarUm(t.pdv_id); fim(); } catch (e) { document.querySelectorAll('[data-le]').forEach(x => x.disabled = false); erro(e); } });
   if (!novo) {
     $('#tFeita').onclick = async () => { try { await db.atualizarTarefa(t.id, { concluida: !t.concluida, concluida_em: t.concluida ? null : new Date().toISOString() }); if (t.pdv_id) await atualizarUm(t.pdv_id); toast(t.concluida ? 'Tarefa reaberta' : 'Tarefa concluída'); fim(); } catch (e) { erro(e); } };
     $('#tDel').onclick = async () => { try { await db.excluirTarefa(t.id); if (t.pdv_id) await atualizarUm(t.pdv_id); toast('Tarefa excluída'); fim(); } catch (e) { erro(e); } };
@@ -2862,8 +2910,9 @@ const quando = d => new Date(d).toLocaleString('pt-BR', { day: '2-digit', month:
 // "Repor a cada N dias" no perfil do negócio
 function campoFrequencia(p) { if (!CART.includes(p.etapa) && !p.cadencia_dias && !S.compraTs?.[p.id]) return '';
   const pad = cadPadrao()[p.etapa], rit = ritmoCompra(p.id), ops = [7, 10, 14, 15, 21, 28, 30, 45, 60], cd = +p.cadencia_dias || null;
-  return `<div class="row" style="gap:8px;margin:8px 0 0;align-items:center;flex-wrap:wrap"><span>🔁 Repor a cada</span><select id="pCad"><option value="">automático (${rit ? `ritmo de compra: ${rit} dias` : `padrão da etapa: ${pad || 14} dias`})</option>${[...new Set([...ops, ...(cd ? [cd] : [])])].sort((a, b) => a - b).map(d => `<option value="${d}" ${cd === d ? 'selected' : ''}>${d} dias</option>`).join('')}<option value="outro">Outro…</option></select>${cd && rit && Math.abs(rit - cd) >= 5 ? `<small style="color:var(--mute)">ele costuma comprar a cada ${rit} dias</small>` : ''}</div>`; }
-function ligarFrequencia(p) { const sel = $('#pCad'); if (!sel) return; sel.onchange = () => { let v = sel.value;
+  return `<div class="row" style="gap:8px;margin:8px 0 0;align-items:center;flex-wrap:wrap"><span>🔁 Repor a cada</span><select id="pCad"><option value="">automático (${rit ? `ritmo de compra: ${rit} dias` : `padrão da etapa: ${pad || 14} dias`})</option>${[...new Set([...ops, ...(cd ? [cd] : [])])].sort((a, b) => a - b).map(d => `<option value="${d}" ${cd === d ? 'selected' : ''}>${d} dias</option>`).join('')}<option value="outro">Outro…</option></select>${cd && rit && Math.abs(rit - cd) >= 5 ? `<small style="color:var(--mute)">ele costuma comprar a cada ${rit} dias</small>` : ''}${(sg => sg ? `<small style="background:var(--bg-warn);padding:3px 8px;border-radius:6px">💡 ${sg.txt}: repor a cada ${sg.d} dias? <a href="#" id="pCadSug" data-d="${sg.d}">aplicar</a></small>` : '')(sugestaoFreq(p))}</div>`; }
+function ligarFrequencia(p) { const sel = $('#pCad'); if (!sel) return;
+  if ($('#pCadSug')) $('#pCadSug').onclick = e => { e.preventDefault(); const d = +e.target.dataset.d, rs = { ...(S.base.regras.resp_estoque || {}) }; rs[p.id] = []; db.salvarRegra('resp_estoque', rs).then(() => S.base.regras.resp_estoque = rs).catch(() => { }); salvarPdv(p.id, { cadencia_dias: d }, `Reposição a cada ${d} dias`); }; sel.onchange = () => { let v = sel.value;
   if (v === 'outro') { const n = parseInt(prompt('Repor a cada quantos dias?', p.cadencia_dias || 14), 10); if (!(n > 0 && n <= 365)) { sel.value = p.cadencia_dias || ''; return; } v = n; }
   salvarPdv(p.id, { cadencia_dias: v ? +v : null }, v ? `Reposição a cada ${v} dias` : 'Frequência automática'); }; }
 async function telaPerfil() {
