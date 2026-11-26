@@ -652,3 +652,8 @@ section:fullscreen #mapa{height:100vh}
 .vozbtn.ouvindo{background:#DC2626;border-color:#DC2626;color:#fff;opacity:1;animation:vozpulse 1.2s infinite}
 @keyframes vozpulse{0%{box-shadow:0 0 0 0 rgba(220,38,38,.5)}70%{box-shadow:0 0 0 10px rgba(220,38,38,0)}100%{box-shadow:0 0 0 0 rgba(220,38,38,0)}}
 .vozbox>input~.vozbtn{top:50%;transform:translateY(-50%)}
+/* atalhos do pedido no topo (ficam visíveis ao rolar) */
+.atalhos{position:sticky;top:0;z-index:30;display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 10px;margin:8px 0 12px;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.06)}
+.atalhos>b{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);margin-right:4px}
+.atalhos .atsep{flex:1}
+.atalhos .kq{color:var(--car-d)}
