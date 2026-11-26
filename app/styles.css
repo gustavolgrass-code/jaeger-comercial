@@ -722,3 +722,5 @@ section:fullscreen #mapa{height:100vh}
 .msbtn.on{border-color:var(--choc);font-weight:600}
 .msmenu{max-height:70vh;overflow-y:auto}
 .ligest{background:var(--bg-info);border-radius:10px;padding:10px 12px;margin:4px 0 6px}
+.pfin{background:var(--sand);border-radius:10px;padding:10px 12px;margin:12px 0 0}
+.pfin .btn{text-decoration:none}

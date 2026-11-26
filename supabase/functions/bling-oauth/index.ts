@@ -256,6 +256,71 @@ async function atualizarPrecos(itens: { id: string | number; preco: number }[]) 
   return { itens: out };
 }
 
+// ---------- financeiro do pedido: contas a receber, baixa e nota fiscal ----------
+const hojeBR = () => new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+async function pedidoBling(pedidoId: string) {
+  const { data: ped } = await db.from('pedidos').select('id, numero, bling_id, condicao, valor').eq('id', pedidoId).maybeSingle();
+  if (!ped) throw new Error('Pedido não encontrado'); if (!ped.bling_id) throw new Error('Este pedido ainda não foi enviado ao Bling'); return ped;
+}
+// contas a receber geradas pelo pedido (com link do boleto e do Pix)
+async function contasDoPedido(bid: string, token: string) {
+  let ids: number[] = [];
+  try { const r: any = await chamar(`/contas/receber/boletos?idOrigem=${bid}`, token); const d = r?.data ?? r; ids = (d?.contas ?? (Array.isArray(d) ? d.flatMap((x: any) => x.contas ?? []) : [])).map((c: any) => Number(c.id)).filter(Boolean); } catch { /* segue */ }
+  if (!ids.length) { const de = new Date(Date.now() - 200 * 864e5).toISOString().slice(0, 10), ate = new Date(Date.now() + 400 * 864e5).toISOString().slice(0, 10);
+    for (let pg = 1; pg <= 10; pg++) { const r: any = await chamar(`/contas/receber?dataInicial=${de}&dataFinal=${ate}&pagina=${pg}&limite=100`, token); const d = r?.data ?? [];
+      d.filter((c: any) => String(c.origem?.id ?? '') === String(bid)).forEach((c: any) => ids.push(Number(c.id))); if (d.length < 100) break; } }
+  const out: any[] = [];
+  for (const id of [...new Set(ids)]) { try { const c: any = (await chamar(`/contas/receber/${id}`, token))?.data ?? {};
+    out.push({ id: c.id, situacao: c.situacao, valor: c.valor, saldo: c.saldo, vencimento: c.vencimento, forma: c.formaPagamento?.id, conta: c.contaContabil?.descricao ?? null, linkBoleto: c.linkBoleto || null, linkPix: c.linkQRCodePix || null }); } catch { /* ignora */ } }
+  return out;
+}
+// lança as contas do pedido no Bling (se ainda não tiver) e devolve as contas
+async function contasPedido(pedidoId: string) {
+  const token = await tokenValido(), ped = await pedidoBling(pedidoId);
+  let contas = await contasDoPedido(String(ped.bling_id), token), lancou = false;
+  if (!contas.length) {
+    const r = await enviarBling('POST', `/pedidos/vendas/${ped.bling_id}/lancar-contas`, {}, token);
+    if (!r.ok && !/lan[cç]ad/i.test(r.txt)) throw new Error(`O Bling não lançou as contas (${r.status}): ${r.txt}`);
+    lancou = true; await new Promise(res => setTimeout(res, 1200)); contas = await contasDoPedido(String(ped.bling_id), token);
+  }
+  return { pedido: ped.numero, lancou, contas };
+}
+// baixa (recebimento) das contas do pedido: só as que não são boleto; conta financeira pela forma (Regras e metas)
+async function baixarPedido(pedidoId: string) {
+  const token = await tokenValido(), { contas, lancou } = await contasPedido(pedidoId);
+  const { data: rb } = await db.from('regras').select('valor').eq('chave', 'bling').maybeSingle(), { data: rp } = await db.from('regras').select('valor').eq('chave', 'fin_portadores').maybeSingle();
+  const formas: Record<string, any> = rb?.valor?.formas ?? {}, port: Record<string, any> = rp?.valor ?? {}, nomeForma: Record<string, string> = {};
+  Object.entries(formas).forEach(([n, id]) => nomeForma[String(id)] = n);
+  let fp: any[] = []; try { fp = ((await chamar('/formas-pagamentos?limite=100', token)) as any)?.data ?? []; } catch { /* segue */ }
+  const ehBoleto = (id: any) => /boleto/i.test(nomeForma[String(id)] ?? '') || fp.some((f: any) => String(f.id) === String(id) && (f.tipoPagamento === 15 || /boleto/i.test(f.descricao)));
+  const nomeDe = (id: any) => nomeForma[String(id)] ?? (fp.find((f: any) => String(f.id) === String(id))?.descricao ?? '');
+  let blingConta: number | null = null;
+  const portadorDe = async (id: any) => { const n = nomeDe(id), k = Object.keys(port).find(x => semAc(n).startsWith(semAc(x))); if (k && port[k]) return Number(port[k]);
+    if (/pix/i.test(n)) { if (blingConta == null) { try { const cs = ((await chamar('/contas-contabeis', token)) as any)?.data ?? []; blingConta = Number(cs.find((c: any) => /bling conta/i.test(c.descricao))?.id) || 0; } catch { blingConta = 0; } } return blingConta || null; }
+    return null; };
+  const out: any[] = [];
+  for (const c of contas) {
+    if (![1, 3].includes(Number(c.situacao))) { out.push({ id: c.id, ok: true, ja: true }); continue; }
+    if (ehBoleto(c.forma)) { out.push({ id: c.id, ok: true, boleto: true }); continue; }
+    const pid = await portadorDe(c.forma), corpo: any = { data: hojeBR(), valorRecebido: Number(c.saldo || c.valor), historico: 'Recebido na entrega (app Jaeger)', ...(pid ? { portador: { id: pid } } : {}) };
+    const r = await enviarBling('POST', `/contas/receber/${c.id}/baixar`, corpo, token);
+    out.push({ id: c.id, valor: corpo.valorRecebido, forma: nomeDe(c.forma), ok: r.ok, ...(r.ok ? {} : { erro: `Bling (${r.status}): ${r.txt}` }) });
+  }
+  return { lancou, contas: out };
+}
+// nota fiscal: gera a NF-e do pedido, transmite para a SEFAZ e devolve número e links
+async function lerNfe(id: number | string, token: string) { const n: any = (await chamar(`/nfe/${id}`, token))?.data ?? {}; return { id: n.id, numero: n.numero, serie: n.serie, situacao: n.situacao, chave: n.chaveAcesso || null, linkDanfe: n.linkDanfe || null, linkPDF: n.linkPDF || null, valor: n.valorNota }; }
+async function gerarNfe(pedidoId: string, nfeId?: string) {
+  const token = await tokenValido(); let id = nfeId ? Number(nfeId) : 0;
+  if (!id) { const ped = await pedidoBling(pedidoId);
+    const r = await fetch(`${API}/pedidos/vendas/${ped.bling_id}/gerar-nfe`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'enable-jwt': '1' } });
+    const j: any = await r.json().catch(() => ({})); if (!r.ok) throw new Error(`O Bling não gerou a nota (${r.status}): ${JSON.stringify(j?.error ?? j).slice(0, 600)}`);
+    id = Number(j?.data?.idNotaFiscal ?? j?.idNotaFiscal); if (!id) throw new Error('O Bling não devolveu o número da nota'); }
+  const env = await enviarBling('POST', `/nfe/${id}/enviar`, {}, token);
+  await new Promise(res => setTimeout(res, 1500));
+  return { ...(await lerNfe(id, token)), enviada: env.ok, ...(env.ok ? {} : { erro: `A nota foi criada no Bling, mas não foi autorizada: ${env.txt}` }) };
+}
+
 // cliente novo: procura pelo nome exato e, se não existir, cria o cadastro no Bling com os dados do app
 async function criarContatoBling(p: any, doc: string, token: string): Promise<number | null> {
   if (!p?.nome) return null;
@@ -452,7 +517,7 @@ Deno.serve(async (req) => {
   const jwt = (req.headers.get('Authorization') ?? '').replace('Bearer ', '');
   const { data: u } = await db.auth.getUser(jwt);
   if (!u?.user) return json({ erro: 'não autorizado' }, 401);
-  const { acao, inicio, caminho, pedido_id, contato_id, metodo, corpo, paginas, itens } = await req.json().catch(() => ({}));
+  const { acao, inicio, caminho, pedido_id, contato_id, metodo, corpo, paginas, itens, nfe_id } = await req.json().catch(() => ({}));
   try {
     if (acao === 'status') {
       const { data } = await db.from('bling_conexao').select('conectado_em, ultima_sync, ultimo_resultado, ultimo_erro, refresh_token').eq('id', 1).maybeSingle();
@@ -474,6 +539,10 @@ Deno.serve(async (req) => {
     if (acao === 'itens') return json(await puxarItens());
     if (acao === 'atualizar_custos') return json(await atualizarCustos(itens));
     if (acao === 'atualizar_precos') return json(await atualizarPrecos(itens));
+    if (acao === 'contas_pedido') return json(await contasPedido(String(pedido_id || '')));
+    if (acao === 'baixar_pedido') return json(await baixarPedido(String(pedido_id || '')));
+    if (acao === 'gerar_nfe') return json(await gerarNfe(String(pedido_id || ''), nfe_id ? String(nfe_id) : undefined));
+    if (acao === 'nfe') return json(await lerNfe(String(nfe_id || ''), await tokenValido()));
     if (acao === 'enviar_pedido') return json(await enviarPedido(String(pedido_id || '')));
     if (acao === 'atualizar_pedido') return json(await enviarPedido(String(pedido_id || ''), true));
     if (acao === 'excluir_pedido') return json(await excluirPedido(String(pedido_id || '')));
