@@ -113,13 +113,17 @@ const alvo = (expoId, prodId) => (S.base.alvo.find(a => a.expositor_id === expoI
 async function estimarProximas() {
   let ds; try { ds = await db.datasPedidos(); } catch (e) { return; }
   const por = {}; ds.forEach(o => (por[o.pdv_id] = por[o.pdv_id] || []).push(new Date(o.criado_em).getTime()));
-  S.pdvs.forEach(p => { const ts = (por[p.id] || []).sort((a, b) => a - b); if (!ts.length) return;
-    const dias = []; for (let i = 1; i < ts.length; i++) { const d = (ts[i] - ts[i - 1]) / DIA; if (d >= 3) dias.push(d); }
-    dias.sort((a, b) => a - b); const med = dias.length ? dias[Math.floor(dias.length / 2)] : 14, inter = Math.max(7, Math.min(45, Math.round(med)));
-    const est = new Date(ts[ts.length - 1] + inter * DIA), atual = p.proxima_reposicao ? new Date(p.proxima_reposicao) : null;
-    p.ultima_compra_em = new Date(ts[ts.length - 1]).toISOString();
-    if (!atual || est > atual) { p.proxima_reposicao = isoDe(est); p.prox_por_compra = true; } });
+  S.compraTs = {}; Object.entries(por).forEach(([id, ts]) => S.compraTs[id] = ts.sort((a, b) => a - b));
+  S.pdvs.forEach(estimarUm);
 }
+// ritmo de compra do cliente (mediana entre compras, 7 a 45 dias); null sem histórico
+function ritmoCompra(id) { const ts = S.compraTs?.[id] || []; const dias = []; for (let i = 1; i < ts.length; i++) { const d = (ts[i] - ts[i - 1]) / DIA; if (d >= 3) dias.push(d); }
+  if (!dias.length) return null; dias.sort((a, b) => a - b); return Math.max(7, Math.min(45, Math.round(dias[Math.floor(dias.length / 2)]))); }
+// frequência escolhida no perfil manda; sem ela, o ritmo de compra
+function estimarUm(p) { const ts = S.compraTs?.[p.id] || []; if (!ts.length) return;
+  const inter = +p.cadencia_dias || ritmoCompra(p.id) || 14, est = new Date(ts[ts.length - 1] + inter * DIA), atual = p.proxima_reposicao ? new Date(p.proxima_reposicao) : null;
+  p.ultima_compra_em = new Date(ts[ts.length - 1]).toISOString();
+  if (!atual || est > atual) { p.proxima_reposicao = isoDe(est); p.prox_por_compra = true; } }
 async function recarregar() {
   const [pdvs, so, cts] = await Promise.all([db.carregarPdvs(), db.carregarSellouts(), db.listarContatos().catch(() => [])]);
   S.pdvs = pdvs; S.contatos = cts;
@@ -796,7 +800,7 @@ function painel() {
   ligarComentario(() => painel());
   s.querySelectorAll('[data-rev]').forEach(b => b.onclick = () => revisar(p, b.dataset.rev));
 }
-async function atualizarUm(id) { const n = await db.carregarPdv(id); const i = S.pdvs.findIndex(x => x.id === id); if (i >= 0) S.pdvs[i] = n; else S.pdvs.push(n); if (S.aba === 'mapa' && !S.prosp) { desenhar(); painel(); } }
+async function atualizarUm(id) { const n = await db.carregarPdv(id); estimarUm(n); const i = S.pdvs.findIndex(x => x.id === id); if (i >= 0) S.pdvs[i] = n; else S.pdvs.push(n); if (S.aba === 'mapa' && !S.prosp) { desenhar(); painel(); } }
 async function salvarPdv(id, patch, msg) { try { await db.atualizarPdv(id, patch); await atualizarUm(id); toast(msg); if (S.aba !== 'mapa') irPara(S.aba); } catch (e) { erro(e); } }
 async function revisar(p, acao) {
   if (acao === 'retirar') return salvarPdv(p.id, { etapa: 'inativo' }, 'Expositor recolhido: PDV foi para Inativo');
@@ -2855,6 +2859,13 @@ window.abrirPerfil = abrirPerfil; window.abrirContato = abrirContato;
 const linkWpp = t => { const d = soDig(t); return d.length >= 10 ? `https://wa.me/${d.length <= 11 ? '55' + d : d}` : null; };
 const quando = d => new Date(d).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
 
+// "Repor a cada N dias" no perfil do negócio
+function campoFrequencia(p) { if (!CART.includes(p.etapa) && !p.cadencia_dias && !S.compraTs?.[p.id]) return '';
+  const pad = cadPadrao()[p.etapa], rit = ritmoCompra(p.id), ops = [7, 10, 14, 15, 21, 28, 30, 45, 60], cd = +p.cadencia_dias || null;
+  return `<div class="row" style="gap:8px;margin:8px 0 0;align-items:center;flex-wrap:wrap"><span>🔁 Repor a cada</span><select id="pCad"><option value="">automático (${rit ? `ritmo de compra: ${rit} dias` : `padrão da etapa: ${pad || 14} dias`})</option>${[...new Set([...ops, ...(cd ? [cd] : [])])].sort((a, b) => a - b).map(d => `<option value="${d}" ${cd === d ? 'selected' : ''}>${d} dias</option>`).join('')}<option value="outro">Outro…</option></select>${cd && rit && Math.abs(rit - cd) >= 5 ? `<small style="color:var(--mute)">ele costuma comprar a cada ${rit} dias</small>` : ''}</div>`; }
+function ligarFrequencia(p) { const sel = $('#pCad'); if (!sel) return; sel.onchange = () => { let v = sel.value;
+  if (v === 'outro') { const n = parseInt(prompt('Repor a cada quantos dias?', p.cadencia_dias || 14), 10); if (!(n > 0 && n <= 365)) { sel.value = p.cadencia_dias || ''; return; } v = n; }
+  salvarPdv(p.id, { cadencia_dias: v ? +v : null }, v ? `Reposição a cada ${v} dias` : 'Frequência automática'); }; }
 async function telaPerfil() {
   const p = S.pdvs.find(x => x.id === S.perfilId);
   if (!p) { $('#main').innerHTML = '<section class="view on"><div class="empty">Negócio não encontrado.</div></section>'; return; }
@@ -2882,6 +2893,7 @@ async function telaPerfil() {
      <div class="badges"><span class="badge st" style="background:${etapa(p.etapa).c}">${etapa(p.etapa).n}</span>${p.classe ? `<span class="badge">Classe ${p.classe}</span>` : ''}<span class="badge">${p.regiao || '—'} · ${esc(regNome(p.regiao))}</span>${p.expositor_id ? `<span class="badge">Expositor ${esc(expo(p.expositor_id).nome)}</span>` : ''}<span class="badge">${'★'.repeat(p.potencial || 0) || 'sem potencial'}</span>${p.geo_precisao && p.geo_precisao !== 'exata' ? `<span class="badge" style="background:var(--bg-warn)">localização ${esc(p.geo_precisao)}</span>` : ''}</div>
      ${p.razao_social || p.cnpj ? `<p style="color:var(--soft);margin:6px 0">${esc(p.razao_social || '')}${p.cnpj ? ' · CNPJ ' + esc(p.cnpj.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5')) : ''}</p>` : ''}
      <p style="color:var(--soft);margin:6px 0">${esc(p.endereco || 'Sem endereço')}${p.condicao ? ` · Condição: <b>${esc(p.condicao)}</b>` : ''}${p.proxima_reposicao ? ` · Próxima reposição: <b>${dstr(p.proxima_reposicao)}</b> (${prazoTxt(p)})` : ''}</p>
+     ${campoFrequencia(p)}
      ${adiadoAte(p) ? `<p style="background:var(--bg-warn);padding:8px 10px;border-radius:8px;margin:8px 0 0">🗓️ Reposição postergada até <b>${dstr(adiadoAte(p) + 'T12:00')}</b>: até lá não entra sozinho na rota. <a href="#" id="pRetomar">retomar agora</a></p>` : ''}
      ${p.observacao ? `<p style="background:var(--sand);padding:8px 10px;border-radius:8px;margin:8px 0 0">${esc(p.observacao)}</p>` : ''}
      <div class="row" style="flex-wrap:wrap;margin-top:12px">
@@ -2931,6 +2943,7 @@ async function telaPerfil() {
     S.etapasMapa = new Set([p.etapa]); S.modoPend = false; S.sel = p.id; irPara('mapa'); mapa.setView([p.lat, p.lng], 16); }; // abre o mapa filtrado na etapa deste negócio
   $('#pAjustar').onclick = () => { irPara('mapa'); if (p.lat) mapa.setView([p.lat, p.lng], 17); marcando = true; $('#hint').textContent = 'Toque no lugar exato de ' + p.nome; $('#hint').style.display = 'block';
     aoMarcar = async ([lng, lat]) => { try { const g = await geoReverso(lat, lng); await db.atualizarPdv(p.id, { lat, lng, geo_precisao: 'manual', regiao: await garantirRegiao(lng, lat, g.cidade || p.cidade), endereco: g.rua || p.endereco, bairro: g.bairro || p.bairro, cidade: g.cidade || p.cidade }); $('#hint').textContent = 'Toque no mapa onde fica o ponto'; await atualizarUm(p.id); toast('Localização ajustada'); } catch (e) { erro(e); } }; };
+  ligarFrequencia(p);
   $('#pEditar').onclick = () => { modal(`<h3>Editar ${esc(p.nome)}</h3><label>Nome fantasia</label><input id="eNome" value="${esc(p.nome)}">${campoEmpresa('e', p)}<label>Canal</label>${campoCanal('eCanal', p.canal)}
     ${(() => { const sp = separarRua(p); return `<div class="row"><div style="flex:3"><label>Rua</label><input id="eEnd" value="${esc(sp.rua)}" placeholder="Av. Benjamin Constant"></div><div style="flex:1"><label>Número</label><input id="eNum" value="${esc(sp.num)}" inputmode="numeric"></div></div>
     <div class="row"><div style="flex:2"><label>Bairro</label><input id="eBai" value="${esc(p.bairro || '')}"></div><div style="flex:2"><label>Cidade</label><input id="eCid" value="${esc(p.cidade || '')}"></div><div style="flex:.8"><label>UF</label><input id="eUf" value="${esc(p.uf || (p.cidade ? 'RS' : ''))}" maxlength="2" style="text-transform:uppercase"></div><div style="flex:1.4"><label>CEP</label><input id="eCep" value="${esc(p.cep || '')}" inputmode="numeric" placeholder="00000-000"></div></div>
