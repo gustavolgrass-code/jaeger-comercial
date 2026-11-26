@@ -322,3 +322,5 @@ export async function editarPedido(pedidoId, { itens, condicao, vencimento }) {
     if (rows.length && o.criado_por) await sb.from('estoque_mov').insert(rows); } catch (e) { }
   return { valor, unidades };
 }
+
+export async function atualizarProduto(id, patch) { return ok(await sb.from('produtos').update(patch).eq('id', id).select()); }
