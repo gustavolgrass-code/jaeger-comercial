@@ -69,11 +69,22 @@ export async function atualizarPdv(id, patch) { if ('etapa' in patch && !('etapa
 export async function registrarVisita(pdvId, tipo, observacao, usuarioId, resultado = null) {
   return ok(await sb.from('visitas').insert({ pdv_id: pdvId, tipo, observacao, usuario_id: usuarioId, resultado }).select().single());
 }
+// a primeira compra de um cliente é sempre abertura: o pedido vai como abertura e o cliente entra em avaliação (ganho no funil),
+// mesmo que a etapa tenha sido trocada à mão para Ativo antes da venda
+async function primeiraCompra(pdvId, pedido) {
+  if (!pedido || pedido.tipo === 'abertura') return pedido;
+  const { count } = await sb.from('pedidos').select('id', { count: 'exact', head: true }).eq('pdv_id', pdvId);
+  if (count) return pedido;
+  const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+  await sb.from('pdvs').update({ etapa: 'avaliacao', avaliacao_inicio: hoje, etapa_motivo: 'Primeira compra (abertura)' }).eq('id', pdvId);
+  return { ...pedido, tipo: 'abertura' };
+}
 async function gravarContagemEPedido({ pdvId, tipoVisita, usuarioId, contagens, pedido, itens, observacao }) {
   const visita = await registrarVisita(pdvId, tipoVisita, observacao, usuarioId);
   if (contagens.length) ok(await sb.from('contagens').insert(contagens.map(c => ({ ...c, visita_id: visita.id }))));
   let ped = null;
   if (pedido) {
+    pedido = await primeiraCompra(pdvId, pedido);
     ped = ok(await sb.from('pedidos').insert({ ...pedido, pdv_id: pdvId, visita_id: visita.id, criado_por: usuarioId }).select().single());
     const its = itens.filter(i => i.quantidade > 0 || i.bonificado > 0); // bonificação entra no pedido com quantidade 0 (não é cobrada)
     if (its.length) ok(await sb.from('pedido_itens').insert(its.map(i => ({ ...i, pedido_id: ped.id }))));
@@ -143,6 +154,7 @@ export async function blingIgnorar(blingId) { return ok(await sb.from('bling_orf
 export async function registrarVenda({ pdvId, usuarioId, pedido, itens, patch }) {
   // venda para quem já é cliente também é uma reposição: gera a visita, para contar no Dia de rota e recalcular a próxima reposição
   const vis = pedido.tipo === 'reposicao' ? await registrarVisita(pdvId, 'reposicao', 'Venda registrada sem contagem do expositor', usuarioId) : null;
+  pedido = await primeiraCompra(pdvId, pedido);
   const ped = ok(await sb.from('pedidos').insert({ ...pedido, pdv_id: pdvId, criado_por: usuarioId, ...(vis ? { visita_id: vis.id } : {}) }).select().single());
   const its = itens.filter(i => i.quantidade > 0);
   if (its.length) ok(await sb.from('pedido_itens').insert(its.map(i => ({ ...i, pedido_id: ped.id }))));
