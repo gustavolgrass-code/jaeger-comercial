@@ -231,7 +231,20 @@ function pintarMenu() {
 }
 // navegação com "voltar" de verdade: cada tela guarda de onde veio (aba + cliente/contato aberto)
 S.hist = []; S.fil = {};
+// posição de rolagem de cada tela: ao sair guarda, ao voltar devolve para onde estava
+const ROLA = {};
+const chaveRola = (a, c = {}) => a + (['perfil', 'contato', 'pedcli'].includes(a) ? ':' + (c.perfilId || '') + ':' + (c.contatoId || '') : '');
+const selRola = el => el.id ? '#' + CSS.escape(el.id) : el.tagName.toLowerCase() + [...el.classList].map(c => '.' + CSS.escape(c)).join('');
+function guardarRola() { const m = $('#main'); if (!m || !S.aba) return; const ls = [];
+  [m, ...m.querySelectorAll('*')].forEach(el => { if (el.scrollTop > 0 || el.scrollLeft > 0) { const sel = selRola(el), n = el === m ? 0 : [...m.querySelectorAll(sel)].indexOf(el); ls.push({ sel, n, t: el.scrollTop, l: el.scrollLeft, raiz: el === m }); } });
+  ROLA[chaveRola(S.aba, S.histEnt)] = ls; }
+function restaurarRola(k) { const ls = ROLA[k]; if (!ls?.length) return; let tent = 0;
+  const vai = () => { const m = $('#main'); let falta = 0;
+    ls.forEach(x => { const el = x.raiz ? m : m.querySelectorAll(x.sel)[x.n]; if (!el || el.scrollHeight - el.clientHeight < x.t - 2) { falta++; return; } el.scrollTop = x.t; el.scrollLeft = x.l; });
+    if (falta && ++tent < 30) setTimeout(vai, 100); };
+  requestAnimationFrame(vai); }
 function irPara(a, semHist) {
+  guardarRola();
   const ctx = { perfilId: S.perfilId, contatoId: S.contatoId }, mesmo = S.aba === a && S.histEnt && S.histEnt.perfilId === ctx.perfilId && S.histEnt.contatoId === ctx.contatoId;
   const topo = S.hist[S.hist.length - 1], ehTopo = topo && topo.aba === a && (!['perfil', 'contato', 'pedcli'].includes(a) || (topo.perfilId === ctx.perfilId && topo.contatoId === ctx.contatoId));
   if (!semHist && ehTopo) S.hist.pop(); // voltando para a tela anterior (ex.: depois de salvar uma venda): não empilha de novo
@@ -239,6 +252,7 @@ function irPara(a, semHist) {
   S.aba = a; S.histEnt = ctx;
   pintarMenu();
   ({ agenda: telaAgenda, perfil: telaPerfil, contato: telaContato, contatos: telaContatos, uploads: telaUploads, mapa: telaMapa, funil: telaFunil, carteira: telaCarteira, abertura: telaAbertura, painel: telaPainel, regras: telaRegras, rota: telaRota, reposicao: telaReposicao, pedcli: telaPedidosCliente, resumo: telaResumo, carteiramet: telaCarteiraMet, estoque: telaEstoque, pedidos: telaPedidos, fpainel: telaFinPainel, freceber: () => telaContas('receber'), fpagar: () => telaContas('pagar'), fcaixa: telaCaixas })[a]();
+  restaurarRola(chaveRola(a, S.histEnt));
 }
 window.irPara = irPara;
 // texto do botão Voltar: diz para onde vai (ex.: "← Almeida 68" quando veio do perfil do negócio)
