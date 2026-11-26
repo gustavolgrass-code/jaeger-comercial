@@ -2009,7 +2009,7 @@ function painelCustos() {
      <h4 style="margin:16px 0 6px">Custo e margem por produto</h4><div style="overflow-x:auto"><table class="dped"><tr><th>Produto</th><th>Ingredientes</th><th>Embalagem</th><th>Mão de obra</th><th>CIF</th><th>Custo</th><th>Preço</th><th>Margem</th></tr>
       ${prods.map(p => { const k = custoProducao(c, p), cu = k ? k.total : +p.custo || 0, mg = +p.preco ? (+p.preco - cu) / +p.preco : null; return `<tr><td>${esc(nomeProd(p))}${k ? '' : ' <small style="color:var(--mute)">revenda</small>'}</td>
         ${k ? `<td>${R2(k.ingr)}</td><td>${R2(k.emb)}</td><td>${R2(k.mo)}</td><td>${R2(k.cif)}</td><td><b>${R2(k.total)}</b></td>` : `<td colspan="4"><small style="color:var(--mute)">custo de compra →</small></td><td><input type="number" step="0.01" class="cuRev" data-p="${p.id}" value="${(+p.custo || 0).toFixed(2)}" style="width:80px"></td>`}
-        <td>${R2(+p.preco || 0)}</td><td><b style="color:${mg == null ? 'inherit' : mg >= 0.45 ? 'var(--t-ok)' : mg >= 0.3 ? 'var(--car-d)' : 'var(--t-bad)'}">${mg == null ? '—' : Math.round(mg * 100) + '%'}</b></td></tr>`; }).join('')}</table></div>
+        <td><input type="number" step="0.05" min="0" class="cuPreco" data-p="${p.id}" value="${(+p.preco || 0).toFixed(2)}" style="width:80px" title="Preço de tabela: vale para todos os clientes sem preço próprio"></td><td><b style="color:${mg == null ? 'inherit' : mg >= 0.45 ? 'var(--t-ok)' : mg >= 0.3 ? 'var(--car-d)' : 'var(--t-bad)'}">${mg == null ? '—' : Math.round(mg * 100) + '%'}</b></td></tr>`; }).join('')}</table></div>
      <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn pri" id="cuAplicar">Enviar estes custos para o Bling</button></div>
      <small style="color:var(--mute)">A coluna Custo é a base do Painel e do Financeiro (margem, perdas, CAC). Muda sozinha quando você altera insumos, fichas ou premissas.</small>`;
     el.querySelectorAll('.cuP').forEach(i => i.onchange = () => { c.premissas[i.dataset.k] = +i.value || 0; salvar(); });
@@ -2024,6 +2024,7 @@ function painelCustos() {
     el.querySelectorAll('[data-dels]').forEach(b => b.onclick = () => { const [cod, j] = b.dataset.dels.split(':'); c.sabores[cod].add.splice(+j, 1); salvar(); });
     el.querySelectorAll('[data-adds]').forEach(b => b.onclick = () => { c.sabores[b.dataset.adds].add.push({ ref: 'ins:' + c.insumos[0].id, qtd: 0 }); salvar(); });
     el.querySelectorAll('.cuRev').forEach(i => i.onchange = async () => { try { await db.atualizarProduto(+i.dataset.p, { custo: +i.value || 0 }); S.base.produtos.find(p => p.id === +i.dataset.p).custo = +i.value || 0; toast('Custo de compra salvo'); pintar(); } catch (e) { erro(e); } });
+    el.querySelectorAll('.cuPreco').forEach(i => i.onchange = () => mudarPrecoTabela(S.base.produtos.find(p => p.id === +i.dataset.p), Math.round(+i.value * 100) / 100, pintar));
     el.querySelector('#cuAplicar').onclick = async () => { const b = el.querySelector('#cuAplicar'), ls = S.base.produtos.map(p => [p, custoProducao(c, p)]).filter(([, k]) => k); b.disabled = true; b.textContent = 'Atualizando…';
       try { for (const [p, k] of ls) { const v = Math.round(k.total * 100) / 100; await db.atualizarProduto(p.id, { custo: v }); p.custo = v; }
         const noBling = ls.filter(([p]) => p.bling_produto_id).map(([p]) => ({ id: p.bling_produto_id, custo: p.custo }));
@@ -2037,6 +2038,24 @@ function painelCustos() {
 }
 
 // custo do produto: o calculado pela ficha técnica (Regras e metas → Custos de produção); revenda, o custo de compra digitado
+// novo preço de tabela: clientes sem preço próprio passam a pagar o novo; quem tem preço guardado continua com o dele
+async function mudarPrecoTabela(prod, novo, depois) {
+  if (!prod || !(novo > 0) || Math.abs(novo - +prod.preco) < 0.001) return depois?.();
+  const irmaos = S.base.produtos.filter(x => x.id !== prod.id && x.linha && x.linha === prod.linha && Math.abs(+x.preco - +prod.preco) < 0.001);
+  const ps = [prod, ...(irmaos.length && confirm(`Aplicar ${brl(novo)} também aos outros sabores da linha ${prod.linha} (${irmaos.map(x => x.sabor || x.nome).join(', ')})?`) ? irmaos : [])];
+  let prop = []; try { prop = await db.precosProprios(); } catch (e) { }
+  const comProprio = prop.filter(c => ps.some(x => c.precos[x.id] != null));
+  if (!confirm(`Novo preço de tabela: ${brl(+prod.preco)} → ${brl(novo)} (${ps.map(x => nomeProd(x)).join(', ')}).\n\nVale para todos os clientes sem preço próprio.${comProprio.length ? `\n${comProprio.length} cliente${comProprio.length === 1 ? '' : 's'} com preço próprio continua${comProprio.length === 1 ? '' : 'm'} com o dele: ${comProprio.slice(0, 8).map(c => c.nome).join(', ')}${comProprio.length > 8 ? '…' : ''}.` : ''}\n\nTambém atualizo o preço no Bling. Confirmar?`)) return depois?.();
+  try {
+    for (const x of ps) { await db.atualizarProduto(x.id, { preco: novo }); x.preco = novo; }
+    let msg = `Preço de tabela agora é ${brl(novo)}`;
+    const nb = ps.filter(x => x.bling_produto_id).map(x => ({ id: x.bling_produto_id, preco: novo }));
+    if (nb.length) { try { const r = await db.bling('atualizar_precos', { itens: nb }), ok = (r.itens || []).filter(x => x.ok).length; msg += ` · Bling: ${ok} de ${nb.length}`; if (ok < nb.length) console.warn('preços Bling', r.itens); }
+      catch (e) { msg += ` · Bling não atualizado: ${/ação desconhecida/.test(e.message) ? 'publique a função bling-oauth nova' : e.message}`; } }
+    PV.dados = null; toast(msg);
+  } catch (e) { erro(e); }
+  depois?.();
+}
 function custoAtual(p) { const k = p && S.base?.regras?.custos_producao ? custoProducao(custosCfg(), p) : null; return k ? Math.round(k.total * 100) / 100 : +(p?.custo || 0); }
 // mantém o custo gravado no cadastro do app igual ao calculado (usado por relatórios e pelo Bling)
 function sincCustos() { (S.base?.produtos || []).forEach(p => { const v = custoAtual(p); if (Math.abs(v - (+p.custo || 0)) > 0.004) { p.custo = v; db.atualizarProduto(p.id, { custo: v }).catch(() => { }); } }); }

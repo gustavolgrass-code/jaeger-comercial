@@ -240,6 +240,22 @@ async function atualizarCustos(itens: { id: string | number; custo: number }[]) 
   return { itens: out };
 }
 
+// preço de venda (tabela) dos produtos: PATCH do produto e confere lendo de volta
+async function atualizarPrecos(itens: { id: string | number; preco: number }[]) {
+  const token = await tokenValido(), out: unknown[] = [];
+  for (const it of (itens || []).slice(0, 50)) {
+    const id = String(it.id || '').replace(/\D/g, ''), preco = Math.round(Number(it.preco) * 100) / 100;
+    if (!id || !(preco > 0)) { out.push({ id, ok: false, erro: 'dados inválidos' }); continue; }
+    try {
+      const atual = (await chamar(`/produtos/${id}`, token) as any)?.data ?? {}, antes = Number(atual.preco ?? 0);
+      const r = await enviarBling('PATCH', `/produtos/${id}`, { preco }, token);
+      const depois = Number(((await chamar(`/produtos/${id}`, token) as any)?.data?.preco) ?? NaN);
+      out.push({ id, nome: atual.nome, antes, depois, ok: Math.abs(depois - preco) < 0.005, ...(r.ok ? {} : { erro: `Bling (${r.status}): ${r.txt}` }) });
+    } catch (e) { out.push({ id, ok: false, erro: String((e as Error).message || e) }); }
+  }
+  return { itens: out };
+}
+
 // cliente novo: procura pelo nome exato e, se não existir, cria o cadastro no Bling com os dados do app
 async function criarContatoBling(p: any, doc: string, token: string): Promise<number | null> {
   if (!p?.nome) return null;
@@ -457,6 +473,7 @@ Deno.serve(async (req) => {
     if (acao === 'fin_escrever') return json(await escreverFin(String(metodo || ''), String(caminho || ''), corpo));
     if (acao === 'itens') return json(await puxarItens());
     if (acao === 'atualizar_custos') return json(await atualizarCustos(itens));
+    if (acao === 'atualizar_precos') return json(await atualizarPrecos(itens));
     if (acao === 'enviar_pedido') return json(await enviarPedido(String(pedido_id || '')));
     if (acao === 'atualizar_pedido') return json(await enviarPedido(String(pedido_id || ''), true));
     if (acao === 'excluir_pedido') return json(await excluirPedido(String(pedido_id || '')));

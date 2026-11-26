@@ -167,6 +167,7 @@ export async function registrarVenda({ pdvId, usuarioId, pedido, itens, patch })
 }
 // preços combinados com o cliente: { produto_id: preço }
 export async function precosCliente(pdvId) { const r = await sb.from('pdvs').select('precos').eq('id', pdvId).maybeSingle(); if (r.error) return {}; return r.data?.precos || {}; }
+export async function precosProprios() { const r = await sb.from('pdvs').select('id, nome, precos').not('precos', 'is', null); if (r.error) return []; return (r.data || []).filter(x => x.precos && Object.keys(x.precos).length); }
 export async function salvarPrecos(pdvId, precos) { return ok(await sb.from('pdvs').update({ precos }).eq('id', pdvId)); }
 export async function datasPedidos() { return tudo(() => sb.from('pedidos').select('pdv_id, criado_em').order('criado_em')); }
 export async function resumoPedidos() { return ok(await sb.from('pedidos').select('pdv_id, criado_em, valor, unidades').limit(10000)); }
