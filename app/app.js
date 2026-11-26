@@ -3244,6 +3244,7 @@ async function telaFinPainel() {
   const mcR = N.fat ? N.margem - perdas - freteNosso : 0, mcRA = NA.margem;
   const hero = (n, v, sub, dl, sp, cls = '') => `<div class="fhero ${cls}"><small>${n}</small><b>${v}</b><div class="fhs">${dl}${sub ? `<span>${sub}</span>` : ''}</div>${sp || ''}</div>`;
   const card = (num, n, v, sub, stK, extra = '') => `<div class="fcard"><div class="fch"><small><em>${num}</em>${n}</small>${st(stK)}</div><b>${v}</b>${extra}<p>${sub}</p></div>`;
+  const totMix = Object.values(mix).reduce((a, b) => a + b, 0);
   const perdP = N.fat ? perdas / N.fat : null, inadP = totRec ? totVenc / totRec : null, ltvCac = CAC ? LTV / CAC : null;
   const peP = PE ? fatMes / PE : null, mixOrd = Object.entries(mix).sort((a, b) => b[1] - a[1]), corMix = { Pix: COR.s1, Boleto: COR.s2, 'Cartão': COR.s3, Dinheiro: '#8b5cf6', Outro: 'var(--neutro)' };
   const agingCor = [COR.aviso, COR.s2, COR.ruim];
