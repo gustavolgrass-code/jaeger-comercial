@@ -235,8 +235,8 @@ async function idForma(nome: string, cfg: Record<string, any>, token: string): P
 
 async function enviarPedido(pedidoId: string) {
   const token = await tokenValido();
-  const { data: ped, error } = await db.from('pedidos').select('*, pdvs(*, contatos(nome, telefone, whatsapp, email)), pedido_itens(quantidade, bonificado, preco_unit, produtos(id, linha, sabor, preco, bling_produto_id, bling_codigo))').eq('id', pedidoId).single();
-  if (error || !ped) throw new Error('pedido não encontrado');
+  const { data: ped, error } = await db.from('pedidos').select('*, pdvs(*, contatos!pdvs_contato_id_fkey(nome, telefone, whatsapp, email)), pedido_itens(quantidade, bonificado, preco_unit, produtos(id, linha, sabor, preco, bling_produto_id, bling_codigo))').eq('id', pedidoId).single();
+  if (error || !ped) { const msg = 'Não consegui ler o pedido no banco: ' + (error?.message || 'pedido não encontrado'); await db.from('pedidos').update({ bling_status: 'erro', bling_erro: msg }).eq('id', pedidoId); throw new Error(msg); }
   if (ped.bling_id) return { ja_enviado: true, bling_id: ped.bling_id, numero: ped.bling_pedido_id };
   const { data: rg } = await db.from('regras').select('valor').eq('chave', 'bling').maybeSingle();
   const cfg = (rg?.valor ?? {}) as Record<string, any>;
