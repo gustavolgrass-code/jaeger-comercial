@@ -673,9 +673,9 @@ section:fullscreen #mapa{height:100vh}
 .fhero>small{color:var(--mute);font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.6px}
 .fhero>b{font-family:var(--fh);font-size:30px;font-weight:600;line-height:1.05;letter-spacing:-.5px}
 .fhero.neg>b{color:var(--t-bad)}
-.fhs{display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--mute);max-width:62%}
+.fhs{display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--mute)}
 .fdl{font-size:12px;font-weight:700}
-.fspk{position:absolute;right:14px;bottom:14px;width:110px;height:34px}
+.fspk{position:absolute;right:16px;top:14px;width:84px;height:28px;opacity:.9}
 .fgrid{display:grid;grid-template-columns:repeat(12,1fr);gap:12px}
 .fgrid>.panel{margin:0;min-width:0}
 .fgrid .s8{grid-column:span 8}.fgrid .s7{grid-column:span 7}.fgrid .s5{grid-column:span 5}.fgrid .s4{grid-column:span 4}

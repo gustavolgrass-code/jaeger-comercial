@@ -3270,10 +3270,10 @@ async function telaFinPainel() {
        <dl class="fdl2"><div><dt>Custo fixo do mês</dt><dd>${brl(fixoMes)}</dd></div><div><dt>Margem de contribuição</dt><dd>${pctS(margemContrib)}</dd></div><div><dt>${peP >= 1 ? 'Acima do equilíbrio' : 'Falta faturar'}</dt><dd>${brl(Math.abs(fatMes - PE))}</dd></div></dl>`}</div>
    </div>
    <div class="fcards">
-    ${card('3', 'Custo de perdas', pctS(perdP), `${brl(perdas)} · trocas ${brl(custoTroca)} · bonificação ${brl(custoBon)}`, faixa(perdP, 0.03, 0.06), barra(perdP || 0, 0.1, perdP > 0.06 ? COR.ruim : perdP > 0.03 ? COR.aviso : COR.bom, 0.03))}
-    ${card('4', 'CAC · custo por cliente novo', CAC == null ? '—' : brl(CAC), `${novos} novo${novos === 1 ? '' : 's'} · expositores ${brl(custoExp)} · bonificação ${brl(custoBonAb)} · ${visProsp} visitas ${brl(custoProsp)}`, CAC == null ? 'nd' : payback <= 3 ? 'ok' : payback <= 6 ? 'at' : 'cr')}
-    ${card('5', 'Payback · LTV ÷ CAC', payback == null ? '—' : (payback < 1 ? Math.round(payback * 30) + ' dias' : dec(payback) + ' meses'), `margem por cliente ${brl(mMensal)}/mês · LTV 12 meses ${brl(LTV)}`, faixa(ltvCac, 3, 1.5, false), ltvCac ? `<div class="kmeta"><span>LTV ÷ CAC</span><b>${dec(ltvCac)}×</b></div>${barra(ltvCac, Math.max(10, ltvCac), ltvCac >= 3 ? COR.bom : COR.aviso, 3)}` : '')}
-    ${card('10', 'Custo logístico', logP == null ? '—' : pctS(logP), `${brl(custoLog)} · ~${Math.round(km)} km × ${brl(P.custo_km)}/km + frete ${brl(freteNosso)}${paradas ? ` · ${brl(custoLog / paradas)} por parada` : ''}`, faixa(logP, 0.08, 0.12), barra(logP || 0, 0.25, logP > 0.12 ? COR.ruim : logP > 0.08 ? COR.aviso : COR.bom, 0.08))}
+    ${card('3', 'Perdas', pctS(perdP), `${brl(perdas)} · trocas ${brl(custoTroca)} · bonificação ${brl(custoBon)}`, faixa(perdP, 0.03, 0.06), barra(perdP || 0, 0.1, perdP > 0.06 ? COR.ruim : perdP > 0.03 ? COR.aviso : COR.bom, 0.03))}
+    ${card('4', 'CAC', CAC == null ? '—' : brl(CAC), `custo por cliente novo · ${novos} novo${novos === 1 ? '' : 's'} · expositores ${brl(custoExp)} · bonificação ${brl(custoBonAb)} · ${visProsp} visitas ${brl(custoProsp)}`, CAC == null ? 'nd' : payback <= 3 ? 'ok' : payback <= 6 ? 'at' : 'cr')}
+    ${card('5', 'Payback', payback == null ? '—' : (payback < 1 ? Math.round(payback * 30) + ' dias' : dec(payback) + ' meses'), `margem por cliente ${brl(mMensal)}/mês · LTV 12 meses ${brl(LTV)}`, faixa(ltvCac, 3, 1.5, false), ltvCac ? `<div class="kmeta"><span>LTV ÷ CAC</span><b>${dec(ltvCac)}×</b></div>${barra(ltvCac, Math.max(10, ltvCac), ltvCac >= 3 ? COR.bom : COR.aviso, 3)}` : '')}
+    ${card('10', 'Logística', logP == null ? '—' : pctS(logP), `${brl(custoLog)} · ~${Math.round(km)} km × ${brl(P.custo_km)}/km + frete ${brl(freteNosso)}${paradas ? ` · ${brl(custoLog / paradas)} por parada` : ''}`, faixa(logP, 0.08, 0.12), barra(logP || 0, 0.25, logP > 0.12 ? COR.ruim : logP > 0.08 ? COR.aviso : COR.bom, 0.08))}
    </div>
    <div class="fgrid">
     <div class="panel s7"><div class="fph"><h3>8 · Fluxo de caixa projetado</h3>${legenda([{ nome: 'Entra', cor: COR.bom }, { nome: 'Sai', cor: COR.ruim }])}</div>
@@ -3282,7 +3282,7 @@ async function telaFinPainel() {
     <div class="panel s5"><div class="fph"><h3>7 · Inadimplência</h3>${st(faixa(inadP, 0.05, 0.15))}</div>
      <div class="fduo"><div><small>Vencido</small><b style="color:${totVenc ? 'var(--t-bad)' : 'inherit'}">${brl(totVenc)}</b><span>${inadP == null ? '' : pctS(inadP) + ' do que há para receber'}</span></div><div><small>A receber em aberto</small><b>${brl(totRec)}</b><span>${recA.length} contas</span></div></div>
      <div class="fstack">${totVenc ? fx.map((x, i) => x.v ? `<i style="width:${x.v / totVenc * 100}%;background:${agingCor[i]}" data-tip="${x.n}: ${brl(x.v)}"></i>` : '').join('') : '<i style="width:100%;background:var(--sand)"></i>'}</div>
-     ${legenda(fx.map((x, i) => ({ nome: `${x.n} · ${brl(x.v)} (${x.q})`, cor: agingCor[i] })))}
+     ${legenda(fx.map((x, i) => ({ nome: `${x.n} · ${brl(x.v)} (${x.q})`, cor: agingCor[i], q: x.q })).filter(x => x.q || !totVenc))}
      ${venc.length ? `<table class="ftab"><tr><th>Quem está devendo</th><th>Atraso</th><th>Valor</th></tr>${venc.sort((a, b) => a.vencimento < b.vencimento ? -1 : 1).slice(0, 6).map(x => `<tr><td>${esc(nomeContato(x.contato))}</td><td>${atraso(x)} d</td><td><b>${brl(val(x.valor))}</b></td></tr>`).join('')}</table>` : '<p class="psub" style="margin-top:10px">Nenhuma conta vencida.</p>'}</div>
    </div>
    <div class="fgrid">
