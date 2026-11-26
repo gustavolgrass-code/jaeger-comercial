@@ -717,3 +717,7 @@ section:fullscreen #mapa{height:100vh}
 @media (max-width:1400px){.fcards{grid-template-columns:repeat(3,1fr)}}
 @media (max-width:1200px){.fheros,.fcards{grid-template-columns:repeat(2,1fr)}.fgrid .s8,.fgrid .s7,.fgrid .s5,.fgrid .s4{grid-column:span 12}}
 @media (max-width:700px){.fheros,.fcards,.fmini,.fcols{grid-template-columns:1fr}.fspk{display:none}.fhs{max-width:none}}
+
+.toolbar .msbtn{min-width:200px}
+.msbtn.on{border-color:var(--choc);font-weight:600}
+.msmenu{max-height:70vh;overflow-y:auto}

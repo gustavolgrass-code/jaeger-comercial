@@ -1130,22 +1130,37 @@ function listaTarefas(ts, vazio) {
 
 /* =================== carteira =================== */
 let ord = { k: 'nome', d: 1 };
+// seleção múltipla em lista suspensa (vazio = todos)
+const msHtml = (id, opts, atalhos = []) => `<div class="msel" id="${id}"><button type="button" class="msbtn" id="${id}Btn"></button><div class="msmenu" id="${id}Menu" hidden>${atalhos.length ? `<div class="msatalhos">${atalhos.map(([k, n]) => `<button type="button" data-msk="${k}">${n}</button>`).join('')}</div>` : ''}${opts.map(o => `<label><input type="checkbox" value="${o.k}">${o.c ? `<i class="dot" style="background:${o.c}"></i>` : ''}${esc(o.n)}</label>`).join('')}</div></div>`;
+function msLigar(id, set, todos, plural, nomeDe, aoMudar, atalhos = {}) {
+  const btn = $('#' + id + 'Btn'), menu = $('#' + id + 'Menu'), ins = [...menu.querySelectorAll('input')];
+  const rot = () => { ins.forEach(i => i.checked = set.has(i.value)); btn.textContent = !set.size ? todos : set.size === 1 ? nomeDe([...set][0]) : `${set.size} ${plural}`; btn.classList.toggle('on', set.size > 0); };
+  btn.onclick = e => { e.stopPropagation(); document.querySelectorAll('.msmenu').forEach(m => { if (m !== menu) m.hidden = true; }); menu.hidden = !menu.hidden; };
+  menu.onclick = e => e.stopPropagation();
+  ins.forEach(i => i.onchange = () => { i.checked ? set.add(i.value) : set.delete(i.value); rot(); aoMudar(); });
+  menu.querySelectorAll('[data-msk]').forEach(b => b.onclick = () => { set.clear(); (atalhos[b.dataset.msk] || []).forEach(k => set.add(k)); rot(); aoMudar(); });
+  if (!S.msFecha) { S.msFecha = true; document.addEventListener('click', () => document.querySelectorAll('.msmenu').forEach(m => { if (!m.closest('.mfpanel')) m.hidden = true; })); }
+  rot();
+}
 function telaCarteira() {
+  const FC = S.fil.cartMs = S.fil.cartMs || { et: new Set(), pr: new Set() };
   const RP = {}; let RU = S.rupCache || {};
-  $('#main').innerHTML = `<section class="view on"><div class="tablewrap"><div class="toolbar"><input id="q" placeholder="Buscar PDV…" style="width:240px"><select id="tEt"><option value="">Todas as etapas</option>${ETAPAS.map(e => `<option value="${e.k}">${e.n}</option>`).join('')}</select><select id="tPr"><option value="">Toda prioridade de reativação</option>${Object.entries(PRIOR).map(([k, x]) => `<option value="${k}">Reativar · ${x.n}</option>`).join('')}<option value="-">Sem prioridade definida</option></select><span id="tN" style="color:var(--mute)"></span><button class="btn pri" id="tNovo" style="margin-left:auto">+ Novo negócio</button></div><table id="tbl"></table></div></section>`;
+  $('#main').innerHTML = `<section class="view on"><div class="tablewrap"><div class="toolbar"><input id="q" placeholder="Buscar PDV…" style="width:240px">${msHtml('tEt', ETAPAS.map(e => ({ k: e.k, n: e.n, c: e.c })), [['todas', 'Todas'], ['carteira', 'Carteira'], ['prosp', 'Prospecção']])}${msHtml('tPr', [...Object.entries(PRIOR).map(([k, x]) => ({ k, n: 'Reativar · ' + x.n })), { k: '-', n: 'Sem prioridade definida' }], [['todas', 'Todas']])}<span id="tN" style="color:var(--mute)"></span><button class="btn pri" id="tNovo" style="margin-left:auto">+ Novo negócio</button></div><table id="tbl"></table></div></section>`;
   const cols = [['nome', 'PDV'], ['regiao', 'Região'], ['canal', 'Canal'], ['etapa', 'Etapa'], ['classe', 'Classe'], ['potencial', 'Potencial'], ['so', 'Sell-out médio'], ['rup', 'Ruptura'], ['ultima_compra', 'Última compra'], ['proxima_reposicao', 'Próx. reposição'], ['pr', 'Reativar']];
   const desenhaT = () => {
-    const q = $('#q').value.toLowerCase(), et = $('#tEt').value, pr = $('#tPr').value;
-    let ds = S.pdvs.filter(p => (!et || p.etapa === et) && (!pr || (pr === '-' ? !(REATIVAR.includes(p.etapa) && p.prioridade_reativacao) : REATIVAR.includes(p.etapa) && p.prioridade_reativacao === pr)) && (!q || p.nome.toLowerCase().includes(q))).map(p => { const s = (S.sellouts[p.id] || []).slice(-6), rp = RP[p.id]; return { ...p, so: s.length ? s.reduce((a, x) => a + x.sellout, 0) / s.length : rp ? rp.un / rp.n : null, soPed: !s.length && !!rp, ultima_compra: rp?.ult || null, rup: RU[p.id] ? RU[p.id].r : null, rupI: RU[p.id], pr: REATIVAR.includes(p.etapa) ? PRIOR[p.prioridade_reativacao]?.v || 0 : 0 }; });
+    const q = $('#q').value.toLowerCase(), et = FC.et, pr = FC.pr;
+    let ds = S.pdvs.filter(p => (!et.size || et.has(p.etapa)) && (!pr.size || (pr.has('-') && !(REATIVAR.includes(p.etapa) && p.prioridade_reativacao)) || (REATIVAR.includes(p.etapa) && pr.has(p.prioridade_reativacao))) && (!q || p.nome.toLowerCase().includes(q))).map(p => { const s = (S.sellouts[p.id] || []).slice(-6), rp = RP[p.id]; return { ...p, so: s.length ? s.reduce((a, x) => a + x.sellout, 0) / s.length : rp ? rp.un / rp.n : null, soPed: !s.length && !!rp, ultima_compra: rp?.ult || null, rup: RU[p.id] ? RU[p.id].r : null, rupI: RU[p.id], pr: REATIVAR.includes(p.etapa) ? PRIOR[p.prioridade_reativacao]?.v || 0 : 0 }; });
     ds.sort((a, b) => { const nul = ord.k === 'rup' ? -1 : '', x = a[ord.k] ?? nul, y = b[ord.k] ?? nul; return (x > y ? 1 : x < y ? -1 : 0) * ord.d; });
     $('#tN').textContent = ds.length + ' pontos';
     $('#tbl').innerHTML = `<tr>${cols.map(([k, n]) => `<th data-k="${k}">${n}${ord.k === k ? (ord.d > 0 ? ' ↑' : ' ↓') : ''}</th>`).join('')}</tr>` + ds.map(p => `<tr data-id="${p.id}" style="cursor:pointer"><td><b>${esc(p.nome)}</b></td><td>${p.regiao || '—'}</td><td>${esc(p.canal || '')}</td><td><i class="dot" style="background:${etapa(p.etapa).c}"></i> ${etapa(p.etapa).n}</td><td>${p.classe || '—'}</td><td>${'★'.repeat(p.potencial || 0)}</td><td ${p.soPed ? 'title="Média de unidades por pedido (Bling)"' : ''}>${p.so === null ? '—' : Math.round(p.so) + ' un.' + (p.soPed ? '<small style="color:var(--mute)"> /pedido</small>' : '')}</td><td title="${p.rupI ? `${p.rupI.z} de ${p.rupI.n} sabores zerados nas ${p.rupI.vis} últimas contagens` : 'sem contagens'}">${p.rup == null ? '—' : `<span style="color:${p.rup === 0 ? 'var(--t-ok)' : p.rup <= 0.2 ? 'var(--car-d)' : 'var(--t-bad)'};font-weight:600">${Math.round(p.rup * 100)}%</span>`}</td><td>${p.ultima_compra ? dataLonga(p.ultima_compra) + `<br><small style="color:var(--mute)">há ${Math.floor((Date.now() - new Date(p.ultima_compra)) / DIA)} dias</small>` : '—'}</td><td>${p.proxima_reposicao ? dstr(p.proxima_reposicao) + ' · ' + prazoTxt(p) : '—'}</td><td>${seloPrior(p).replace('Reativar · ', '') || '—'}</td></tr>`).join('');
     $('#tbl').querySelectorAll('th').forEach(th => th.onclick = () => { ord = { k: th.dataset.k, d: ord.k === th.dataset.k ? -ord.d : 1 }; desenhaT(); });
     $('#tbl').querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => abrirPerfil(tr.dataset.id));
   };
-  manter('carteira', ['q', 'tEt', 'tPr']);
-  $('#tNovo').onclick = () => abrirCadastro(null, ETAPAS_CAD.includes($('#tEt').value) ? $('#tEt').value : 'visitado');
-  $('#q').oninput = $('#tEt').onchange = $('#tPr').onchange = desenhaT; desenhaT();
+  manter('carteira', ['q']);
+  $('#tNovo').onclick = () => abrirCadastro(null, ETAPAS_CAD.includes(FC.et.size === 1 ? [...FC.et][0] : '') ? [...FC.et][0] : 'visitado');
+  msLigar('tEt', FC.et, 'Todas as etapas', 'etapas', k => etapa(k).n, desenhaT, { todas: [], carteira: CART, prosp: PROSP });
+  msLigar('tPr', FC.pr, 'Toda prioridade de reativação', 'prioridades', k => k === '-' ? 'Sem prioridade' : 'Reativar · ' + PRIOR[k].n, desenhaT, { todas: [] });
+  $('#q').oninput = desenhaT; desenhaT();
   db.rupturaPorPdv().then(r => { RU = S.rupCache = r; if ($('#tbl')) desenhaT(); }).catch(() => { });
   db.resumoPedidos().then(ls => { ls.forEach(o => { const x = RP[o.pdv_id] = RP[o.pdv_id] || { n: 0, un: 0, ult: null }; x.n++; x.un += Number(o.unidades) > 0 ? Number(o.unidades) : Math.round((Number(o.valor) || 0) / 4.6); if (!x.ult || o.criado_em > x.ult) x.ult = o.criado_em; }); if ($('#tbl')) desenhaT(); }).catch(() => { });
 }
