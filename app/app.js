@@ -3040,8 +3040,9 @@ const situacaoPed = o => { const s = (o.bling_situacao || '').toLowerCase();
 async function telaPedidos() {
   const F = S.pdF = S.pdF || { per: 'hoje', sit: '', vend: '', tipo: '', q: '' };
   const h0 = new Date(); h0.setHours(0, 0, 0, 0);
-  const de = F.per === 'hoje' ? h0 : F.per === 'ontem' ? new Date(+h0 - DIA) : F.per === 'tudo' ? new Date(2020, 0, 1) : F.per === 'custom' ? new Date((F.de || hojeISO()) + 'T00:00') : new Date(+h0 - (+F.per - 1) * DIA);
-  const ate = F.per === 'ontem' ? h0 : F.per === 'custom' ? new Date(new Date((F.ate || hojeISO()) + 'T00:00').getTime() + DIA) : new Date(+h0 + DIA);
+  if (!['hoje', 'mes', 'mesant', '3m', 'custom'].includes(F.per)) F.per = 'hoje';
+  const de = F.per === 'hoje' ? h0 : F.per === 'mes' ? new Date(h0.getFullYear(), h0.getMonth(), 1) : F.per === 'mesant' ? new Date(h0.getFullYear(), h0.getMonth() - 1, 1) : F.per === '3m' ? new Date(h0.getFullYear(), h0.getMonth() - 3, h0.getDate() + 1) : new Date((F.de || hojeISO()) + 'T00:00');
+  const ate = F.per === 'mesant' ? new Date(h0.getFullYear(), h0.getMonth(), 1) : F.per === 'custom' ? new Date(new Date((F.ate || hojeISO()) + 'T00:00').getTime() + DIA) : new Date(+h0 + DIA);
   $('#main').innerHTML = '<section class="view on"><div class="dash pnl"><div class="loading">Carregando os pedidos…</div></div></section>';
   let ls, perfis; try { [ls, perfis] = await Promise.all([db.listarPedidos(de.toISOString(), ate.toISOString()), S.perfisCache || db.perfisLista()]); S.perfisCache = perfis; } catch (e) { return erro(e); }
   const nomeP = id => (perfis.find(p => p.id === id)?.nome || '').split(' ')[0];
@@ -3063,7 +3064,7 @@ async function telaPedidos() {
   };
   $('#main').innerHTML = `<section class="view on"><div class="dash pnl">
    <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
-    <div><label class="lb">Período</label><select id="pdPer">${[['hoje', 'Hoje'], ['ontem', 'Ontem'], ['7', 'Últimos 7 dias'], ['30', 'Últimos 30 dias'], ['90', 'Últimos 90 dias'], ['180', 'Últimos 6 meses'], ['365', 'Último ano'], ['tudo', 'Tudo'], ['custom', 'Personalizado']].map(([k, n]) => `<option value="${k}" ${F.per === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+    <div><label class="lb">Período</label><select id="pdPer">${[['hoje', 'Dia'], ['mes', 'Mês'], ['mesant', 'Mês passado'], ['3m', 'Últimos 3 meses'], ['custom', 'Personalizado']].map(([k, n]) => `<option value="${k}" ${F.per === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
     ${F.per === 'custom' ? `<div><label class="lb">&nbsp;</label><button class="btn" id="pdCal">📅 ${dstr((F.de || hojeISO()) + 'T12:00')} – ${dstr((F.ate || hojeISO()) + 'T12:00')}</button></div>` : ''}
     <div><label class="lb">Tipo</label><select id="pdTipo"><option value="">Todos</option><option value="abertura" ${F.tipo === 'abertura' ? 'selected' : ''}>Abertura</option><option value="reposicao" ${F.tipo === 'reposicao' ? 'selected' : ''}>Reposição</option></select></div>
     <div><label class="lb">Vendedor</label><select id="pdVend"><option value="">Todos</option>${perfis.map(p => `<option value="${p.id}" ${F.vend === p.id ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}<option value="bling" ${F.vend === 'bling' ? 'selected' : ''}>Lançados no Bling</option></select></div>
