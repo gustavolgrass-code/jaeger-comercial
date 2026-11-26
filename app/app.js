@@ -3021,7 +3021,8 @@ async function finCadastros() {
   if (!FIN.cats) FIN.cats = await finLer('/categorias/receitas-despesas', 5).catch(() => []);
   if (!FIN.formas) FIN.formas = await finLer('/formas-pagamentos', 3).catch(() => []);
 }
-const erroFin = e => { const m = String(e.message || e); if (/não permitido|desconhecida/.test(m)) return `<div class="panel"><h3>Falta publicar a função do Bling</h3><p>Para o financeiro funcionar, a função <b>bling-oauth</b> no Supabase precisa ser atualizada com a versão nova (Edge Functions → bling-oauth → colar o código → Deploy).</p><small style="color:var(--mute)">${esc(m)}</small></div>`; return `<div class="panel"><h3>Não consegui ler do Bling</h3><p style="color:var(--t-bad)">${esc(m)}</p></div>`; };
+const erroFin = e => { const m = String(e.message || e);
+  if (/insufficient_scope|\(403\)/.test(m)) return `<div class="panel"><h3>O Bling ainda não deu permissão para esta parte</h3><p>O app conectado ao Bling não tem a permissão (escopo) de <b>Caixas e bancos</b>. No Bling: <b>Central de extensões → Área do integrador → seu aplicativo → Escopos</b>, marque <b>Caixas e bancos</b> (e <b>Contas a pagar/receber</b>, se não estiverem), salve e depois reconecte o Bling em <b>Regras e metas</b>.</p><small style="color:var(--mute)">${esc(m.slice(0, 200))}</small></div>`; if (/não permitido|desconhecida/.test(m)) return `<div class="panel"><h3>Falta publicar a função do Bling</h3><p>Para o financeiro funcionar, a função <b>bling-oauth</b> no Supabase precisa ser atualizada com a versão nova (Edge Functions → bling-oauth → colar o código → Deploy).</p><small style="color:var(--mute)">${esc(m)}</small></div>`; return `<div class="panel"><h3>Não consegui ler do Bling</h3><p style="color:var(--t-bad)">${esc(m)}</p></div>`; };
 function finPeriodo(k) { const h = new Date(), iso = d => isoDe(d); FIN[k] = FIN[k] || { de: iso(new Date(h.getFullYear(), h.getMonth() - 2, 1)), ate: iso(new Date(h.getFullYear(), h.getMonth() + 2, 0)), sit: 'abertos' }; return FIN[k]; }
 async function telaContas(tipo) { // tipo: 'receber' | 'pagar'
   const F = finPeriodo(tipo), rec = tipo === 'receber';
@@ -3066,7 +3067,7 @@ async function detalheConta(tipo, id) {
   modal(`<h3 style="margin-top:0">Conta a ${tipo} · ${esc(nomeContato(c.contato))}</h3><table class="dped">
    ${lin('Situação', SIT_FIN[tipo][c.situacao] || c.situacao)}${lin('Valor', brl(val(c.valor)))}${c.saldo != null ? lin('Saldo', brl(val(c.saldo))) : ''}${lin('Vencimento', c.vencimento ? dstr(c.vencimento + 'T12:00') : '')}
    ${lin('Emissão', c.dataEmissao ? dstr(c.dataEmissao + 'T12:00') : '')}${lin('Competência', c.competencia ? dstr(c.competencia + 'T12:00') : '')}${lin('Documento', esc(c.numeroDocumento || ''))}${lin('Histórico', esc(c.historico || ''))}
-   ${lin('Categoria', esc(nm(FIN.cats, c.categoria)))}${lin('Conta financeira (portador)', esc(nm(FIN.contas, c.portador)))}${lin('Forma de pagamento', esc(nm(FIN.formas, c.formaPagamento)))}${c.origem?.numero ? lin('Origem', esc((c.origem.tipoOrigem || '') + ' ' + c.origem.numero)) : ''}</table>
+   ${lin('Categoria', esc(nm(FIN.cats, c.categoria)))}${lin('Conta financeira', esc(nm(FIN.contas, c.portador || c.contaContabil)))}${lin('Forma de pagamento', esc(nm(FIN.formas, c.formaPagamento)))}${c.origem?.numero ? lin('Origem', esc((c.origem.tipoOrigem || '') + ' ' + c.origem.numero)) : ''}${c.linkBoleto ? lin('Boleto', `<a href="${esc(c.linkBoleto)}" target="_blank" rel="noopener">abrir ↗</a>`) : ''}${c.linkQRCodePix ? lin('Pix', `<a href="${esc(c.linkQRCodePix)}" target="_blank" rel="noopener">QR Code ↗</a>`) : ''}</table>
    <div class="row" style="margin-top:14px;justify-content:space-between"><span>${[1, 3].includes(+c.situacao) ? `<button class="btn car" id="dcBaixa">${tipo === 'receber' ? 'Receber' : 'Pagar'} (baixa total)</button>` : ''}</span><button class="btn pri" onclick="fecharModal()">Fechar</button></div>`);
   if ($('#dcBaixa')) $('#dcBaixa').onclick = () => baixarConta(tipo, id, c);
 }
@@ -3079,7 +3080,7 @@ async function baixarConta(tipo, id, c) {
   modal(`<h3 style="margin-top:0">${rec ? 'Receber' : 'Pagar'} · ${esc(nomeContato(c.contato))}</h3>
    <p style="margin:0">Baixa <b>total</b> de <b>${brl(saldo)}</b> (vencimento ${c.vencimento ? dstr(c.vencimento + 'T12:00') : '—'}).</p>
    <div class="row" style="gap:10px;flex-wrap:wrap"><div><label>Data do ${rec ? 'recebimento' : 'pagamento'}</label><input type="date" id="bxD" value="${hojeISO()}"></div>
-    <div style="flex:1;min-width:200px"><label>Conta financeira</label><select id="bxC">${opcoes(FIN.contas || [], c.portador?.id, '— escolha —')}</select></div></div>
+    <div style="flex:1;min-width:200px"><label>Conta financeira</label><select id="bxC">${opcoes(FIN.contas || [], c.portador?.id ?? c.contaContabil?.id, '— escolha —')}</select></div></div>
    <label>Categoria</label><select id="bxCat">${opcoes(catsDo(tipo), c.categoria?.id, '— sem categoria —')}</select>
    <label>Histórico</label><input id="bxH" value="${esc(c.historico || '')}" style="width:100%">
    <p style="font-size:12px;color:var(--mute)">Baixa parcial: faça direto no Bling (a API do Bling já quitou contas inteiras quando recebeu valor parcial).</p>
