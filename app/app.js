@@ -1946,11 +1946,24 @@ function painelCustos() {
   pintar();
 }
 
+function painelLogistica() {
+  const el = document.getElementById('logPanel'); if (!el) return;
+  const P = finPrem(), campo = (k, n, step, u) => `<label>${n}<br><span class="row" style="gap:6px"><input type="number" step="${step}" min="0" class="lgP" data-k="${k}" value="${P[k]}" style="width:100px"> <small>${u}</small></span></label>`;
+  el.innerHTML = `<h3>Custos de logística e prospecção</h3><p class="psub">Usados no Painel financeiro: custo logístico (km rodados nas rotas) e CAC (visitas de prospecção).</p>
+   <div class="row" style="gap:14px;flex-wrap:wrap;align-items:flex-end">${campo('gasolina', 'Preço da gasolina', '0.01', 'R$/litro')}${campo('consumo', 'Consumo do carro', '0.5', 'km/litro')}${campo('desgaste', 'Desgaste e manutenção', '0.01', 'R$/km')}
+    <div class="kpi" style="padding:8px 14px"><small>Custo do km</small><b style="font-size:22px">${brl(P.custo_km)}</b><small class="sub">${brl(P.gasolina / (+P.consumo || 1))} combustível + ${brl(+P.desgaste || 0)} desgaste</small></div>
+    ${campo('custo_visita', 'Custo por visita de prospecção', '1', 'R$')}</div>
+   <small style="color:var(--mute)">Desgaste: pneus, óleo, revisões e depreciação do carro divididos pelos km do ano (referência: R$ 0,30 a R$ 0,60/km).</small>`;
+  el.querySelectorAll('.lgP').forEach(i => i.onchange = async () => { const r = finPrem(), v = { gasolina: r.gasolina, consumo: r.consumo, desgaste: r.desgaste, custo_visita: r.custo_visita, [i.dataset.k]: +i.value || 0 }; v.custo_km = v.gasolina / (v.consumo || 1) + v.desgaste;
+    try { await db.salvarRegra('fin_premissas', v); S.base.regras.fin_premissas = v; toast('Custo salvo'); painelLogistica(); } catch (e) { erro(e); } });
+}
+
 function telaRegras() {
   const r = regraAval(), cp = cadPadrao();
-  setTimeout(painelBling, 0); setTimeout(painelCustos, 0);
+  setTimeout(painelBling, 0); setTimeout(painelCustos, 0); setTimeout(painelLogistica, 0);
   $('#main').innerHTML = `<section class="view on"><div class="dash">
   <div class="panel" id="custosPanel"></div>
+  <div class="panel" id="logPanel"></div>
   <div class="panel" id="blingPanel"><h3>Integração com o Bling</h3><small style="color:var(--mute)">verificando…</small></div>
   <div class="panel"><h3>Metas do comercial</h3><p style="color:var(--soft);margin-top:0">Aparecem no topo do CRM, com barra de progresso. Os dias de trabalho contam de segunda a sábado.</p>
    <div class="metas">${[['visitas_dia', 'Visitas de prospecção por dia', 'visitas'], ['vendas_dia', 'Vendas (novos clientes) por dia', 'vendas'], ['valor_mes', 'Valor em vendas novas por mês', 'R$'], ['cadastros_semana', 'Novos pontos cadastrados por semana', 'pontos']].map(([k, n, u]) => `<label><span>${n}</span><span class="row" style="gap:6px"><input type="number" min="0" class="rMeta" data-k="${k}" value="${metas()[k]}" style="width:110px"> <small>${u}</small></span></label>`).join('')}</div></div>
@@ -3156,7 +3169,10 @@ async function telaPedidos() {
 /* =================== financeiro (integrado ao Bling) =================== */
 /* =================== painel financeiro =================== */
 // 10 métricas: margem bruta, margem por cliente, perdas, CAC, payback/LTV, prazo de recebimento e mix, inadimplência, fluxo de caixa 30/60/90, ponto de equilíbrio e custo logístico
-const finPrem = () => ({ custo_km: 1.2, custo_visita: 15, ...(S.base.regras.fin_premissas || {}) });
+// custo do km = gasolina ÷ consumo + desgaste (pneus, óleo, manutenção, depreciação); editado em Regras e metas
+const finPrem = () => { const r = S.base.regras.fin_premissas || {}, x = { gasolina: 6.3, consumo: 10, custo_visita: 15, ...r };
+  if (r.desgaste == null) x.desgaste = Math.max(0, Math.round(((r.custo_km ?? 1.2) - x.gasolina / (x.consumo || 1)) * 100) / 100);
+  x.custo_km = x.gasolina / (+x.consumo || 1) + (+x.desgaste || 0); return x; };
 async function telaFinPainel() {
   const F = S.fpF = S.fpF || { per: 'mes' }, h0 = new Date(); h0.setHours(0, 0, 0, 0);
   const ini = F.per === 'mes' ? new Date(h0.getFullYear(), h0.getMonth(), 1) : F.per === 'mesant' ? new Date(h0.getFullYear(), h0.getMonth() - 1, 1) : F.per === '3m' ? new Date(h0.getFullYear(), h0.getMonth() - 3, h0.getDate() + 1) : new Date((F.de || hojeISO()) + 'T00:00');
@@ -3214,43 +3230,76 @@ async function telaFinPainel() {
   const bR = baseRota(), km2p = (a, b) => { const R = 6371, dLa = (b.lat - a.lat) * Math.PI / 180, dLo = (b.lng - a.lng) * Math.PI / 180, x = Math.sin(dLa / 2) ** 2 + Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.sin(dLo / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(x)); };
   let km = 0, paradas = 0; (D.rotas || []).filter(r => r.data && new Date(r.data + 'T12:00') >= ini && new Date(r.data + 'T12:00') < fim && new Date(r.data + 'T12:00') <= new Date()).forEach(r => { const pts = (r.paradas || []).map(s => S.pdvs.find(p => p.id === s.id)).filter(p => p?.lat); if (!pts.length) return; paradas += pts.length; let a = bR; pts.forEach(p => { km += km2p(a, p) * 1.35; a = p; }); km += km2p(a, bR) * 1.35; });
   const custoLog = km * P.custo_km + freteNosso, logP = N.fat ? custoLog / N.fat : null;
-  // ---- desenho
-  const var_ = (a, b) => b ? `<small class="sub ${a >= b ? 'up' : 'dn'}">${a >= b ? '▲' : '▼'} ${Math.abs(Math.round((a / b - 1) * 100))}% vs período anterior</small>` : '';
-  const kp = (n, v, sub, extra = '') => `<div class="kpi"><small>${n}</small><b>${v}</b>${sub ? `<small class="sub">${sub}</small>` : ''}${extra}</div>`;
-  const totMix = Object.values(mix).reduce((a, b) => a + b, 0);
-  $('#main').innerHTML = `<section class="view on"><div class="dash pnl">
-   <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end"><div><label class="lb">Período</label><select id="fpPer">${[['mes', 'Mês'], ['mesant', 'Mês passado'], ['3m', 'Últimos 3 meses'], ['custom', 'Personalizado']].map(([k, n]) => `<option value="${k}" ${F.per === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
-    ${F.per === 'custom' ? `<div><label class="lb">&nbsp;</label><button class="btn" id="fpCal">📅 ${dstr((F.de || hojeISO()) + 'T12:00')} – ${dstr((F.ate || hojeISO()) + 'T12:00')}</button></div>` : ''}
-    <small style="color:var(--mute);margin-left:4px">${ini.toLocaleDateString('pt-BR')} a ${new Date(+fim - DIA).toLocaleDateString('pt-BR')} · comparado com os ${dias} dias anteriores</small>
-    <div style="margin-left:auto" class="row"><label class="lb" style="margin:0">Custo do km (R$)</label><input type="number" step="0.05" id="fpKm" value="${P.custo_km}" style="width:70px"><label class="lb" style="margin:0">Custo por visita de prospecção (R$)</label><input type="number" step="1" id="fpVis" value="${P.custo_visita}" style="width:70px"></div></div>
-   ${blingOk ? '' : '<p class="esteira" style="margin:0">⚠️ Não consegui ler o Bling agora: inadimplência, fluxo de caixa e ponto de equilíbrio ficam incompletos.</p>'}
-   <h2 class="psec">Resultado</h2><div class="kpis">
-    ${kp('1 · Margem bruta', brl(N.margem), `${N.margemP == null ? '—' : Math.round(N.margemP * 100) + '%'} de ${brl(N.fat)} faturados`, var_(N.margem, NA.margem))}
-    ${kp('3 · Custo de perdas', N.fat ? Math.round(perdas / N.fat * 1000) / 10 + '%' : '—', `${brl(perdas)}: trocas ${brl(custoTroca)} · bonificação ${brl(custoBon)}`)}
-    ${kp('9 · Ponto de equilíbrio', PE == null ? '—' : brl(PE), fixoMes ? `custo fixo ${brl(fixoMes)} ÷ margem de contribuição ${Math.round(margemContrib * 100)}% · faturado no mês ${brl(fatMes)} (${PE ? Math.round(fatMes / PE * 100) : 0}%)` : 'marque as contas fixas em Contas a pagar (coluna Classe)')}
-    ${kp('10 · Custo logístico', logP == null ? '—' : Math.round(logP * 1000) / 10 + '% das vendas', `${brl(custoLog)}: ~${Math.round(km)} km × ${brl(P.custo_km)} + frete ${brl(freteNosso)}${paradas ? ` · ${brl(custoLog / paradas)} por parada` : ''}`)}</div>
-   <h2 class="psec">Clientes</h2><div class="kpis">
-    ${kp('4 · CAC (custo por cliente novo)', CAC == null ? '—' : brl(CAC), `${novos} cliente${novos === 1 ? '' : 's'} novo${novos === 1 ? '' : 's'} · expositores ${brl(custoExp)} · bonificação de abertura ${brl(custoBonAb)} · ${visProsp} visitas de prospecção ${brl(custoProsp)}`)}
-    ${kp('5 · Payback / LTV ÷ CAC', payback == null ? '—' : (payback < 1 ? Math.round(payback * 30) + ' dias' : dec(payback) + ' meses'), `margem por cliente ${brl(mMensal)}/mês · LTV 12 meses ${brl(LTV)}${CAC ? ' · LTV ÷ CAC ' + dec(LTV / CAC) + '×' : ''}`)}</div>
-   <div class="pgrid"><div class="panel"><h3>2 · Margem de contribuição por cliente</h3><p class="psub">Faturamento − custo do produto − trocas − bonificação − frete por nossa conta</p>
-     <p class="psub" style="margin-top:8px"><b>Mais lucrativos</b></p>${ranking(MC.slice(0, 6).map(x => ({ n: x.nome, v: x.v, c: COR.bom, tip: `${Math.round(x.p * 100)}% de ${brl(x.fat)}` })), 'R$')}
-     ${MC.filter(x => x.v < 0).length ? `<p class="psub" style="margin-top:8px;color:var(--t-bad)"><b>Dando prejuízo</b></p>${ranking(MC.filter(x => x.v < 0).slice(-6).reverse().map(x => ({ n: x.nome, v: -x.v, c: COR.ruim, tip: `fatura ${brl(x.fat)}` })), 'R$')}` : `<p class="psub" style="margin-top:8px">Nenhum cliente com margem negativa no período.</p>`}
-     <p class="psub" style="margin-top:8px"><b>Menor margem</b></p>${ranking(MC.filter(x => x.v >= 0).slice(-5).reverse().map(x => ({ n: x.nome, v: x.v, c: COR.s2, tip: `${Math.round(x.p * 100)}% de ${brl(x.fat)}` })), 'R$')}</div>
-    <div class="panel"><h3>6 · Prazo médio de recebimento e mix</h3><div class="kpis k2">${kp('Prazo médio', PMR == null ? '—' : Math.round(PMR) + ' dias', 'ponderado pelo valor')}${kp('Vendido a prazo', totMix ? Math.round((mix.Boleto || 0) / totMix * 100) + '%' : '—', 'boleto')}</div>
-     ${ranking(Object.entries(mix).sort((a, b) => b[1] - a[1]).map(([n, v]) => ({ n, v: totMix ? v / totMix : 0, c: n === 'Boleto' ? COR.s2 : COR.s1, tip: brl(v) })), '%', { max: 1 })}</div></div>
-   <h2 class="psec">Caixa</h2><div class="pgrid">
-    <div class="panel"><h3>7 · Inadimplência</h3><p class="psub">Contas a receber vencidas no Bling, por tempo de atraso</p><div class="kpis k2">${kp('Vencido', brl(totVenc), totRec ? Math.round(totVenc / totRec * 100) + '% do que há para receber' : '')}${kp('A receber em aberto', brl(totRec), recA.length + ' contas')}</div>
-     ${ranking(fx.map(x => ({ n: x.n + ` (${x.q})`, v: x.v, c: x.n.startsWith('Mais') ? COR.ruim : COR.s2 })), 'R$')}
-     ${venc.length ? `<p class="psub" style="margin-top:8px">Quem está devendo: ${venc.sort((a, b) => a.vencimento < b.vencimento ? -1 : 1).slice(0, 6).map(x => `<b>${esc(nomeContato(x.contato))}</b> ${brl(val(x.valor))} (${atraso(x)} d)`).join(' · ')}</p>` : ''}</div>
-    <div class="panel"><h3>8 · Fluxo de caixa projetado</h3><p class="psub">Entradas: contas a receber + pedidos em aberto ainda sem conta. Saídas: contas a pagar em aberto. Os vencidos entram nos primeiros 30 dias.</p>
-     <table class="dped"><tr><th>Período</th><th style="text-align:right">Entra</th><th style="text-align:right">Sai</th><th style="text-align:right">Saldo</th><th style="text-align:right">Acumulado</th></tr>${FC.map(x => `<tr><td>${x.n}</td><td style="text-align:right;color:var(--t-ok)">${brl(x.ent)}</td><td style="text-align:right;color:var(--t-bad)">${brl(x.sai)}</td><td style="text-align:right"><b>${brl(x.saldo)}</b></td><td style="text-align:right;color:${x.acum < 0 ? 'var(--t-bad)' : 'inherit'}"><b>${brl(x.acum)}</b></td></tr>`).join('')}</table>
-     ${grafBarras('fpFC', FC.map(x => x.n.replace('Próximos ', '')), [{ nome: 'Entra', cor: COR.bom, vals: FC.map(x => x.ent) }, { nome: 'Sai', cor: COR.ruim, vals: FC.map(x => x.sai) }], 'R$', { h: 170 })}${legenda([{ nome: 'Entra', cor: COR.bom }, { nome: 'Sai', cor: COR.ruim }])}</div></div>
-   <small style="color:var(--mute)">Custos dos produtos: cadastro (Regras e metas → Custos de produção). Km das rotas: estimado em linha reta × 1,35 a partir das paradas salvas no Dia de rota. CAC e custo logístico dependem do custo do km e do custo por visita acima.</small>
+  // ---- desenho (dashboard)
+  const pctS = v => v == null || !isFinite(v) ? '—' : (Math.round(v * 1000) / 10).toString().replace('.', ',') + '%';
+  const delta = (a, b, inv) => b ? (() => { const d = a / b - 1, bom = inv ? d <= 0 : d >= 0; return `<span class="fdl ${bom ? 'up' : 'dn'}">${d >= 0 ? '▲' : '▼'} ${Math.abs(Math.round(d * 100))}%</span>`; })() : '<span class="fdl" style="color:var(--mute)">sem comparação</span>';
+  const ST = { ok: ['Saudável', COR.bom], at: ['Atenção', COR.aviso], cr: ['Crítico', COR.ruim], nd: ['Sem dados', 'var(--neutro)'] };
+  const st = k => `<span class="fst" style="--c:${ST[k][1]}">${ST[k][0]}</span>`;
+  const faixa = (v, ok, at, menor = true) => v == null || !isFinite(v) ? 'nd' : menor ? (v <= ok ? 'ok' : v <= at ? 'at' : 'cr') : (v >= ok ? 'ok' : v >= at ? 'at' : 'cr');
+  const barra = (v, max, cor, marca) => `<div class="kbar"><i style="width:${Math.max(0, Math.min(100, (v || 0) / max * 100))}%;background:${cor}"></i>${marca != null ? `<em style="left:${Math.min(100, marca / max * 100)}%"></em>` : ''}</div>`;
+  // últimos 6 meses (faturamento e margem bruta), para as tendências
+  const meses = [...Array(6)].map((_, k) => { const a = new Date(h0.getFullYear(), h0.getMonth() - 5 + k, 1), b = new Date(h0.getFullYear(), h0.getMonth() - 4 + k, 1); return { n: a.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', ''), ...numeros(D.pedidos.filter(o => no(o, a, b))) }; });
+  const spark = (vals, cor) => { const W = 120, H = 34, mx = Math.max(...vals, 1), mn = Math.min(...vals, 0), Y = v => H - 3 - (v - mn) / (mx - mn || 1) * (H - 6), X = i => i * W / (vals.length - 1 || 1);
+    return `<svg class="fspk" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true"><path d="${vals.map((v, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1)).join('')}" fill="none" stroke="${cor}" stroke-width="2" vector-effect="non-scaling-stroke"/><circle cx="${X(vals.length - 1)}" cy="${Y(vals[vals.length - 1])}" r="3" fill="${cor}"/></svg>`; };
+  const mcR = N.fat ? N.margem - perdas - freteNosso : 0, mcRA = NA.margem;
+  const hero = (n, v, sub, dl, sp, cls = '') => `<div class="fhero ${cls}"><small>${n}</small><b>${v}</b><div class="fhs">${dl}${sub ? `<span>${sub}</span>` : ''}</div>${sp || ''}</div>`;
+  const card = (num, n, v, sub, stK, extra = '') => `<div class="fcard"><div class="fch"><small><em>${num}</em>${n}</small>${st(stK)}</div><b>${v}</b>${extra}<p>${sub}</p></div>`;
+  const perdP = N.fat ? perdas / N.fat : null, inadP = totRec ? totVenc / totRec : null, ltvCac = CAC ? LTV / CAC : null;
+  const peP = PE ? fatMes / PE : null, mixOrd = Object.entries(mix).sort((a, b) => b[1] - a[1]), corMix = { Pix: COR.s1, Boleto: COR.s2, 'Cartão': COR.s3, Dinheiro: '#8b5cf6', Outro: 'var(--neutro)' };
+  const agingCor = [COR.aviso, COR.s2, COR.ruim];
+  $('#main').innerHTML = `<section class="view on"><div class="dash pnl fdash">
+   <div class="fhead"><div><h2>Painel financeiro</h2><small>${ini.toLocaleDateString('pt-BR')} a ${new Date(+fim - DIA).toLocaleDateString('pt-BR')} · comparado com os ${dias} dias anteriores</small></div>
+    <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><div class="fseg">${[['mes', 'Mês'], ['mesant', 'Mês passado'], ['3m', '3 meses'], ['custom', 'Personalizado']].map(([k, n]) => `<button data-fper="${k}" class="${F.per === k ? 'on' : ''}">${n}</button>`).join('')}</div>
+    ${F.per === 'custom' ? `<button class="btn" id="fpCal">📅 ${dstr((F.de || hojeISO()) + 'T12:00')} – ${dstr((F.ate || hojeISO()) + 'T12:00')}</button>` : ''}
+    <span class="fst" style="--c:${blingOk ? COR.bom : COR.ruim}">${blingOk ? 'Bling conectado' : 'Bling indisponível'}</span></div></div>
+   ${blingOk ? '' : '<p class="esteira" style="margin:0 0 12px">⚠️ Não consegui ler o Bling agora: inadimplência, fluxo de caixa e ponto de equilíbrio ficam incompletos.</p>'}
+   <div class="fheros">
+    ${hero('Faturamento', brl(N.fat), `${N.pedidos} pedidos · ${N.compradores} clientes`, delta(N.fat, NA.fat), spark(meses.map(m => m.fat), COR.s1))}
+    ${hero('1 · Margem bruta', brl(N.margem), N.margemP == null ? '' : pctS(N.margemP) + ' do faturamento', delta(N.margem, NA.margem), spark(meses.map(m => m.margem), COR.bom))}
+    ${hero('Margem de contribuição', brl(mcR), N.fat ? `${pctS(mcR / N.fat)} · depois de perdas e frete` : '', delta(mcR, mcRA), '')}
+    ${hero('Caixa · próximos 30 dias', brl(FC[0].saldo), `entra ${brl(FC[0].ent)} · sai ${brl(FC[0].sai)}`, `<span class="fdl ${FC[0].saldo >= 0 ? 'up' : 'dn'}">${FC[0].saldo >= 0 ? '▲ positivo' : '▼ negativo'}</span>`, '', FC[0].saldo < 0 ? 'neg' : '')}
+   </div>
+   <div class="fgrid">
+    <div class="panel s8"><div class="fph"><h3>Faturamento e margem bruta · últimos 6 meses</h3>${legenda([{ nome: 'Faturamento', cor: COR.s1 }, { nome: 'Margem bruta', cor: COR.bom }])}</div>
+     ${grafBarras('fpMes', meses.map(m => m.n), [{ nome: 'Faturamento', cor: COR.s1, vals: meses.map(m => m.fat) }, { nome: 'Margem bruta', cor: COR.bom, vals: meses.map(m => m.margem) }], 'R$', { h: 210 })}</div>
+    <div class="panel s4"><div class="fph"><h3>9 · Ponto de equilíbrio</h3>${st(peP == null ? 'nd' : peP >= 1 ? 'ok' : peP >= 0.7 ? 'at' : 'cr')}</div>
+     ${PE == null ? `<div class="fvazio"><b>—</b><p>Marque as contas fixas (aluguel, salários, contador, sistemas) em Contas a pagar, coluna Classe.</p><button class="btn" id="fpIrPagar">Marcar contas fixas</button></div>`
+      : `<div class="fbig">${brl(PE)}</div><p class="psub">faturamento mínimo no mês para empatar</p>${barra(fatMes, Math.max(PE, fatMes) * 1.1, peP >= 1 ? COR.bom : COR.aviso, PE)}
+       <div class="kmeta" style="margin-top:6px"><span>Faturado ${brl(fatMes)}</span><b>${Math.round(peP * 100)}%</b></div>
+       <dl class="fdl2"><div><dt>Custo fixo do mês</dt><dd>${brl(fixoMes)}</dd></div><div><dt>Margem de contribuição</dt><dd>${pctS(margemContrib)}</dd></div><div><dt>${peP >= 1 ? 'Acima do equilíbrio' : 'Falta faturar'}</dt><dd>${brl(Math.abs(fatMes - PE))}</dd></div></dl>`}</div>
+   </div>
+   <div class="fcards">
+    ${card('3', 'Custo de perdas', pctS(perdP), `${brl(perdas)} · trocas ${brl(custoTroca)} · bonificação ${brl(custoBon)}`, faixa(perdP, 0.03, 0.06), barra(perdP || 0, 0.1, perdP > 0.06 ? COR.ruim : perdP > 0.03 ? COR.aviso : COR.bom, 0.03))}
+    ${card('4', 'CAC · custo por cliente novo', CAC == null ? '—' : brl(CAC), `${novos} novo${novos === 1 ? '' : 's'} · expositores ${brl(custoExp)} · bonificação ${brl(custoBonAb)} · ${visProsp} visitas ${brl(custoProsp)}`, CAC == null ? 'nd' : payback <= 3 ? 'ok' : payback <= 6 ? 'at' : 'cr')}
+    ${card('5', 'Payback · LTV ÷ CAC', payback == null ? '—' : (payback < 1 ? Math.round(payback * 30) + ' dias' : dec(payback) + ' meses'), `margem por cliente ${brl(mMensal)}/mês · LTV 12 meses ${brl(LTV)}`, faixa(ltvCac, 3, 1.5, false), ltvCac ? `<div class="kmeta"><span>LTV ÷ CAC</span><b>${dec(ltvCac)}×</b></div>${barra(ltvCac, Math.max(10, ltvCac), ltvCac >= 3 ? COR.bom : COR.aviso, 3)}` : '')}
+    ${card('10', 'Custo logístico', logP == null ? '—' : pctS(logP), `${brl(custoLog)} · ~${Math.round(km)} km × ${brl(P.custo_km)}/km + frete ${brl(freteNosso)}${paradas ? ` · ${brl(custoLog / paradas)} por parada` : ''}`, faixa(logP, 0.08, 0.12), barra(logP || 0, 0.25, logP > 0.12 ? COR.ruim : logP > 0.08 ? COR.aviso : COR.bom, 0.08))}
+   </div>
+   <div class="fgrid">
+    <div class="panel s7"><div class="fph"><h3>8 · Fluxo de caixa projetado</h3>${legenda([{ nome: 'Entra', cor: COR.bom }, { nome: 'Sai', cor: COR.ruim }])}</div>
+     ${grafBarras('fpFC', FC.map(x => x.n.replace('Próximos ', '')), [{ nome: 'Entra', cor: COR.bom, vals: FC.map(x => x.ent) }, { nome: 'Sai', cor: COR.ruim, vals: FC.map(x => x.sai) }], 'R$', { h: 180 })}
+     <div class="fmini">${FC.map(x => `<div><small>${x.n}</small><b style="color:${x.saldo < 0 ? 'var(--t-bad)' : 'var(--t-ok)'}">${brl(x.saldo)}</b><span>acumulado ${brl(x.acum)}</span></div>`).join('')}</div></div>
+    <div class="panel s5"><div class="fph"><h3>7 · Inadimplência</h3>${st(faixa(inadP, 0.05, 0.15))}</div>
+     <div class="fduo"><div><small>Vencido</small><b style="color:${totVenc ? 'var(--t-bad)' : 'inherit'}">${brl(totVenc)}</b><span>${inadP == null ? '' : pctS(inadP) + ' do que há para receber'}</span></div><div><small>A receber em aberto</small><b>${brl(totRec)}</b><span>${recA.length} contas</span></div></div>
+     <div class="fstack">${totVenc ? fx.map((x, i) => x.v ? `<i style="width:${x.v / totVenc * 100}%;background:${agingCor[i]}" data-tip="${x.n}: ${brl(x.v)}"></i>` : '').join('') : '<i style="width:100%;background:var(--sand)"></i>'}</div>
+     ${legenda(fx.map((x, i) => ({ nome: `${x.n} · ${brl(x.v)} (${x.q})`, cor: agingCor[i] })))}
+     ${venc.length ? `<table class="ftab"><tr><th>Quem está devendo</th><th>Atraso</th><th>Valor</th></tr>${venc.sort((a, b) => a.vencimento < b.vencimento ? -1 : 1).slice(0, 6).map(x => `<tr><td>${esc(nomeContato(x.contato))}</td><td>${atraso(x)} d</td><td><b>${brl(val(x.valor))}</b></td></tr>`).join('')}</table>` : '<p class="psub" style="margin-top:10px">Nenhuma conta vencida.</p>'}</div>
+   </div>
+   <div class="fgrid">
+    <div class="panel s7"><div class="fph"><h3>2 · Margem de contribuição por cliente</h3></div><p class="psub">Faturamento − custo do produto − trocas − bonificação − frete por nossa conta</p>
+     <div class="fcols"><div><p class="ftit">Mais lucrativos</p>${ranking(MC.slice(0, 6).map(x => ({ n: x.nome, v: x.v, c: COR.bom, tip: `${Math.round(x.p * 100)}% de ${brl(x.fat)}` })), 'R$')}</div>
+     <div>${MC.filter(x => x.v < 0).length ? `<p class="ftit" style="color:var(--t-bad)">Dando prejuízo</p>${ranking(MC.filter(x => x.v < 0).slice(-6).reverse().map(x => ({ n: x.nome, v: -x.v, c: COR.ruim, tip: `fatura ${brl(x.fat)}` })), 'R$')}` : `<p class="ftit">Menor margem</p>${ranking(MC.filter(x => x.v >= 0).slice(-6).reverse().map(x => ({ n: x.nome, v: x.v, c: COR.s2, tip: `${Math.round(x.p * 100)}% de ${brl(x.fat)}` })), 'R$')}`}</div></div></div>
+    <div class="panel s5"><div class="fph"><h3>6 · Prazo de recebimento e mix</h3></div>
+     <div class="fduo"><div><small>Prazo médio</small><b>${PMR == null ? '—' : Math.round(PMR) + ' dias'}</b><span>ponderado pelo valor</span></div><div><small>Vendido a prazo</small><b>${totMix ? Math.round((mix.Boleto || 0) / totMix * 100) + '%' : '—'}</b><span>boleto</span></div></div>
+     <div class="fstack">${mixOrd.map(([n, v]) => `<i style="width:${v / totMix * 100}%;background:${corMix[n]}" data-tip="${n}: ${brl(v)}"></i>`).join('') || '<i style="width:100%;background:var(--sand)"></i>'}</div>
+     <table class="ftab">${mixOrd.map(([n, v]) => `<tr><td><i class="fsq" style="background:${corMix[n]}"></i>${n}</td><td>${Math.round(v / totMix * 100)}%</td><td><b>${brl(v)}</b></td></tr>`).join('')}</table></div>
+   </div>
+   <p class="fnota">Custo dos produtos: Regras e metas → Custos de produção. Km das rotas: linha reta × 1,35 a partir das paradas do Dia de rota, a ${brl(P.custo_km)}/km (gasolina ${brl(P.gasolina)}/L ÷ ${dec(P.consumo)} km/L + desgaste ${brl(P.desgaste)}/km). Visita de prospecção: ${brl(P.custo_visita)}. <a href="#" id="fpIrRegras">Editar em Regras e metas</a></p>
   </div></section>`;
-  $('#fpPer').onchange = e => { F.per = e.target.value; if (F.per === 'custom' && !F.de) { F.de = isoDe(new Date(Date.now() - 29 * DIA)); F.ate = hojeISO(); } telaFinPainel(); if (F.per === 'custom') setTimeout(() => $('#fpCal')?.click(), 60); };
+  document.querySelectorAll('[data-fper]').forEach(b => b.onclick = () => { F.per = b.dataset.fper; if (F.per === 'custom' && !F.de) { F.de = isoDe(new Date(Date.now() - 29 * DIA)); F.ate = hojeISO(); } telaFinPainel(); if (F.per === 'custom') setTimeout(() => $('#fpCal')?.click(), 60); });
   if ($('#fpCal')) $('#fpCal').onclick = e => { e.stopPropagation(); calendarioFaixa($('#fpCal'), F.de, F.ate, (a, b) => { F.de = a; F.ate = b; telaFinPainel(); }); };
-  const salvarP = async () => { const v = { ...finPrem(), custo_km: +$('#fpKm').value || 0, custo_visita: +$('#fpVis').value || 0 }; try { await db.salvarRegra('fin_premissas', v); S.base.regras.fin_premissas = v; telaFinPainel(); } catch (e) { erro(e); } };
-  $('#fpKm').onchange = salvarP; $('#fpVis').onchange = salvarP;
+  if ($('#fpIrPagar')) $('#fpIrPagar').onclick = () => irPara('fpagar');
+  $('#fpIrRegras').onclick = e => { e.preventDefault(); irPara('regras'); setTimeout(() => $('#logPanel')?.scrollIntoView({ behavior: 'smooth' }), 300); };
+  document.querySelectorAll('.fstack i[data-tip]').forEach(i => { i.onmousemove = e => dica(e, esc(i.dataset.tip)); i.onmouseleave = () => dica(); });
   ligarGraficos($('#main section'));
 }
 
