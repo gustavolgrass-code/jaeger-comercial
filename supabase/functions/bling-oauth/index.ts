@@ -302,7 +302,10 @@ async function baixarPedido(pedidoId: string) {
   for (const c of contas) {
     if (![1, 3].includes(Number(c.situacao))) { out.push({ id: c.id, ok: true, ja: true }); continue; }
     if (ehBoleto(c.forma)) { out.push({ id: c.id, ok: true, boleto: true }); continue; }
-    const pid = await portadorDe(c.forma), corpo: any = { data: hojeBR(), valorRecebido: Number(c.saldo || c.valor), historico: 'Recebido na entrega (app Jaeger)', ...(pid ? { portador: { id: pid } } : {}) };
+    const pid = await portadorDe(c.forma);
+    // Bling Conta: o Bling não aceita baixa manual; a baixa é dele quando o Pix entra (QR Code da conta) ou na conciliação do extrato
+    if (/bling conta/i.test(String(c.conta || '')) || (pid && pid === blingConta)) { out.push({ id: c.id, valor: Number(c.saldo || c.valor), forma: nomeDe(c.forma), ok: true, automatico: true, linkPix: c.linkPix }); continue; }
+    const corpo: any = { data: hojeBR(), valorRecebido: Number(c.saldo || c.valor), historico: 'Recebido na entrega (app Jaeger)', ...(pid ? { portador: { id: pid } } : {}) };
     const r = await enviarBling('POST', `/contas/receber/${c.id}/baixar`, corpo, token);
     out.push({ id: c.id, valor: corpo.valorRecebido, forma: nomeDe(c.forma), ok: r.ok, ...(r.ok ? {} : { erro: `Bling (${r.status}): ${r.txt}` }) });
   }
