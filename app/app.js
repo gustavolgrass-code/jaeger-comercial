@@ -3586,7 +3586,16 @@ async function finCadastros() {
 }
 const erroFin = e => { const m = String(e.message || e);
   if (/insufficient_scope|\(403\)/.test(m)) return `<div class="panel"><h3>O Bling ainda não deu permissão para esta parte</h3><p>O app conectado ao Bling não tem a permissão (escopo) de <b>Caixas e bancos</b>. No Bling: <b>Central de extensões → Área do integrador → seu aplicativo → Escopos</b>, marque <b>Caixas e bancos</b> (e <b>Contas a pagar/receber</b>, se não estiverem), salve e depois reconecte o Bling em <b>Regras e metas</b>.</p><small style="color:var(--mute)">${esc(m.slice(0, 200))}</small></div>`; if (/não permitido|desconhecida/.test(m)) return `<div class="panel"><h3>Falta publicar a função do Bling</h3><p>Para o financeiro funcionar, a função <b>bling-oauth</b> no Supabase precisa ser atualizada com a versão nova (Edge Functions → bling-oauth → colar o código → Deploy).</p><small style="color:var(--mute)">${esc(m)}</small></div>`; return `<div class="panel"><h3>Não consegui ler do Bling</h3><p style="color:var(--t-bad)">${esc(m)}</p></div>`; };
-function finPeriodo(k) { const h = new Date(), iso = d => isoDe(d); FIN[k] = FIN[k] || { de: iso(new Date(h.getFullYear(), h.getMonth() - 2, 1)), ate: iso(new Date(h.getFullYear(), h.getMonth() + 2, 0)), sit: 'abertos' }; return FIN[k]; }
+// período em lista suspensa (Dia, Mês, Mês passado, Últimos 3 meses, Personalizado), como em Pedidos
+const PERS = [['hoje', 'Dia'], ['mes', 'Mês'], ['mesant', 'Mês passado'], ['3m', 'Últimos 3 meses'], ['custom', 'Personalizado']];
+function aplicarPer(F) { const h = new Date(), iso = d => isoDe(d), y = h.getFullYear(), m = h.getMonth();
+  if (F.per === 'hoje') { F.de = F.ate = hojeISO(); } else if (F.per === 'mes') { F.de = iso(new Date(y, m, 1)); F.ate = iso(new Date(y, m + 1, 0)); }
+  else if (F.per === 'mesant') { F.de = iso(new Date(y, m - 1, 1)); F.ate = iso(new Date(y, m, 0)); } else if (F.per === '3m') { F.de = iso(new Date(y, m - 3, h.getDate() + 1)); F.ate = hojeISO(); }
+  return F; }
+const perHtml = (id, F) => `<div><label class="lb">Período</label><select id="${id}">${PERS.map(([k, n]) => `<option value="${k}" ${F.per === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>${F.per === 'custom' ? `<div><label class="lb">&nbsp;</label><button class="btn" id="${id}Cal">📅 ${dstr(F.de + 'T12:00')} – ${dstr(F.ate + 'T12:00')}</button></div>` : ''}`;
+function ligarPer(id, F, redesenha) { $('#' + id).onchange = e => { F.per = e.target.value; aplicarPer(F); redesenha(); if (F.per === 'custom') setTimeout(() => $('#' + id + 'Cal')?.click(), 60); };
+  if ($('#' + id + 'Cal')) $('#' + id + 'Cal').onclick = e => { e.stopPropagation(); calendarioFaixa($('#' + id + 'Cal'), F.de, F.ate, (a, b) => { F.de = a; F.ate = b; redesenha(); }); }; }
+function finPeriodo(k) { FIN[k] = FIN[k] || aplicarPer({ per: 'mes', sit: 'abertos' }); return FIN[k]; }
 async function telaContas(tipo) { // tipo: 'receber' | 'pagar'
   const F = finPeriodo(tipo), rec = tipo === 'receber';
   $('#main').innerHTML = `<section class="view on"><div class="dash pnl"><div class="loading">Lendo as contas a ${tipo} no Bling…</div></div></section>`;
@@ -3622,12 +3631,12 @@ async function telaContas(tipo) { // tipo: 'receber' | 'pagar'
   };
   $('#main').innerHTML = `<section class="view on"><div class="dash pnl">
    <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
-    <div><label class="lb">Vencimento de</label><input type="date" id="fDe" value="${F.de}"></div><div><label class="lb">até</label><input type="date" id="fAte" value="${F.ate}"></div>
+    ${perHtml('fPer', F)}
     <div><label class="lb">Mostrar</label><select id="fSit">${[['abertos', 'Em aberto'], ['vencidos', 'Vencidos'], ['quitados', rec ? 'Recebidos' : 'Pagos'], ['todos', 'Todos']].map(([k, n]) => `<option value="${k}" ${F.sit === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
     <div><label class="lb">Buscar</label><input id="fQ" placeholder="${rec ? 'Cliente' : 'Fornecedor'}…" value="${esc(FIN['q_' + tipo] || '')}"></div>
     <button class="btn" id="fRec" title="Ler de novo do Bling">↻</button><button class="btn pri" id="fNova" style="margin-left:auto">+ Nova conta a ${tipo}</button></div>
    <div id="finCorpo"></div><small style="color:var(--mute)">Dados lidos do Bling agora. Toque numa conta para ver os detalhes.</small></div></section>`;
-  $('#fDe').onchange = $('#fAte').onchange = () => { F.de = $('#fDe').value; F.ate = $('#fAte').value; telaContas(tipo); };
+  ligarPer('fPer', F, () => telaContas(tipo));
   $('#fSit').onchange = e => { F.sit = e.target.value; desenha(); }; $('#fQ').oninput = e => { FIN['q_' + tipo] = e.target.value; desenha(); };
   $('#fRec').onclick = () => telaContas(tipo); $('#fNova').onclick = () => novaConta(tipo);
   desenha();
@@ -3687,7 +3696,7 @@ async function novaConta(tipo) {
     catch (e) { $('#ncOk').disabled = false; toast('O Bling recusou: ' + e.message.slice(0, 160)); } };
 }
 async function telaCaixas() {
-  const F = FIN.cx = FIN.cx || { de: isoDe(new Date(Date.now() - 30 * DIA)), ate: hojeISO(), conta: '' };
+  const F = FIN.cx = FIN.cx || aplicarPer({ per: 'mes', conta: '' });
   $('#main').innerHTML = `<section class="view on"><div class="dash pnl"><div class="loading">Lendo caixas e bancos no Bling…</div></div></section>`;
   let ls; try { await finCadastros(); ls = await finLer(`/caixas?dataInicial=${F.de}&dataFinal=${F.ate}${F.conta ? '&idContaFinanceira=' + F.conta : ''}`, 20); } catch (e) { return $('#main .dash').innerHTML = erroFin(e); }
   // o Bling manda debCred (C = entrada, D = saída) e o valor já com sinal
@@ -3698,13 +3707,13 @@ async function telaCaixas() {
   const porConta = {}; f.forEach(x => { const k = contaDe(x) || '-'; porConta[k] = (porConta[k] || 0) + sinal(x) * absV(x); });
   const nmC = id => (FIN.contas || []).find(c => String(c.id) === String(id))?.descricao || (id === '-' ? 'Sem conta' : '#' + id);
   $('#main').innerHTML = `<section class="view on"><div class="dash pnl">
-   <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end"><div><label class="lb">De</label><input type="date" id="cxDe" value="${F.de}"></div><div><label class="lb">até</label><input type="date" id="cxAte" value="${F.ate}"></div>
+   <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end">${perHtml('cxPer', F)}
     <div><label class="lb">Conta</label><select id="cxConta">${opcoes(FIN.contas || [], F.conta, 'Todas as contas')}</select></div><button class="btn" id="cxRec">↻</button><button class="btn pri" id="cxNovo" style="margin-left:auto">+ Lançamento</button></div>
    <div class="kpis"><div class="kpi"><small>Entradas</small><b style="color:var(--t-ok)">${brl(ent)}</b></div><div class="kpi"><small>Saídas</small><b style="color:var(--t-bad)">${brl(sai)}</b></div><div class="kpi"><small>Resultado do período</small><b>${brl(ent - sai)}</b></div><div class="kpi"><small>Lançamentos</small><b>${f.length}</b></div></div>
    ${Object.keys(porConta).length > 1 ? `<div class="panel"><h3>Movimento por conta</h3>${Object.entries(porConta).map(([k, v]) => `<div class="row" style="justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line)"><span>${esc(nmC(k))}</span><b style="color:${v >= 0 ? 'var(--t-ok)' : 'var(--t-bad)'}">${v >= 0 ? '+ ' : '− '}${brl(Math.abs(v))}</b></div>`).join('') + '<small style="color:var(--mute)">Movimento (entradas − saídas) no período escolhido. O saldo atual de cada conta está no Bling.</small>'}</div>` : ''}
    <div class="panel" style="overflow-x:auto">${f.length ? `<table class="dped"><tr><th>Data</th><th>Histórico</th><th>Conta</th><th>Tipo</th><th style="text-align:right">Valor</th></tr>${f.map(x => `<tr><td>${x.data ? dstr(String(x.data).slice(0, 10) + 'T12:00') : '—'}</td><td>${esc(x.observacoes || x.historico || x.descricao || '')}</td><td>${esc(x.contaFinanceira?.descricao || nmC(contaDe(x) || '-'))}</td><td>${esc((FIN.cats || []).find(c => String(c.id) === String(x.categoria?.id))?.descricao || x.descricao || '')}</td><td style="text-align:right;font-weight:600;color:${sinal(x) > 0 ? 'var(--t-ok)' : 'var(--t-bad)'}">${sinal(x) > 0 ? '+' : '−'} ${brl(absV(x))}</td></tr>`).join('')}</table>` : '<p class="empty">Nenhum lançamento no período.</p>'}</div>
    <small style="color:var(--mute)">Lido do Bling agora (Financeiro → Caixas e bancos).</small></div></section>`;
-  $('#cxDe').onchange = $('#cxAte').onchange = () => { F.de = $('#cxDe').value; F.ate = $('#cxAte').value; telaCaixas(); }; $('#cxConta').onchange = e => { F.conta = e.target.value; telaCaixas(); };
+  ligarPer('cxPer', F, () => telaCaixas()); $('#cxConta').onchange = e => { F.conta = e.target.value; telaCaixas(); };
   $('#cxRec').onclick = () => telaCaixas();
   $('#cxNovo').onclick = () => { modal(`<h3 style="margin-top:0">Novo lançamento no caixa</h3><div class="nbol" id="lxT"><button type="button" data-t="C" class="on">Entrada</button><button type="button" data-t="D">Saída</button></div>
     <div class="row" style="gap:10px;flex-wrap:wrap"><div><label>Data</label><input type="date" id="lxD" value="${hojeISO()}"></div><div><label>Valor</label><input type="number" step="0.01" min="0" id="lxV" style="width:120px"></div><div style="flex:1;min-width:180px"><label>Conta</label><select id="lxC">${opcoes(FIN.contas || [], F.conta, '— escolha —')}</select></div></div>
