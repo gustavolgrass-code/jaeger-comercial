@@ -3401,6 +3401,12 @@ async function verPedido(id, p) {
     ${doBling ? '<small style="color:var(--mute)">Pedido importado do Bling: edite ou exclua por lá.</small>' : '<div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn car" id="vpEdit">✏️ Editar pedido</button><button class="btn" id="vpExc" style="color:var(--t-bad)">Excluir pedido</button><button class="btn" id="vpRef">Excluir e refazer</button></div>'}
     <button class="btn pri" onclick="fecharModal()">Fechar</button></div>`);
   ligarFinPedido(o, p);
+  // nota emitida direto no Bling: ao abrir o pedido, busca a nota ligada a ele e passa a mostrar DANFE e WhatsApp
+  if (o.bling_id && !nfeOk(pedFin(o.id).nfe) && !verPedido._sinc?.[o.id]) { (verPedido._sinc = verPedido._sinc || {})[o.id] = 1;
+    db.bling('ler', { caminho: '/pedidos/vendas/' + o.bling_id }).then(r => (r?.data ?? r)?.notaFiscal?.id).then(nid => nid && db.bling('ler', { caminho: '/nfe/' + nid }))
+      .then(async r => { const n = r?.data ?? r; if (!n?.id || ![5, 6, 7].includes(+n.situacao)) return;
+        await salvarPedFin(o.id, { nfe: { id: n.id, numero: n.numero, serie: n.serie, situacao: n.situacao, chave: n.chaveAcesso || null, linkDanfe: n.linkDanfe || null, linkPDF: n.linkPDF || null, valor: n.valorNota, enviada: true } });
+        if ($('#vpPdf')) verPedido(id, p); }).catch(() => { }); }
   if ($('#vpPerfil')) $('#vpPerfil').onclick = e => { e.preventDefault(); fecharModal(); abrirPerfil(o.pdv_id || p.id); };
   if (doBling) return;
   const excluir = async refazer => {
