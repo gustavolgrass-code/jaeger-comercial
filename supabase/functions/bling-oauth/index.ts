@@ -281,8 +281,8 @@ async function contasPedido(pedidoId: string) {
   const pv: any = (await chamar(`/pedidos/vendas/${ped.bling_id}`, token) as any)?.data ?? {}, nfId = pv.notaFiscal?.id ? String(pv.notaFiscal.id) : '';
   let contas = await contasDoPedido(String(ped.bling_id), token, ped.criado_em, nfId), lancou = false;
   if (!contas.length) {
-    if (nfId) {
-      const nf: any = (await chamar(`/nfe/${nfId}`, token) as any)?.data ?? {};
+    let nf: any = null; if (nfId) { try { nf = (await chamar(`/nfe/${nfId}`, token) as any)?.data ?? null; } catch { nf = null; } } // nota excluída no Bling: segue pelo pedido
+    if (nf) {
       if (![5, 6, 7].includes(Number(nf.situacao))) throw new Error(`Este pedido está ligado à nota fiscal ${nf.numero || ''}, que ainda não foi autorizada (situação ${nf.situacao}). Emita a nota pelo botão "Gerar nota fiscal" (ou exclua a nota no Bling) e depois lance a conta.`);
       const r = await enviarBling('POST', `/nfe/${nfId}/lancar-contas`, {}, token);
       if (!r.ok && !/lan[cç]ad/i.test(r.txt)) throw new Error(`O Bling não lançou as contas da nota (${r.status}): ${r.txt}`);
@@ -336,6 +336,7 @@ async function proximoNumeroNfe(token: string, serie?: number | string) {
 }
 async function gerarNfe(pedidoId: string, nfeId?: string, numero?: number) {
   const token = await tokenValido(); let id = nfeId ? Number(nfeId) : 0;
+  if (id) { try { await chamar(`/nfe/${id}`, token); } catch { id = 0; } } // a nota rejeitada foi excluída no Bling: gera outra
   if (!id) { const ped = await pedidoBling(pedidoId);
     const r = await fetch(`${API}/pedidos/vendas/${ped.bling_id}/gerar-nfe`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'enable-jwt': '1' } });
     const j: any = await r.json().catch(() => ({})); if (!r.ok) throw new Error(`O Bling não gerou a nota (${r.status}): ${JSON.stringify(j?.error ?? j).slice(0, 600)}`);
