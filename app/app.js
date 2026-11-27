@@ -2704,7 +2704,7 @@ async function telaReposicao() {
   // reabrindo uma reposição: volta com os números que foram lançados
   const re = S.reabrir && S.reabrir.pdvId === p.id ? S.reabrir : null, reC = re ? Object.fromEntries(re.contagens.map(c => [c.produto_id, c])) : {}, reB = re?.bonif || {};
   // encomenda feita antes (ex.: pelo WhatsApp): volta com o pedido e o pagamento guardados
-  const enc = !re && (S.base.regras.encomendas || {})[p.id], encL = enc?.linhas || {};
+  const enc = !re && (S.base.regras.encomendas || {})[p.id], rasc = !re && !enc && (S.base.regras.rascunhos_rep || {})[p.id], encL = enc?.linhas || rasc?.linhas || {};
   if (re) ant = Object.fromEntries(re.contagens.map(c => [c.produto_id, c.deixado_anterior]));
   const ex = expo(p.expositor_id), cons = p.condicao === 'Consignado';
   const preco = pr => Number(precos[pr.id] ?? pr.preco);
@@ -2713,6 +2713,7 @@ async function telaReposicao() {
   <div class="atalhos"><b>Atalhos do pedido</b>${KITS.map((k, i) => `<button class="mini" type="button" data-kit="${i}">+ ${k.n} <b class="kq" data-kq="${i}"></b></button>`).join('')}<span class="atsep"></span><button class="mini" type="button" id="kZerar">Zerar repor</button><button class="mini" type="button" id="kZerEnc">Zerar encontrados</button><button class="mini" type="button" id="kZerTudo">Zerar tudo</button></div>
   ${enc ? `<div class="esteira" style="margin-bottom:10px"><b>📦 Pedido para entrega${enc.data ? ' em ' + dstr(enc.data + 'T12:00') : ''}${entregaTxt(enc) ? ' · ' + esc(entregaTxt(enc)) : ''}${enc.obs ? ': ' + esc(enc.obs) : ''}.</b><p style="margin:4px 0 0">O pedido e o pagamento já estão preenchidos. Conte o expositor e toque em <b>Fechar reposição</b> para lançar e mandar ao Bling. <a href="#" id="encDesc">descartar a encomenda</a></p></div>` : ''}
   <p style="color:var(--soft);margin-top:0">Conte o que tem de cada sabor no expositor, inclusive o que vai ser trocado. O sistema sugere quanto repor e calcula o sell-out.<br><small>Deixado: ${re ? 'o mesmo da reposição reaberta' : dx.fonte === 'contagem' ? `contagem de ${dstr(dx.em)}` : dx.fonte === 'pedido' ? `o que foi entregue no último pedido (${dstr(dx.em)}), pelo histórico` : 'sem histórico deste cliente'}${Object.keys(precos).length ? ' · preços combinados com o cliente aplicados' : ''}</small></p>
+  ${rasc ? `<div class="esteira" style="margin-bottom:10px"><b>💾 Edição salva${rasc.em ? ' em ' + new Date(rasc.em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}${rasc.por ? ' por ' + esc(rasc.por) : ''}.</b> A tela abriu como você deixou. <a href="#" id="rascDesc">Descartar e começar do zero</a></div>` : ''}
   <div id="ct" class="contagem">`;
   let l = '';
   S.base.produtos.forEach(pr => { if (pr.linha !== l) { l = pr.linha; h += `<div class="lingrp">${esc(l)}</div>`; }
@@ -2721,7 +2722,7 @@ async function telaReposicao() {
      <div class="sab"><b>${esc(pr.sabor)}</b><small>deixado: ${a}${precos[pr.id] != null ? ` · ${brl(preco(pr))}` : ''}</small></div>
      <div class="cel"><small>Encontrado</small>${stepper('enc', rc ? rc.encontrado : encL[pr.id]?.enc != null ? encL[pr.id].enc : a)}</div>
      <div class="cel"><small>Troca</small>${stepper('trc', rc ? rc.troca : encL[pr.id]?.trc || 0, true)}</div>
-     <div class="cel"><small>Repor</small>${stepper('rep', rc ? Math.max(0, rc.reposto - rc.troca - (reB[pr.id] || 0)) : encL[pr.id] ? encL[pr.id].rep || 0 : 0, false, rc || enc ? 'data-mexeu="1"' : '')}</div>
+     <div class="cel"><small>Repor</small>${stepper('rep', rc ? Math.max(0, rc.reposto - rc.troca - (reB[pr.id] || 0)) : encL[pr.id] ? encL[pr.id].rep || 0 : 0, false, rc || enc || rasc ? 'data-mexeu="1"' : '')}</div>
      <div class="cel"><small>Bonificação</small>${stepper('bon', rc ? reB[pr.id] || 0 : encL[pr.id]?.bon || 0, true)}</div>
      <div class="res"><small>sell-out</small><b class="so">0</b><small class="val">—</small></div></div>`; });
   h += `</div><div class="panel totpanel"><div class="row" style="justify-content:space-between;flex-wrap:wrap;margin-top:12px"><div><b id="tUn">0 un.</b> a repor · sell-out <b id="tSo">0 un.</b> · trocas <b id="tTr">0</b> <small style="color:var(--mute)">(repostas sem cobrar)</small> · bonificação <b id="tBon">0</b> <small style="color:var(--mute)">(não cobra; sai do carro)</small></div><div style="font-family:var(--fh);font-size:24px" id="tVal">R$ 0,00</div></div>
@@ -2729,7 +2730,7 @@ async function telaReposicao() {
   <h3 style="margin:14px 0 6px">Pagamento</h3>${blocoPag('rp', formaIni, re?.vencimento)}${caixaPix()}
   ${re ? '' : blocoEntrega('rp')}
   <label style="display:flex;gap:8px;align-items:center;margin-top:10px" id="rBlingL"><input type="checkbox" id="rBling" checked> Criar o pedido de venda no Bling</label>
-  <div class="row" style="margin-top:12px;flex-wrap:wrap;gap:8px"><button class="btn" id="bVoltar">Voltar</button><button class="btn pri" id="fechar">Fechar reposição</button></div></div></div></section>`;
+  <div class="row" style="margin-top:12px;flex-wrap:wrap;gap:8px"><button class="btn" id="bVoltar">Voltar</button><button class="btn" id="bSalvarEd">💾 Salvar edição</button><button class="btn pri" id="fechar">Fechar reposição</button></div></div></div></section>`;
   $('#main').innerHTML = h;
   const linhas = () => [...document.querySelectorAll('#ct .lin[data-p]')];
   const kitsUsados = {};
@@ -2756,7 +2757,7 @@ async function telaReposicao() {
     kitsUsados[i] = (kitsUsados[i] || 0) + 1; document.querySelector(`[data-kq="${i}"]`).textContent = '×' + kitsUsados[i]; calc(); });
   const zerar = cls => { linhas().forEach(r => cls.forEach(c => { const i = r.querySelector('.' + c); if (i) { i.value = 0; i.dataset.mexeu = 1; } })); if (cls.includes('rep')) Object.keys(kitsUsados).forEach(k => { delete kitsUsados[k]; document.querySelector(`[data-kq="${k}"]`).textContent = ''; }); calc(); };
   $('#kZerar').onclick = () => zerar(['rep']); $('#kZerEnc').onclick = () => zerar(['enc']); $('#kZerTudo').onclick = () => zerar(['rep', 'enc', 'trc', 'bon']);
-  pag = ligarPag('rp', () => valItens, () => calc()); pag.preencher(enc?.pag); if (enc && enc.bling === false && $('#rBling')) $('#rBling').checked = false; calc();
+  pag = ligarPag('rp', () => valItens, () => calc()); pag.preencher(enc?.pag || rasc?.pag); if ((enc || rasc) && (enc || rasc).bling === false && $('#rBling')) $('#rBling').checked = false; calc();
   // pedido para entrega: em vez de fechar, guarda como encomenda para o dia escolhido
   const ent = re ? null : ligarEntrega('rp', on => { $('#fechar').textContent = on ? '📦 Salvar para entrega' : 'Fechar reposição'; });
   atualizaPix();
@@ -2764,6 +2765,24 @@ async function telaReposicao() {
     if (pid && !confirm('Descartar a entrega e excluir também o pedido já criado (no app e no Bling)?')) return;
     try { if (pid) { try { await db.bling('excluir_pedido', { pedido_id: pid }); } catch (er) { if (!/não foi enviado|sem bling/i.test(er.message)) toast('Bling: ' + er.message); } await db.excluirPedido(pid, null); }
       await db.salvarRegra('encomendas', todas); S.base.regras.encomendas = todas; toast('Encomenda descartada'); telaReposicao(); } catch (er) { erro(er); } };
+  // salvar edição: guarda o que está na tela sem fechar a reposição (na entrega agendada, atualiza a entrega e o pedido já criado)
+  if ($('#rascDesc')) $('#rascDesc').onclick = async e => { e.preventDefault(); const t = { ...(S.base.regras.rascunhos_rep || {}) }; delete t[p.id]; await db.salvarRegra('rascunhos_rep', t).catch(() => { }); S.base.regras.rascunhos_rep = t; telaReposicao(); };
+  $('#bSalvarEd').onclick = async () => {
+    const g = pag.ler(), ln = {}, b = $('#bSalvarEd'); linhas().forEach(r => { const v = c => r.querySelector('.' + c).value, en = v('enc'); ln[r.dataset.p] = { rep: +v('rep') || 0, bon: +v('bon') || 0, trc: +v('trc') || 0, enc: en === '' ? null : +en }; });
+    const pagE = { forma: g.forma, vencimento: g.vencimento, parcelas: g.parcelas, frete: g.frete, pago: g.pago }, mandar = $('#rBling')?.checked;
+    b.disabled = true; b.textContent = 'Salvando…';
+    try {
+      if (re) { toast('Esta é uma reposição reaberta: use "Fechar reposição" para gravar'); }
+      else if (enc) { const e = ent?.on() ? ent.ler() : {}; let txt = '';
+        if (enc.pedido_id) { const itensE = linhas().map(r => ({ produto_id: +r.dataset.p, quantidade: +r.querySelector('.rep').value || 0, preco_unit: +r.dataset.pre, bonificado: +r.querySelector('.bon').value || 0 }));
+          await db.editarPedido(enc.pedido_id, { itens: itensE, condicao: g.condicao, vencimento: g.vencimento }); await db.atualizarPedidoCampos(enc.pedido_id, { ...g.extra }).catch(() => { });
+          if (enc.bling) { try { await db.bling('atualizar_pedido', { pedido_id: enc.pedido_id }); txt = ' · pedido atualizado no Bling'; } catch (er) { txt = ' · Bling não atualizado: ' + er.message; } } }
+        await salvarEncomenda(p.id, { ...enc, ...e, linhas: ln, pag: pagE, bling: mandar ?? enc.bling }); toast('Edição salva na entrega' + txt); }
+      else { const t = { ...(S.base.regras.rascunhos_rep || {}), [p.id]: { linhas: ln, pag: pagE, bling: mandar, em: new Date().toISOString(), por: S.eu.nome || '' } };
+        await db.salvarRegra('rascunhos_rep', t); S.base.regras.rascunhos_rep = t; toast('Edição salva: a reposição abre assim da próxima vez'); }
+    } catch (er) { erro(er); }
+    b.disabled = false; b.textContent = '💾 Salvar edição';
+  };
   $('#bVoltar').onclick = () => { S.reabrir = null; voltarDaRep(); };
   $('#fechar').onclick = async () => {
     const t = calc(), g = pag.ler(), pg = g.condicao, venc = g.vencimento, mandar = $('#rBling').checked;
@@ -2781,6 +2800,7 @@ async function telaReposicao() {
           else { const ped = await db.criarPedidoEntrega({ pdvId: p.id, usuarioId: S.eu.id, itens: itensE, pedido: { tipo: cons ? 'reposicao_consignado' : 'reposicao', condicao: g.condicao, unidades: t.un, valor: g.total, pago_na_hora: false, vencimento: g.vencimento, ...g.extra } }); pedId = ped.id; }
         }
         await salvarEncomenda(p.id, { tipo: 'reposicao', linhas: ln, pag: { forma: g.forma, vencimento: g.vencimento, parcelas: g.parcelas, frete: g.frete, pago: g.pago }, bling: mandar, pedido_id: pedId, ...e });
+        if (rasc) { const tr = { ...(S.base.regras.rascunhos_rep || {}) }; delete tr[p.id]; db.salvarRegra('rascunhos_rep', tr).catch(() => { }); S.base.regras.rascunhos_rep = tr; }
         toast(`📦 Entrega salva para ${dstr(e.data + 'T12:00')}: entra na rota desse dia${blingTxt}`); S.contando = null; voltarDaRep();
         if (mandar && pedId && !enc?.pedido_id) enviarAoBling(pedId, p.nome, false);
       } catch (er) { erro(er); $('#fechar').disabled = false; } return; }
@@ -2805,6 +2825,7 @@ async function telaReposicao() {
         if (jaNoBling && g.pago) baixarNoBling(enc.pedido_id).then(({ falha }) => toast(falha.length ? 'Pagamento não baixado no Bling: veja o pedido' : 'Pagamento baixado no Bling ✓')).catch(er => toast('Baixa não feita: ' + msgBling(er)));
       } else reg = await db.registrarReposicao({ pdvId: p.id, usuarioId: S.eu.id, contagens, itens, pedido: pedidoNovo });
       if (enc) await apagarEncomenda(p.id);
+      if (rasc) { const tr = { ...(S.base.regras.rascunhos_rep || {}) }; delete tr[p.id]; db.salvarRegra('rascunhos_rep', tr).catch(() => { }); S.base.regras.rascunhos_rep = tr; }
       let n = await db.carregarPdv(p.id), extra = '';
       const r = regraAval();
       if (n.etapa === 'avaliacao' && (n.aval_reposicoes || 0) >= r.reposicoes) {
