@@ -206,7 +206,7 @@ async function escreverFin(metodo: string, caminho: string, corpo: unknown) {
 // O Bling guarda o custo no vínculo produto-fornecedor; tenta, nesta ordem: PATCH do produto, PUT do vínculo /produtos/fornecedores, PUT do produto inteiro (só produto simples)
 async function enviarBling(metodo: string, caminho: string, corpo: unknown, token: string) {
   const r = await fetch(`${API}${caminho}`, { method: metodo, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json', 'enable-jwt': '1' }, body: JSON.stringify(corpo) });
-  const txt = await r.text(); return { ok: r.ok, status: r.status, txt: txt.slice(0, 300) };
+  const txt = await r.text(); return { ok: r.ok, status: r.status, txt: txt.slice(0, 900) };
 }
 async function atualizarCustos(itens: { id: string | number; custo: number }[]) {
   const token = await tokenValido(), out: unknown[] = [];
@@ -263,12 +263,12 @@ async function pedidoBling(pedidoId: string) {
   if (!ped) throw new Error('Pedido não encontrado'); if (!ped.bling_id) throw new Error('Este pedido ainda não foi enviado ao Bling'); return ped;
 }
 // contas a receber geradas pelo pedido (com link do boleto e do Pix)
-async function contasDoPedido(bid: string, token: string, dataPed?: string) {
-  let ids: number[] = [];
+async function contasDoPedido(bid: string, token: string, dataPed?: string, nfId?: string | number) {
+  let ids: number[] = []; const origens = [String(bid), ...(nfId ? [String(nfId)] : [])];
   try { const r: any = await chamar(`/contas/receber/boletos?idOrigem=${bid}`, token); const d = r?.data ?? r; ids = (d?.contas ?? (Array.isArray(d) ? d.flatMap((x: any) => x.contas ?? []) : [])).map((c: any) => Number(c.id)).filter(Boolean); } catch { /* segue */ }
   if (!ids.length) { const base = dataPed ? new Date(dataPed).getTime() : Date.now(), de = new Date(base - 15 * 864e5).toISOString().slice(0, 10), ate = new Date(base + 340 * 864e5).toISOString().slice(0, 10); // o Bling aceita no máximo 366 dias
     for (let pg = 1; pg <= 10; pg++) { const r: any = await chamar(`/contas/receber?dataInicial=${de}&dataFinal=${ate}&pagina=${pg}&limite=100`, token); const d = r?.data ?? [];
-      d.filter((c: any) => String(c.origem?.id ?? '') === String(bid)).forEach((c: any) => ids.push(Number(c.id))); if (d.length < 100) break; } }
+      d.filter((c: any) => origens.includes(String(c.origem?.id ?? ''))).forEach((c: any) => ids.push(Number(c.id))); if (d.length < 100) break; } }
   const out: any[] = [];
   for (const id of [...new Set(ids)]) { try { const c: any = (await chamar(`/contas/receber/${id}`, token))?.data ?? {};
     out.push({ id: c.id, situacao: c.situacao, valor: c.valor, saldo: c.saldo, vencimento: c.vencimento, forma: c.formaPagamento?.id, conta: c.contaContabil?.descricao ?? null, linkBoleto: c.linkBoleto || null, linkPix: c.linkQRCodePix || null }); } catch { /* ignora */ } }
@@ -277,11 +277,20 @@ async function contasDoPedido(bid: string, token: string, dataPed?: string) {
 // lança as contas do pedido no Bling (se ainda não tiver) e devolve as contas
 async function contasPedido(pedidoId: string) {
   const token = await tokenValido(), ped = await pedidoBling(pedidoId);
-  let contas = await contasDoPedido(String(ped.bling_id), token, ped.criado_em), lancou = false;
+  // pedido com nota fiscal: as contas são lançadas pela nota (e ficam com a nota como origem)
+  const pv: any = (await chamar(`/pedidos/vendas/${ped.bling_id}`, token) as any)?.data ?? {}, nfId = pv.notaFiscal?.id ? String(pv.notaFiscal.id) : '';
+  let contas = await contasDoPedido(String(ped.bling_id), token, ped.criado_em, nfId), lancou = false;
   if (!contas.length) {
-    const r = await enviarBling('POST', `/pedidos/vendas/${ped.bling_id}/lancar-contas`, {}, token);
-    if (!r.ok && !/lan[cç]ad/i.test(r.txt)) throw new Error(`O Bling não lançou as contas (${r.status}): ${r.txt}`);
-    lancou = true; await new Promise(res => setTimeout(res, 1200)); contas = await contasDoPedido(String(ped.bling_id), token, ped.criado_em);
+    if (nfId) {
+      const nf: any = (await chamar(`/nfe/${nfId}`, token) as any)?.data ?? {};
+      if (![5, 6, 7].includes(Number(nf.situacao))) throw new Error(`Este pedido está ligado à nota fiscal ${nf.numero || ''}, que ainda não foi autorizada (situação ${nf.situacao}). Emita a nota pelo botão "Gerar nota fiscal" (ou exclua a nota no Bling) e depois lance a conta.`);
+      const r = await enviarBling('POST', `/nfe/${nfId}/lancar-contas`, {}, token);
+      if (!r.ok && !/lan[cç]ad/i.test(r.txt)) throw new Error(`O Bling não lançou as contas da nota (${r.status}): ${r.txt}`);
+    } else {
+      const r = await enviarBling('POST', `/pedidos/vendas/${ped.bling_id}/lancar-contas`, {}, token);
+      if (!r.ok && !/lan[cç]ad/i.test(r.txt)) throw new Error(`O Bling não lançou as contas (${r.status}): ${r.txt}`);
+    }
+    lancou = true; await new Promise(res => setTimeout(res, 1200)); contas = await contasDoPedido(String(ped.bling_id), token, ped.criado_em, nfId);
   }
   return { pedido: ped.numero, lancou, contas };
 }
