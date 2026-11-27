@@ -4425,26 +4425,28 @@ const fmtCep = c => { const x = String(c || '').replace(/\D/g, ''); return x.len
 const dBR = d => d && !/^0000/.test(d) ? new Date(String(d).slice(0, 10) + 'T12:00').toLocaleDateString('pt-BR') : '—';
 // junta os dados do pedido: do Bling quando ele já está lá; senão, do app
 async function dadosPedidoPDF(id, p) {
+  // itens, valores e pagamento vêm SEMPRE do app (é onde o pedido é editado); do Bling só o cadastro do cliente, o número e o vendedor
   const d = await db.detalhePedido(id), o = d.pedido, pdv = S.pdvs.find(x => x.id === (o.pdv_id || p?.id)) || p || {}, ct = S.contatos?.find(c => c.id === pdv.contato_id);
-  const E = { ...EMPRESA_PADRAO, ...(S.base.regras.empresa || {}) }, F = pedFin(o.id);
-  if (o.bling_id) {
-    const ler = c => db.bling('ler', { caminho: c }).then(r => r?.data ?? r);
-    const b = await ler('/pedidos/vendas/' + o.bling_id);
-    const [c, fs, ven] = await Promise.all([b.contato?.id ? ler('/contatos/' + b.contato.id).catch(() => ({})) : {}, S.formasBling ? S.formasBling : ler('/formas-pagamentos?limite=100').then(x => S.formasBling = x).catch(() => []), b.vendedor?.id ? ler('/vendedores/' + b.vendedor.id).catch(() => ({})) : {}]);
-    const g = c.endereco?.geral || {}, forma = id => (Array.isArray(fs) ? fs : []).find(f => String(f.id) === String(id))?.descricao?.replace(/\s*-\s*Bling Conta/i, '') || '—';
-    const itens = (b.itens || []).map(i => ({ desc: i.descricao, cod: i.codigo, un: i.unidade || 'UN', q: +i.quantidade, u: +i.valor, tot: +i.quantidade * +i.valor - (+i.desconto || 0) }));
-    const sub = itens.reduce((a, i) => a + i.tot, 0), desc = b.desconto?.valor ? (b.desconto.unidade === 'PERCENTUAL' ? sub * b.desconto.valor / 100 : +b.desconto.valor) : 0;
-    return { E, numero: b.numero || o.bling_pedido_id, data: b.data, prevista: b.dataPrevista, vendedor: ven?.contato?.nome || (o.criado_por ? RT?.perfis?.find(x => x.id === o.criado_por)?.nome : '') || '',
-      cli: { fantasia: c.fantasia || pdv.nome || b.contato?.nome, razao: c.nome || b.contato?.nome, doc: fmtDoc(c.numeroDocumento || b.contato?.numeroDocumento), ie: c.ie || '', end: [g.endereco, g.numero].filter(Boolean).join(', ') + (g.bairro ? ' · ' + g.bairro : ''), cidade: [g.municipio, g.uf].filter(Boolean).join(' · ') + (g.cep ? ' · ' + fmtCep(g.cep) : ''), fone: fmtFone(c.celular || c.telefone) },
-      itens, sub, desc, frete: +(b.transporte?.frete || 0) * (b.transporte?.fretePorConta === 1 ? 1 : 0), total: +b.total || sub - desc,
-      parcelas: (b.parcelas || []).map(x => ({ venc: x.dataVencimento, forma: forma(x.formaPagamento?.id), valor: +x.valor, obs: x.observacoes || '' })), obs: b.observacoes || o.observacao || '', pago: !!F.pago, nfe: F.nfe };
-  }
-  const pr = Object.fromEntries(S.base.produtos.map(x => [x.id, x]));
+  const E = { ...EMPRESA_PADRAO, ...(S.base.regras.empresa || {}) }, F = pedFin(o.id), pr = Object.fromEntries(S.base.produtos.map(x => [x.id, x]));
   const itens = d.itens.filter(i => +i.quantidade > 0).map(i => { const x = pr[i.produto_id] || {}; return { desc: x.nome || nomeProd(x), cod: x.bling_codigo || '', un: 'UN', q: +i.quantidade, u: +i.preco_unit, tot: +i.quantidade * +i.preco_unit }; });
-  const sub = itens.reduce((a, i) => a + i.tot, 0), pags = Array.isArray(o.pagamentos) && o.pagamentos.length ? o.pagamentos : [{ forma: o.condicao, valor: +o.valor, vencimento: o.vencimento }];
-  return { E, numero: o.bling_pedido_id || o.numero, data: o.criado_em, prevista: o.criado_em, vendedor: d.visita?.perfis?.nome || '',
-    cli: { fantasia: pdv.nome, razao: pdv.razao_social || '', doc: fmtDoc(pdv.cnpj || pdv.cpf || ''), ie: '', end: [pdv.endereco, pdv.bairro].filter(Boolean).join(' · '), cidade: [pdv.cidade, pdv.uf].filter(Boolean).join(' · '), fone: fmtFone(ct?.whatsapp || ct?.telefone || '') },
-    itens, sub, desc: Math.max(0, sub - +o.valor), frete: 0, total: +o.valor, parcelas: pags.map(x => ({ venc: x.vencimento, forma: x.forma, valor: +x.valor, obs: '' })), obs: o.observacao || '', pago: !!F.pago, nfe: F.nfe };
+  const bon = d.itens.filter(i => +i.bonificado > 0).map(i => { const x = pr[i.produto_id] || {}; return { desc: (x.nome || nomeProd(x)) + ' (bonificação)', cod: x.bling_codigo || '', un: 'UN', q: +i.bonificado, u: 0, tot: 0 }; });
+  const sub = itens.reduce((a, i) => a + i.tot, 0), frete = o.frete && o.frete_cobrado ? +o.frete : 0;
+  const pags = Array.isArray(o.pagamentos) && o.pagamentos.length ? o.pagamentos : [{ forma: o.condicao, valor: +o.valor, vencimento: o.vencimento }];
+  let cli = { fantasia: pdv.nome, razao: pdv.razao_social || '', doc: fmtDoc(pdv.cnpj || pdv.cpf || ''), ie: '', end: [pdv.endereco, pdv.bairro].filter(Boolean).join(' · '), cidade: [pdv.cidade, pdv.uf].filter(Boolean).join(' · '), fone: fmtFone(ct?.whatsapp || ct?.telefone || '') };
+  let numero = o.bling_pedido_id || o.numero, vendedor = d.visita?.perfis?.nome || '', data = o.criado_em;
+  if (o.bling_id) {
+    try {
+      const ler = c => db.bling('ler', { caminho: c }).then(r => r?.data ?? r);
+      const b = await ler('/pedidos/vendas/' + o.bling_id);
+      const [c, ven] = await Promise.all([b.contato?.id ? ler('/contatos/' + b.contato.id).catch(() => ({})) : {}, b.vendedor?.id ? ler('/vendedores/' + b.vendedor.id).catch(() => ({})) : {}]);
+      const g = c.endereco?.geral || {};
+      cli = { fantasia: c.fantasia || pdv.nome || b.contato?.nome, razao: c.nome || b.contato?.nome, doc: fmtDoc(c.numeroDocumento || b.contato?.numeroDocumento), ie: c.ie || '', end: [g.endereco, g.numero].filter(Boolean).join(', ') + (g.bairro ? ' · ' + g.bairro : ''), cidade: [g.municipio, g.uf].filter(Boolean).join(' · ') + (g.cep ? ' · ' + fmtCep(g.cep) : ''), fone: fmtFone(c.celular || c.telefone) || cli.fone };
+      numero = b.numero || numero; data = b.data || data; vendedor = ven?.contato?.nome || vendedor;
+      if (Math.abs((+b.total || 0) - (+o.valor || 0)) > 0.009) toast(`Atenção: no Bling este pedido está com ${brl(+b.total || 0)}, no app ${brl(+o.valor || 0)}. O PDF saiu com o valor do app; atualize o pedido no Bling.`);
+    } catch (e) { console.warn('PDF: dados do Bling', e); }
+  }
+  return { E, numero, data, prevista: data, vendedor, cli, itens: [...itens, ...bon], sub, desc: Math.max(0, sub + frete - +o.valor), frete, total: +o.valor,
+    parcelas: pags.map(x => ({ venc: x.vencimento, forma: String(x.forma || '').replace(/\s*-\s*Bling Conta/i, ''), valor: +x.valor, obs: '' })), obs: o.observacao || '', pago: !!F.pago, nfe: F.nfe };
 }
 function htmlPedidoPDF(P) {
   const R = v => (Math.round((+v || 0) * 100) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), q = v => (+v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
