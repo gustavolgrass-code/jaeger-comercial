@@ -1256,6 +1256,7 @@ function telaAbertura() {
   <div id="oConsInfo" class="esteira" hidden style="margin-top:8px"><b>Abertura em consignado.</b> Nada é cobrado nem vai para o Bling agora. O cliente entra no funil em <b>Consignado</b> e na rota; na próxima visita você conta o que sobrou, cobra só o vendido (aí sim vira pedido no Bling) e ele passa a ser cliente normal. <b id="oConsV"></b></div>`}
   <div id="oPagWrap"><h3 style="margin:16px 0 6px">Pagamento</h3><div class="row" style="flex-wrap:wrap;gap:14px;align-items:flex-end"><div class="pay" style="margin:0">${FORMAS.map((c, i) => `<label><input type="radio" name="oc" value="${c}" ${i === 0 ? 'checked' : ''}> ${c}</label>`).join('')}</div>
    <label class="chkcomp" style="margin:0"><input type="checkbox" id="oPago"> <b>Pago</b>, já recebi (dá baixa no Bling)</label>
+   <label class="chkcomp" style="margin:0"><input type="checkbox" id="oNf"> 🧾 <b>Pediu NF</b></label>
    <div id="oVencBox"><label class="lb">Vencimento</label><div class="row" style="gap:6px;flex-wrap:nowrap"><input id="oVenc" type="date" value="${vencPadrao(FORMAS[0])}">${atalhoPrazo('oprz')}</div></div>
    <div id="oNBol"><label class="lb">Boletos</label><div class="nbol">${[1, 2, 3, 4].map(n => `<button type="button" data-nbol="${n}" class="${n === 1 ? 'on' : ''}">${n}×</button>`).join('')}</div></div></div>
   <label class="chkcomp"><input type="checkbox" id="oDiv"> Dividir o pagamento (entrada, vários boletos, Pix + cartão…)</label>
@@ -1338,7 +1339,7 @@ function telaAbertura() {
   if (p && S.prefillVenda?.pdv === p.id) { const q = S.prefillVenda.q; S.prefillVenda = null; document.querySelectorAll('.oq').forEach(i => i.value = q[i.dataset.p] || 0); calc(); toast('Itens do pedido excluído já preenchidos: corrija e lance de novo'); }
   // venda guardada para entrega: volta preenchida (itens, preços, pagamento); ao lançar, sai da rota
   const encV = p && encVenda(p.id);
-  if (encV) { $('#oExp').value = encV.exp || ''; fill(); if (encV.pago != null && $('#oPago')) $('#oPago').checked = !!encV.pago; if (encV.obsV && $('#oObs')) $('#oObs').value = encV.obsV; Object.entries(encV.precos || {}).forEach(([pid, v]) => { const o = document.querySelector(`.opr[data-p="${pid}"]`); if (o) o.value = v; });
+  if (encV) { $('#oExp').value = encV.exp || ''; fill(); if (encV.pago != null && $('#oPago')) $('#oPago').checked = !!encV.pago; if (encV.pediuNf && $('#oNf')) $('#oNf').checked = true; if (encV.obsV && $('#oObs')) $('#oObs').value = encV.obsV; Object.entries(encV.precos || {}).forEach(([pid, v]) => { const o = document.querySelector(`.opr[data-p="${pid}"]`); if (o) o.value = v; });
     document.querySelectorAll('.olp').forEach(i => { const o = document.querySelector(`.opr[data-linha="${i.dataset.linha}"]`); if (o) i.value = (+o.value).toFixed(2); });
     document.querySelectorAll('.oq').forEach(i => i.value = encV.q?.[i.dataset.p] || 0);
     const r = document.querySelector(`input[name=oc][value="${encV.forma}"]`); if (r) r.checked = true; if (encV.vencimento) $('#oVenc').value = encV.vencimento; if (encV.min) $('#oMin').value = encV.min;
@@ -1374,7 +1375,7 @@ function telaAbertura() {
     if (entO.on()) { const e = entO.ler(); if (!e.data) return toast('Escolha a data da entrega');
       const q = {}, precos = {}; itens.forEach(i => { if (i.quantidade) q[i.produto_id] = i.quantidade; precos[i.produto_id] = i.preco_unit; });
       $('#oSave').disabled = true;
-      try { await salvarEncomenda(p.id, { tipo: 'venda', q, precos, pago: $('#oPago')?.checked, obsV: $('#oObs')?.value || '', forma: div ? f1 : c, vencimento: venc, exp: $('#oExp').value ? +$('#oExp').value : null, min: +$('#oMin').value || null, ...e });
+      try { await salvarEncomenda(p.id, { tipo: 'venda', q, precos, pago: $('#oPago')?.checked, pediuNf: $('#oNf')?.checked, obsV: $('#oObs')?.value || '', forma: div ? f1 : c, vencimento: venc, exp: $('#oExp').value ? +$('#oExp').value : null, min: +$('#oMin').value || null, ...e });
         toast(`📦 Venda para entrega salva para ${dstr(e.data + 'T12:00')}: entra na rota desse dia`); S.abPdv = null; const volta = S.vendaVolta; S.vendaVolta = null;
         if (volta?.aba === 'perfil') abrirPerfil(p.id); else if (volta?.aba === 'mapa') { S.sel = p.id; irPara('mapa'); } else if (volta?.aba === 'rota') irPara('rota'); else telaAbertura(); } catch (er) { erro(er); $('#oSave').disabled = false; } return; }
     $('#oSave').disabled = true;
@@ -1391,6 +1392,7 @@ function telaAbertura() {
       await atualizarUm(p.id); const n = S.pdvs.find(x => x.id === p.id);
       toast(jaCliente ? `Venda lançada para ${p.nome}.` : `Venda lançada para ${p.nome}. Primeira reposição em ${dstr(n.proxima_reposicao)}.`);
       if (guardar && JSON.stringify(novosPrecos) !== JSON.stringify(S.precosCli || {})) { try { await db.salvarPrecos(p.id, novosPrecos); } catch (e) { toast('Venda salva, mas os preços do cliente não foram guardados: rode o SQL 015'); } }
+      if ($('#oNf')?.checked && reg?.pedido?.id) await salvarPedFin(reg.pedido.id, { pediu_nf: true });
       if (mandar && reg?.pedido?.id) await enviarAoBling(reg.pedido.id, p.nome, $('#oPago')?.checked); S.abPdv = null;
       const volta = S.vendaVolta; S.vendaVolta = null;
       if (S.prosp) { PZ.visHoje[p.id] = 'fechou'; PZ.aberto = null; irPara('mapa'); }
@@ -2626,6 +2628,7 @@ function blocoPag(px, forma, venc) {
    <div class="pgvb"><label class="lb">Vencimento</label><div class="row" style="gap:6px;flex-wrap:nowrap"><input class="pgv" type="date" value="${venc || vencPadrao(forma)}">${atalhoPrazo('pgprz')}</div></div>
    <div class="pgnb"><label class="lb">Boletos</label><div class="nbol">${[1, 2, 3, 4].map(n => `<button type="button" data-nb="${n}" class="${n === 1 ? 'on' : ''}">${n}×</button>`).join('')}</div></div></div>
   <label class="chkcomp pgpagol"><input type="checkbox" class="pgpago"> <b>Pago</b>, já recebi (lança a conta e dá baixa no Bling)</label>
+  <label class="chkcomp"><input type="checkbox" class="pgnf"> 🧾 <b>Pediu NF</b>: o cliente quer nota fiscal</label>
   <label class="chkcomp"><input type="checkbox" class="pgdiv"> Dividir o pagamento (entrada, vários boletos, Pix + cartão…)</label>
   <label class="chkcomp"><input type="checkbox" class="pgfr"> 🚚 Entrega terceirizada</label>
   <div class="divpag pgfrbox" hidden><div class="row"><label class="lb" style="margin:0">Custo da entrega</label><input class="pgfrv" type="number" step="0.01" min="0" inputmode="decimal" placeholder="R$" style="width:120px"></div>
@@ -2665,10 +2668,10 @@ function ligarPag(px, base, muda = () => { }) {
     const parc = div ? ls.map((l, i) => { const ult = i === ls.length - 1, v = ult ? Math.round((tot - soma) * 100) / 100 : Math.round((+l.querySelector('.pv').value || 0) * 100) / 100; soma += v; return { forma: l.querySelector('.pf').value, valor: v, vencimento: l.querySelector('.pd').value || null }; }) : [];
     const fp = [...new Set(parc.map(x => x.forma))], f = frete();
     const condicao = div ? (fp.length === 1 ? `${parc.length}× ${fp[0]}` : fp.join(' + ')) : cond();
-    return { ok: !div || parc.every(x => x.valor > 0), pago: q('.pgpago').checked, condicao, forma: cond(), total: tot, vencimento: div ? parc.map(x => x.vencimento).filter(Boolean).sort().pop() || null : (q('.pgv').value || null), parcelas: parc, frete: f,
+    return { ok: !div || parc.every(x => x.valor > 0), pago: q('.pgpago').checked, pediuNf: q('.pgnf').checked, condicao, forma: cond(), total: tot, vencimento: div ? parc.map(x => x.vencimento).filter(Boolean).sort().pop() || null : (q('.pgv').value || null), parcelas: parc, frete: f,
       extra: { ...(div ? { pagamentos: parc } : {}), ...(f.v ? { frete: f.v, frete_cobrado: f.cobrado } : {}) } }; };
   // repõe um pagamento guardado (encomenda)
-  const preencher = g => { if (!g) return; const r = R.querySelector(`input[name=${px}c][value="${g.forma}"]`); if (r) r.checked = true; mostraNB(); if (g.vencimento) q('.pgv').value = g.vencimento; if (g.pago != null) { q('.pgpago').checked = !!g.pago; pagoMexeu = true; }
+  const preencher = g => { if (!g) return; const r = R.querySelector(`input[name=${px}c][value="${g.forma}"]`); if (r) r.checked = true; mostraNB(); if (g.vencimento) q('.pgv').value = g.vencimento; if (g.pago != null) { q('.pgpago').checked = !!g.pago; pagoMexeu = true; } if (g.pediuNf) q('.pgnf').checked = true;
     if (g.frete?.v) { q('.pgfr').checked = true; q('.pgfrbox').hidden = false; q('.pgfrv').value = g.frete.v; const fq = R.querySelector(`input[name=${px}fq][value="${g.frete.cobrado ? 1 : 0}"]`); if (fq) fq.checked = true; }
     if (g.parcelas?.length > 1) { abrirDiv(true); montar(g.parcelas.map(x => ({ f: x.forma, v: x.valor, d: x.vencimento }))); } };
   return { total, ler, preencher, resto };
@@ -2790,7 +2793,7 @@ async function telaReposicao() {
   if ($('#rascDesc')) $('#rascDesc').onclick = async e => { e.preventDefault(); const t = { ...(S.base.regras.rascunhos_rep || {}) }; delete t[p.id]; await db.salvarRegra('rascunhos_rep', t).catch(() => { }); S.base.regras.rascunhos_rep = t; telaReposicao(); };
   $('#bSalvarEd').onclick = async () => {
     const g = pag.ler(), ln = {}, b = $('#bSalvarEd'); linhas().forEach(r => { const v = c => r.querySelector('.' + c).value, en = v('enc'); ln[r.dataset.p] = { rep: +v('rep') || 0, bon: +v('bon') || 0, trc: +v('trc') || 0, enc: en === '' ? null : +en }; });
-    const pagE = { forma: g.forma, vencimento: g.vencimento, parcelas: g.parcelas, frete: g.frete, pago: g.pago }, mandar = $('#rBling')?.checked;
+    const pagE = { forma: g.forma, vencimento: g.vencimento, parcelas: g.parcelas, frete: g.frete, pago: g.pago, pediuNf: g.pediuNf }, mandar = $('#rBling')?.checked;
     b.disabled = true; b.textContent = 'Salvando…';
     try {
       if (re) { toast('Esta é uma reposição reaberta: use "Fechar reposição" para gravar'); }
@@ -2820,9 +2823,10 @@ async function telaReposicao() {
             try { await db.bling('atualizar_pedido', { pedido_id: pedId }); blingTxt = ' · pedido atualizado no Bling'; } catch (er) { blingTxt = ' · Bling não atualizado: ' + er.message; } }
           else { const ped = await db.criarPedidoEntrega({ pdvId: p.id, usuarioId: S.eu.id, itens: itensE, pedido: { tipo: cons ? 'reposicao_consignado' : 'reposicao', condicao: g.condicao, unidades: t.un, valor: g.total, pago_na_hora: false, vencimento: g.vencimento, ...g.extra } }); pedId = ped.id; }
         }
-        await salvarEncomenda(p.id, { tipo: 'reposicao', linhas: ln, pag: { forma: g.forma, vencimento: g.vencimento, parcelas: g.parcelas, frete: g.frete, pago: g.pago }, bling: mandar, pedido_id: pedId, ...e });
+        await salvarEncomenda(p.id, { tipo: 'reposicao', linhas: ln, pag: { forma: g.forma, vencimento: g.vencimento, parcelas: g.parcelas, frete: g.frete, pago: g.pago, pediuNf: g.pediuNf }, bling: mandar, pedido_id: pedId, ...e });
         if (rasc) { const tr = { ...(S.base.regras.rascunhos_rep || {}) }; delete tr[p.id]; db.salvarRegra('rascunhos_rep', tr).catch(() => { }); S.base.regras.rascunhos_rep = tr; }
         toast(`📦 Entrega salva para ${dstr(e.data + 'T12:00')}: entra na rota desse dia${blingTxt}`); S.contando = null; voltarDaRep();
+        if (pedId && g.pediuNf) await salvarPedFin(pedId, { pediu_nf: true });
         if (mandar && pedId && !enc?.pedido_id) enviarAoBling(pedId, p.nome, false);
       } catch (er) { erro(er); $('#fechar').disabled = false; } return; }
     // reposto (físico) = vendido + trocas repostas; o pedido cobra só o vendido
@@ -2857,6 +2861,7 @@ async function telaReposicao() {
       if (p.condicao !== g.forma && !cons && !g.parcelas.length) await db.atualizarPdv(p.id, { condicao: g.forma }).catch(() => { });
       if (p.etapa === 'consignado') await db.atualizarPdv(p.id, { condicao: g.forma, etapa: 'avaliacao', avaliacao_inicio: hojeISO(), etapa_motivo: 'Consignado efetivado: primeira venda' }).catch(() => { });
       S.reabrir = null; await recarregar(); await avaliarRisco(); toast('Reposição registrada.' + extra); voltarDaRep();
+      if (g.pediuNf && reg.pedido?.id) await salvarPedFin(reg.pedido.id, { pediu_nf: true });
       if (mandar && reg.pedido && !jaNoBling && (cons ? t.so : t.un) > 0) enviarAoBling(reg.pedido.id, p.nome, g.pago);
     } catch (e) { erro(e); $('#fechar').disabled = false; }
   };
@@ -3337,7 +3342,7 @@ async function verPedido(id, p) {
     : `<p style="color:var(--mute);margin:12px 0 0">${o.visita_id ? 'Esta visita não tem contagem do expositor (venda registrada sem contar).' : 'Pedido sem contagem do expositor.'}</p>`;
   const doBling = o.bling_status === 'importado' && !o.criado_por;
   modal(`<h3 style="margin-top:0">Pedido ${esc(o.bling_pedido_id || o.numero || '')} · ${new Date(o.criado_em).toLocaleDateString('pt-BR')}</h3>
-   <p style="color:var(--soft);margin:0"><a href="#" id="vpPerfil" style="color:var(--choc);font-weight:700;text-decoration:underline" title="Abrir o perfil do negócio">${esc(p.nome)}</a> · ${o.tipo === 'abertura' ? 'abertura' : 'reposição'}${d.visita?.perfis?.nome ? ' · por ' + esc(d.visita.perfis.nome) : ''} · ${o.bling_id ? 'no Bling' : doBling ? 'veio do Bling' : 'não enviado ao Bling'}</p>
+   <p style="color:var(--soft);margin:0"><a href="#" id="vpPerfil" style="color:var(--choc);font-weight:700;text-decoration:underline" title="Abrir o perfil do negócio">${esc(p.nome)}</a>${seloNF(o.id)} · ${o.tipo === 'abertura' ? 'abertura' : 'reposição'}${d.visita?.perfis?.nome ? ' · por ' + esc(d.visita.perfis.nome) : ''} · ${o.bling_id ? 'no Bling' : doBling ? 'veio do Bling' : 'não enviado ao Bling'}</p>
    <p style="margin:6px 0 0">Pagamento: <b>${esc(o.condicao || '—')}</b>${o.vencimento ? ' · vence ' + dstr(o.vencimento + 'T12:00') : ''}${Array.isArray(o.pagamentos) && o.pagamentos.length > 1 ? '<br><small>' + o.pagamentos.map(x => `${esc(x.forma)} ${brl(x.valor)}${x.vencimento ? ' (' + dstr(x.vencimento + 'T12:00') + ')' : ''}`).join(' · ') + '</small>' : ''}${+o.frete ? ` · frete ${brl(o.frete)}` : ''}</p>
    ${blocoFinPedido(o)}
    <h4 style="margin:14px 0 6px">Itens cobrados</h4>${its.length ? `<table class="dped"><tr><th>Produto</th><th>Qtd.</th><th>Preço</th><th style="text-align:right">Valor</th></tr>${its.map(i => `<tr><td>${esc(i.n)}</td><td>${i.q}</td><td>${brl(i.u)}</td><td style="text-align:right">${brl(i.v)}</td></tr>`).join('')}<tr style="font-weight:700"><td>Total</td><td>${its.reduce((a, i) => a + i.q, 0)}</td><td></td><td style="text-align:right">${brl(o.valor)}</td></tr></table>` : '<small style="color:var(--mute)">sem itens detalhados</small>'}
@@ -3392,7 +3397,7 @@ async function telaPedidos() {
      <div class="kpis"><div class="kpi"><small>Pedidos</small><b>${f.length}</b></div><div class="kpi"><small>Valor (sem cancelados)</small><b>${brl(tot)}</b></div><div class="kpi"><small>Ticket médio</small><b>${f.length ? brl(tot / Math.max(1, f.filter(o => o.st.k !== 'cancelado').length)) : '—'}</b></div><div class="kpi"><small>Unidades</small><b>${fmt(f.filter(o => o.st.k !== 'cancelado').reduce((a, o) => a + (+o.unidades || 0), 0))}</b></div></div>
      ${encs.length && !F.sit ? `<div class="panel"><h3>📦 Entregas agendadas (${encs.length})</h3><p class="psub">Pedidos salvos para entrega: viram pedido quando você fechar no cliente</p><table class="dped"><tr><th>Entrega</th><th>Cliente</th><th>Tipo</th><th>Por</th><th></th></tr>${encs.map(x => `<tr><td>${x.e.data ? dstr(x.e.data + 'T12:00') : 'sem data'}${x.e.periodo && x.e.periodo !== 'dia_todo' ? ' · ' + PERIODOS_ENT[x.e.periodo].toLowerCase() : ''}</td><td><a href="#" data-cli="${x.id}"><b>${esc(x.p.nome)}</b></a></td><td>${x.e.tipo === 'venda' ? 'Venda' : 'Reposição'}${x.e.origem ? ' · ' + ORIGENS[x.e.origem] : ''}</td><td>${esc(x.e.por || '')}</td><td><button class="mini" data-abre="${x.id}" data-tp="${x.e.tipo}">abrir</button></td></tr>`).join('')}</table></div>` : ''}
      <div class="panel" style="overflow-x:auto">${f.length ? `<table class="dped"><tr>${th('data', 'Data')}${th('num', 'Nº')}${th('cli', 'Cliente')}${th('tipo', 'Tipo')}${th('pag', 'Pagamento')}${th('vend', 'Vendedor')}${th('sit', 'Situação')}${th('val', 'Valor', 'text-align:right')}<th></th></tr>${f.map(o => `<tr class="lnk" data-ped="${o.id}" data-pdv="${o.pdv_id}"><td>${new Date(o.criado_em).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })}<br><small style="color:var(--mute)">${new Date(o.criado_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</small></td>
-       <td>${o.bling_pedido_id ? 'Bling ' + esc(o.bling_pedido_id) : ''}${o.criado_por ? `<br><small style="color:var(--mute)">app ${o.numero}</small>` : ''}</td><td><b>${esc(o.pdvs?.nome || '—')}</b>${o.pdvs?.bairro ? `<br><small style="color:var(--mute)">${esc(o.pdvs.bairro)}</small>` : ''}</td>
+       <td>${o.bling_pedido_id ? 'Bling ' + esc(o.bling_pedido_id) : ''}${o.criado_por ? `<br><small style="color:var(--mute)">app ${o.numero}</small>` : ''}</td><td><b>${esc(o.pdvs?.nome || '—')}</b>${seloNF(o.id)}${o.pdvs?.bairro ? `<br><small style="color:var(--mute)">${esc(o.pdvs.bairro)}</small>` : ''}</td>
        <td>${o.tipo === 'abertura' ? 'Abertura' : 'Reposição'}</td><td>${esc(o.condicao || '—')}${o.vencimento ? `<br><small style="color:var(--mute)">vence ${dstr(o.vencimento + 'T12:00')}</small>` : ''}</td><td>${o.criado_por ? esc(nomeP(o.criado_por)) : '<small style="color:var(--mute)">Bling</small>'}</td>
        <td><span class="badge" style="background:${o.st.c}" title="${esc(o.bling_erro || '')}">${esc(o.st.n)}</span></td><td style="text-align:right"><b>${brl(+o.valor || 0)}</b><br><small style="color:var(--mute)">${fmt(+o.unidades || 0)} un.</small></td><td><button class="mini" data-pdf="${o.id}" title="Baixar o pedido em PDF">📄</button></td></tr>`).join('')}</table>` : '<p class="empty">Nenhum pedido com esses filtros.</p>'}</div>`;
     document.querySelectorAll('[data-st]').forEach(b => b.onclick = () => { F.sit = b.dataset.st; desenha(); });
@@ -4513,6 +4518,7 @@ function linkWhatsNF(o, n) {
   const nome = (ct.nome || '').split(' ')[0], txt = `Olá${nome ? ', ' + nome : ''}! Aqui é da Jaeger's Doces. Segue a nota fiscal nº ${n.numero || ''} do seu pedido nº ${o.bling_pedido_id || o.numero || ''} (${brl(+o.valor || 0)}):\n${n.linkDanfe || n.linkPDF}\n\nObrigado pela parceria!`;
   return `https://wa.me/${f}?text=${encodeURIComponent(txt)}`;
 }
+const seloNF = id => { const F = pedFin(id); return F.pediu_nf && !nfeOk(F.nfe) ? ' <span class="badge" style="background:#F2C94C;color:#151312">pediu NF</span>' : ''; };
 function blocoFinPedido(o) {
   if (!o.bling_id) return `<div class="pfin"><button class="btn" id="vpPdf">📄 Pedido em PDF</button></div>`;
   const F = pedFin(o.id), n0 = F.nfe, n = n0 && ![4, 2].includes(+n0.situacao) ? n0 : null, temBol = /boleto/i.test(o.condicao || ''), bols = (F.contas || []).filter(c => c.linkBoleto);
