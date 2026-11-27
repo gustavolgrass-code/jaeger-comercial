@@ -724,3 +724,9 @@ section:fullscreen #mapa{height:100vh}
 .ligest{background:var(--bg-info);border-radius:10px;padding:10px 12px;margin:4px 0 6px}
 .pfin{background:var(--sand);border-radius:10px;padding:10px 12px;margin:12px 0 0}
 .pfin .btn{text-decoration:none}
+/* caixas de seleção do pagamento maiores (Pago, Dividir, Bling, formas) */
+.chkcomp{font-size:15px;padding:4px 0}
+.chkcomp input[type=checkbox],#oPago,#rBling,#oBling,#oPadrao{width:24px!important;height:24px!important;min-width:24px;margin:0;flex:none;accent-color:var(--choc);cursor:pointer}
+#rBlingL,label:has(>#oBling),label:has(>#oPadrao){font-size:15px;gap:10px!important}
+.pay.pgf label,.pay label{font-size:15px;padding:10px 14px}
+.pay input[type=radio]{width:20px;height:20px;accent-color:var(--choc)}
