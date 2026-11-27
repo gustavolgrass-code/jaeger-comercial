@@ -730,3 +730,4 @@ section:fullscreen #mapa{height:100vh}
 #rBlingL,label:has(>#oBling),label:has(>#oPadrao){font-size:15px;gap:10px!important}
 .pay.pgf label,.pay label{font-size:15px;padding:10px 14px}
 .pay input[type=radio]{width:20px;height:20px;accent-color:var(--choc)}
+.dash>*{flex-shrink:0} /* painéis não encolhem: a página rola, não a lista */
