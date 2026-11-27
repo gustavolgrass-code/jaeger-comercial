@@ -1253,7 +1253,7 @@ function telaAbertura() {
    <div><label class="lb">Pedido mínimo combinado (R$)</label><input id="oMin" type="number" step="10" value="150" style="width:100%"></div>
    <div><label class="lb">Repor a cada</label><select id="oCad" style="width:100%"><option value="">${cadPadrao().avaliacao || 7} dias (padrão da avaliação)</option><option value="10">10 dias</option><option value="14">14 dias</option></select></div></div></div>
   <h3 style="margin:16px 0 6px">Pagamento</h3><div class="row" style="flex-wrap:wrap;gap:14px;align-items:flex-end"><div class="pay" style="margin:0">${FORMAS.map((c, i) => `<label><input type="radio" name="oc" value="${c}" ${i === 0 ? 'checked' : ''}> ${c}</label>`).join('')}</div>
-   <label class="chkcomp" style="margin:0"><input type="checkbox" id="oPago" ${FORMAS[0] !== 'Boleto' ? 'checked' : ''}> ✅ <b>Pago</b>: já recebi (dá baixa no Bling)</label>
+   <label class="chkcomp" style="margin:0"><input type="checkbox" id="oPago"> ✅ <b>Pago</b>: já recebi (dá baixa no Bling)</label>
    <div id="oVencBox"><label class="lb">Vencimento</label><div class="row" style="gap:6px;flex-wrap:nowrap"><input id="oVenc" type="date" value="${vencPadrao(FORMAS[0])}">${atalhoPrazo('oprz')}</div></div>
    <div id="oNBol"><label class="lb">Boletos</label><div class="nbol">${[1, 2, 3, 4].map(n => `<button type="button" data-nbol="${n}" class="${n === 1 ? 'on' : ''}">${n}×</button>`).join('')}</div></div></div>
   <label class="chkcomp"><input type="checkbox" id="oDiv"> Dividir o pagamento (entrada, vários boletos, Pix + cartão…)</label>
@@ -1309,7 +1309,7 @@ function telaAbertura() {
     const tot = calc().tot, cada = tot ? Math.floor(tot / n * 100) / 100 : ''; abrirDiv(true); montarParc(Array.from({ length: n }, () => ({ f: 'Boleto', v: cada }))); });
   const mostraNBol = () => { $('#oNBol').hidden = cond() !== 'Boleto'; }; mostraNBol();
   let oPagoMexeu = false; $('#oPago').onchange = () => { oPagoMexeu = true; };
-  document.querySelectorAll('input[name=oc]').forEach(x => x.onchange = () => { mostraNBol(); $('#oVenc').value = vencPadrao(cond()); if (!oPagoMexeu) $('#oPago').checked = cond() !== 'Boleto'; document.querySelector('.oprz').hidden = cond() !== 'Boleto'; });
+  document.querySelectorAll('input[name=oc]').forEach(x => x.onchange = () => { mostraNBol(); $('#oVenc').value = vencPadrao(cond()); document.querySelector('.oprz').hidden = cond() !== 'Boleto'; });
   document.querySelector('.oprz').hidden = cond() !== 'Boleto';
   document.querySelectorAll('.oprz [data-prz]').forEach(b => b.onclick = () => { $('#oVenc').value = vencPadrao('Boleto', +b.dataset.prz); });
   document.querySelectorAll('[data-kit]').forEach(b => b.onclick = () => { const k = KITS[+b.dataset.kit]; Object.entries(k.q).forEach(([cod, q]) => { const pr = S.base.produtos.find(x => x.bling_codigo === cod), inp = pr && document.querySelector(`.oq[data-p="${pr.id}"]`); if (inp) inp.value = (+inp.value || 0) + q; }); calc(); });
@@ -2607,7 +2607,7 @@ function blocoPag(px, forma, venc) {
   return `<div id="${px}Pag"><div class="row" style="flex-wrap:wrap;gap:14px;align-items:flex-end"><div class="pay pgf" style="margin:0">${FORMAS.map(c => `<label><input type="radio" name="${px}c" value="${c}" ${c === forma ? 'checked' : ''}> ${c}</label>`).join('')}</div>
    <div class="pgvb"><label class="lb">Vencimento</label><div class="row" style="gap:6px;flex-wrap:nowrap"><input class="pgv" type="date" value="${venc || vencPadrao(forma)}">${atalhoPrazo('pgprz')}</div></div>
    <div class="pgnb"><label class="lb">Boletos</label><div class="nbol">${[1, 2, 3, 4].map(n => `<button type="button" data-nb="${n}" class="${n === 1 ? 'on' : ''}">${n}×</button>`).join('')}</div></div></div>
-  <label class="chkcomp pgpagol"><input type="checkbox" class="pgpago" ${forma && forma !== 'Boleto' ? 'checked' : ''}> ✅ <b>Pago</b>: já recebi (lança a conta e dá baixa no Bling)</label>
+  <label class="chkcomp pgpagol"><input type="checkbox" class="pgpago"> ✅ <b>Pago</b>: já recebi (lança a conta e dá baixa no Bling)</label>
   <label class="chkcomp"><input type="checkbox" class="pgdiv"> Dividir o pagamento (entrada, vários boletos, Pix + cartão…)</label>
   <label class="chkcomp"><input type="checkbox" class="pgfr"> 🚚 Entrega terceirizada</label>
   <div class="divpag pgfrbox" hidden><div class="row"><label class="lb" style="margin:0">Custo da entrega</label><input class="pgfrv" type="number" step="0.01" min="0" inputmode="decimal" placeholder="R$" style="width:120px"></div>
@@ -2639,7 +2639,7 @@ function ligarPag(px, base, muda = () => { }) {
     if (n === 1) { abrirDiv(false); q('.pgparc').innerHTML = ''; muda(); return; }
     const tot = total(), cada = tot ? Math.floor(tot / n * 100) / 100 : ''; abrirDiv(true); montar(Array.from({ length: n }, () => ({ f: 'Boleto', v: cada }))); muda(); });
   let pagoMexeu = false; q('.pgpago').onchange = () => { pagoMexeu = true; };
-  qa(`input[name=${px}c]`).forEach(x => x.onchange = () => { mostraNB(); q('.pgv').value = vencPadrao(cond()); if (!pagoMexeu) q('.pgpago').checked = cond() !== 'Boleto'; muda(); });
+  qa(`input[name=${px}c]`).forEach(x => x.onchange = () => { mostraNB(); q('.pgv').value = vencPadrao(cond()); muda(); });
   qa('.pgprz [data-prz]').forEach(b => b.onclick = () => { q('.pgv').value = vencPadrao('Boleto', +b.dataset.prz); muda(); });
   mostraNB();
   // lê o que foi escolhido: condição (ex.: "2× Boleto", "Pix + Boleto"), vencimento final e os campos extras do pedido
