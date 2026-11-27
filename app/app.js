@@ -4583,7 +4583,7 @@ function blocoFinPedido(o) {
   const F = pedFin(o.id), n0 = F.nfe, n = n0 && ![4, 2].includes(+n0.situacao) ? n0 : null, temBol = /boleto/i.test(o.condicao || ''), bols = (F.contas || []).filter(c => c.linkBoleto);
   return `<div class="pfin"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
     <button class="btn" id="vpPdf">📄 Pedido em PDF</button>
-    ${n ? `<span class="fst" style="--c:${nfeOk(n) ? COR.bom : COR.aviso}">NF-e ${esc(n.numero || '')} · ${NFE_SIT[n.situacao] || 'enviada'}</span>${nfeOk(n) && (n.linkDanfe || n.linkPDF) ? `<a class="btn" href="${esc(n.linkDanfe || n.linkPDF)}" target="_blank" rel="noopener">📄 DANFE</a><a class="btn" href="${esc(linkWhatsNF(o, n))}" target="_blank" rel="noopener">📲 Enviar NF por WhatsApp</a>` : ''}${!nfeOk(n) ? '<button class="btn" id="vpNfe">🧾 Emitir a nota de novo</button>' : ''}` : `<button class="btn" id="vpNfe">🧾 Gerar nota fiscal</button>${n0 ? `<small style="color:var(--mute)">tentativa anterior (nº ${esc(n0.numero || '')}) ${NFE_SIT[n0.situacao]?.toLowerCase() || ''}</small>` : ''}`}
+    ${n ? `<span class="fst" style="--c:${nfeOk(n) ? COR.bom : COR.aviso}">NF-e ${esc(n.numero || '')} · ${NFE_SIT[n.situacao] || 'enviada'}</span>${nfeOk(n) && (n.linkDanfe || n.linkPDF) ? `<a class="btn" href="${esc(n.linkDanfe || n.linkPDF)}" target="_blank" rel="noopener">📄 DANFE</a><button class="btn" id="vpWhats" data-link="${esc(linkWhatsNF(o, n))}">📲 Enviar NF por WhatsApp</button>` : ''}${!nfeOk(n) ? '<button class="btn" id="vpNfe">🧾 Emitir a nota de novo</button>' : ''}` : `<button class="btn" id="vpNfe">🧾 Gerar nota fiscal</button>${n0 ? `<small style="color:var(--mute)">tentativa anterior (nº ${esc(n0.numero || '')}) ${NFE_SIT[n0.situacao]?.toLowerCase() || ''}</small>` : ''}`}
     ${temBol ? (bols.length ? bols.map((c, i) => `<a class="btn" href="${esc(c.linkBoleto)}" target="_blank" rel="noopener">💳 Boleto${bols.length > 1 ? ' ' + (i + 1) : ''} · ${brl(c.valor)}</a><button class="mini" data-cpy="${esc(c.linkBoleto)}">copiar link</button>`).join('') : '<button class="btn" id="vpBol">💳 Gerar boleto</button>') : ''}
     ${F.pago ? `<span class="fst" style="--c:${COR.bom}">Pago · baixado no Bling${F.pago_em ? ' em ' + dstr(F.pago_em + 'T12:00') : ''}</span>${F.pix ? `<a class="btn" href="${esc(F.pix)}" target="_blank" rel="noopener">QR Code Pix</a>` : ''}` : /^(pix|dinheiro|cart)/i.test(o.condicao || '') || (o.condicao || '').includes('+') ? '<button class="btn" id="vpPago">✅ Marcar como pago</button>' : ''}
     ${!F.pago && !(F.contas || []).length ? '<button class="btn" id="vpConta">📥 Lançar conta a receber</button>' : ''}
@@ -4592,6 +4592,15 @@ function blocoFinPedido(o) {
 function ligarFinPedido(o, p) {
   const volta = () => verPedido(o.id, p);
   if ($('#vpPdf')) $('#vpPdf').onclick = e => baixarPedidoPDF(o.id, p, e.currentTarget);
+  // enviar a NF: no celular compartilha o PDF da nota direto (escolhe o WhatsApp); no computador baixa o PDF e abre o WhatsApp com a mensagem
+  if ($('#vpWhats')) $('#vpWhats').onclick = async e => { const b = e.currentTarget, link = b.dataset.link, n = pedFin(o.id).nfe, txt = decodeURIComponent(link.split('text=')[1] || '').replace(/\n.*https?:\/\/\S+/, '');
+    b.disabled = true; b.textContent = 'Preparando o PDF…';
+    try { const r = await db.bling('nfe_pdf', { nfe_id: n.id }), bin = atob(r.base64), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+      const arq = new File([u8], r.nome, { type: 'application/pdf' });
+      if (navigator.canShare?.({ files: [arq] })) { try { await navigator.share({ files: [arq], text: txt }); } catch (er) { if (er.name !== 'AbortError') throw er; } }
+      else { const a = document.createElement('a'); a.href = URL.createObjectURL(arq); a.download = r.nome; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); toast('PDF da nota baixado: anexe na conversa do WhatsApp'); window.open(link.replace(/text=[^&]*/, 'text=' + encodeURIComponent(txt)), '_blank'); }
+    } catch (er) { toast('Não consegui o PDF (' + msgBling(er) + '): mandando o link da nota'); window.open(link, '_blank'); }
+    b.disabled = false; b.textContent = '📲 Enviar NF por WhatsApp'; };
   if ($('#vpNfe')) $('#vpNfe').onclick = async () => { const n = pedFin(o.id).nfe, reusa = n && !nfeOk(n) ? n.id : null;
     modal('<div class="loading">Buscando o número da próxima nota…</div>');
     let px = null; try { px = await db.bling('nfe_proximo', n?.serie != null ? { serie: n.serie } : {}); } catch (e) { }

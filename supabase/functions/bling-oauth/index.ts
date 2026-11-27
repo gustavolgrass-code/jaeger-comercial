@@ -363,6 +363,19 @@ async function gerarNfe(pedidoId: string, nfeId?: string, numero?: number) {
   return { ...n, enviada: env.ok, ...(env.ok && ![4].includes(Number(n.situacao)) ? {} : { erro: `A nota ${n.numero || ''} não foi autorizada: ${env.ok ? 'rejeitada pela SEFAZ, veja o motivo no Bling' : env.txt}` }) };
 }
 
+// PDF da nota (DANFE) em base64, para o app compartilhar o arquivo no WhatsApp
+async function pdfNfe(nfeId: string) {
+  const token = await tokenValido(), n: any = (await chamar(`/nfe/${nfeId}`, token) as any)?.data ?? {};
+  for (const url of [n.linkPDF, n.linkDanfe].filter(Boolean)) {
+    try { const u = new URL(url); if (!/(^|\.)bling\.com\.br$/i.test(u.hostname)) continue;
+      const r = await fetch(url, { redirect: 'follow' }); const tipo = r.headers.get('content-type') || ''; if (!r.ok || !/pdf/i.test(tipo)) continue;
+      const b = new Uint8Array(await r.arrayBuffer()); let bin = ''; for (let i = 0; i < b.length; i += 0x8000) bin += String.fromCharCode(...b.subarray(i, i + 0x8000));
+      return { nome: `NF ${n.numero || nfeId}.pdf`, base64: btoa(bin) };
+    } catch { /* tenta o próximo link */ }
+  }
+  throw new Error('O Bling não devolveu o PDF da nota (só o link).');
+}
+
 // cliente novo: procura pelo nome exato e, se não existir, cria o cadastro no Bling com os dados do app
 async function criarContatoBling(p: any, doc: string, token: string): Promise<number | null> {
   if (!p?.nome) return null;
@@ -592,6 +605,7 @@ Deno.serve(async (req) => {
     if (acao === 'contas_pedido') return json(await contasPedido(String(pedido_id || '')));
     if (acao === 'baixar_pedido') return json(await baixarPedido(String(pedido_id || '')));
     if (acao === 'gerar_nfe') return json(await gerarNfe(String(pedido_id || ''), nfe_id ? String(nfe_id) : undefined, Number(numero) || undefined));
+    if (acao === 'nfe_pdf') return json(await pdfNfe(String(nfe_id || '')));
     if (acao === 'nfe_proximo') return json(await proximoNumeroNfe(await tokenValido(), serie ?? undefined));
     if (acao === 'nfe') return json(await lerNfe(String(nfe_id || ''), await tokenValido()));
     if (acao === 'enviar_pedido') return json(await enviarPedido(String(pedido_id || '')));
