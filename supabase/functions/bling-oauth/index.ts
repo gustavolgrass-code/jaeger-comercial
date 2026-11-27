@@ -164,7 +164,7 @@ async function sincronizar() {
 async function puxarContatos(inicio: number) {
   const token = await tokenValido();
   const { data: pdvs, count, error } = await db.from('pdvs').select('id, nome, razao_social, cnpj, bling_contato_id', { count: 'exact' })
-    .in('etapa', ['avaliacao', 'ativo', 'risco', 'revisao', 'inativo']).order('nome').range(inicio, inicio + 19);
+    .in('etapa', ['consignado', 'avaliacao', 'ativo', 'risco', 'revisao', 'inativo']).order('nome').range(inicio, inicio + 19);
   if (error) throw error;
   const lista: unknown[] = []; let nao_achados = 0;
   for (const p of pdvs ?? []) {
