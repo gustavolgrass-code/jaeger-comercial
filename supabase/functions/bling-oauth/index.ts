@@ -368,11 +368,14 @@ async function criarContatoBling(p: any, doc: string, token: string): Promise<nu
   if (!p?.nome) return null;
   const nome = String(p.razao_social || p.nome).trim();
   try { const r = await chamar(`/contatos?limite=5&pesquisa=${encodeURIComponent(nome)}`, token); const igual = (r?.data ?? []).find((c: any) => String(c.nome || '').trim().toLowerCase() === nome.toLowerCase()); if (igual?.id) return Number(igual.id); } catch { /* segue para criar */ }
-  const tel = String(p.contatos?.whatsapp || p.contatos?.telefone || p.telefone || '').replace(/\D/g, '');
+  // telefone: tira o 0 do DDD e o 55; celular (9 dígitos depois do DDD) vai em "celular", fixo vai em "telefone" (o Bling recusa fixo no celular)
+  const limpa = (t: unknown) => { let x = String(t || '').replace(/\D/g, ''); if (x.startsWith('55') && x.length > 11) x = x.slice(2); if (x.startsWith('0')) x = x.replace(/^0+/, ''); return x.length === 10 || x.length === 11 ? x : ''; };
+  const fones = [p.contatos?.whatsapp, p.contatos?.telefone, p.telefone].map(limpa).filter(Boolean);
+  const cel = fones.find(x => x.length === 11 && x[2] === '9') || '', fixo = fones.find(x => x.length === 10) || '';
   const rua = String(p.endereco || '').replace(/,\s*\d+.*$/, '').trim();
   const corpo: Record<string, unknown> = {
     nome, fantasia: p.nome, situacao: 'A', tipo: doc.length === 11 ? 'F' : doc.length === 14 ? 'J' : 'J', indicadorIe: 9,
-    ...(doc ? { numeroDocumento: doc } : {}), ...(tel ? { celular: tel } : {}), ...(p.contatos?.email ? { email: p.contatos.email } : {}),
+    ...(doc ? { numeroDocumento: doc } : {}), ...(cel ? { celular: cel } : {}), ...(fixo ? { telefone: fixo } : {}), ...(p.contatos?.email ? { email: p.contatos.email } : {}),
     endereco: { geral: { endereco: rua || undefined, numero: p.numero || (String(p.endereco || '').match(/,\s*(\d+)/)?.[1]) || 'S/N', bairro: p.bairro || undefined, municipio: p.cidade || undefined, uf: p.uf || 'RS', cep: String(p.cep || '').replace(/\D/g, '') || undefined } },
   };
   const r = await fetch(`${API}/contatos`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json', 'enable-jwt': '1' }, body: JSON.stringify(corpo) });
