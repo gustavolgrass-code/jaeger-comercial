@@ -3307,13 +3307,27 @@ function editarPedidoModal(o, d, p) {
    <p class="psub" style="margin:0 0 8px">${o.bling_id ? `Ao salvar, o pedido nº ${esc(o.bling_pedido_id || '')} é atualizado no Bling (o mesmo número, sem excluir).` : 'Este pedido ainda não está no Bling.'}${o.visita_id ? ' A contagem da visita e a baixa do estoque acompanham.' : ''}</p>
    <div style="max-height:44vh;overflow:auto"><table class="dped"><tr><th>Produto</th><th>Qtd.</th><th>Bonif.</th><th>Preço un.</th><th style="text-align:right">Total</th></tr>
    ${prods.map(pr => { const i = its[pr.id]; return `<tr><td>${esc(nomeProd(pr))}</td><td><input type="number" min="0" class="epQ" data-p="${pr.id}" value="${i ? +i.quantidade : 0}" style="width:64px"></td><td><input type="number" min="0" class="epB" data-p="${pr.id}" value="${i ? +i.bonificado || 0 : 0}" style="width:56px"></td><td><input type="number" step="0.05" min="0" class="epP" data-p="${pr.id}" value="${(i ? +i.preco_unit : (S.precosCli?.[pr.id] ?? +pr.preco)).toFixed(2)}" style="width:76px"></td><td class="epT" data-p="${pr.id}" style="text-align:right"></td></tr>`; }).join('')}</table></div>
-   <div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:10px"><div><label>Pagamento</label><select id="epF">${[...new Set([...FORMAS, o.condicao].filter(Boolean))].map(f => `<option ${f === o.condicao ? 'selected' : ''}>${esc(f)}</option>`).join('')}</select></div>
+   <div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:10px"><div><label>Pagamento</label><select id="epF">${[...new Set([...FORMAS, o.condicao].filter(Boolean))].map(f => `<option ${f === o.condicao ? 'selected' : ''}>${esc(f)}</option>`).join('')}<option value="Consignado">🤝 Consignado</option></select></div>
     <div><label>Vencimento</label><input type="date" id="epV" value="${o.vencimento || ''}"></div><div style="margin-left:auto;text-align:right"><small style="color:var(--mute)">Total</small><br><b id="epTot" style="font-size:20px"></b></div></div>
    ${caixaPix()}
    <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="epOk">Salvar${o.bling_id ? ' e atualizar no Bling' : ''}</button></div>`);
   const tot = () => { let t = 0; prods.forEach(pr => { const q = +document.querySelector(`.epQ[data-p="${pr.id}"]`).value || 0, v = +document.querySelector(`.epP[data-p="${pr.id}"]`).value || 0; t += q * v; document.querySelector(`.epT[data-p="${pr.id}"]`).textContent = q ? brl(q * v) : ''; }); $('#epTot').textContent = brl(t); };
   document.querySelectorAll('.epQ,.epP,.epB').forEach(i => i.oninput = tot); tot(); atualizaPix();
+  $('#epF').onchange = () => { const c = $('#epF').value === 'Consignado'; $('#epV').closest('div').style.display = c ? 'none' : ''; $('#epOk').textContent = c ? '🤝 Virar consignado' : 'Salvar' + (o.bling_id ? ' e atualizar no Bling' : ''); };
   $('#epOk').onclick = async () => {
+    // virar consignado: o pedido deixa de ser venda (sai do app e do Bling); o que ficou no expositor continua registrado e a próxima reposição cobra só o vendido
+    if ($('#epF').value === 'Consignado') {
+      const F = pedFin(o.id); if (nfeOk(F.nfe) || F.pago) return toast('Este pedido já tem nota autorizada ou está pago: não dá para virar consignado');
+      if (!confirm(`Virar consignado?\n\nO pedido nº ${o.bling_pedido_id || o.numero || ''} (${brl(o.valor)}) deixa de ser venda: é excluído no app${o.bling_id ? ' e no Bling' : ''}. O que ficou no expositor continua registrado, e na próxima reposição o ${p.nome} paga só o que vendeu. ${o.tipo === 'abertura' ? 'O cliente vai para a etapa Consignado.' : ''}`)) return;
+      $('#epOk').disabled = true; $('#epOk').textContent = 'Convertendo…';
+      try {
+        if (o.bling_id) { try { await db.bling('excluir_pedido', { pedido_id: o.id }); } catch (e) { if (!confirm('O Bling não excluiu o pedido (' + e.message + '). Continuar só no app? Depois exclua no Bling.')) { $('#epOk').disabled = false; $('#epOk').textContent = '🤝 Virar consignado'; return; } } }
+        await db.excluirPedido(o.id, null);
+        await db.atualizarPdv(o.pdv_id || p.id, { condicao: 'Consignado', ...(o.tipo === 'abertura' ? { etapa: 'consignado', etapa_motivo: 'Venda virou consignado' } : {}) });
+        fecharModal(); toast(`🤝 ${p.nome} agora está em consignado: cobra só o vendido na próxima reposição`); await recarregar(); if (S.aba === 'pedidos') telaPedidos(); else if (S.aba === 'pedcli') telaPedidosCliente();
+      } catch (e) { $('#epOk').disabled = false; $('#epOk').textContent = '🤝 Virar consignado'; erro(e); }
+      return;
+    }
     const itens = prods.map(pr => ({ produto_id: pr.id, quantidade: +document.querySelector(`.epQ[data-p="${pr.id}"]`).value || 0, bonificado: +document.querySelector(`.epB[data-p="${pr.id}"]`).value || 0, preco_unit: +document.querySelector(`.epP[data-p="${pr.id}"]`).value || 0 }));
     if (!itens.some(i => i.quantidade > 0)) return toast('O pedido precisa ter pelo menos um item cobrado (para zerar, use Excluir)');
     $('#epOk').disabled = true; $('#epOk').textContent = 'Salvando…';
