@@ -378,8 +378,13 @@ async function criarContatoBling(p: any, doc: string, token: string): Promise<nu
     ...(doc ? { numeroDocumento: doc } : {}), ...(cel ? { celular: cel } : {}), ...(fixo ? { telefone: fixo } : {}), ...(p.contatos?.email ? { email: p.contatos.email } : {}),
     endereco: { geral: { endereco: rua || undefined, numero: p.numero || (String(p.endereco || '').match(/,\s*(\d+)/)?.[1]) || 'S/N', bairro: p.bairro || undefined, municipio: p.cidade || undefined, uf: p.uf || 'RS', cep: String(p.cep || '').replace(/\D/g, '') || undefined } },
   };
-  const r = await fetch(`${API}/contatos`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json', 'enable-jwt': '1' }, body: JSON.stringify(corpo) });
-  const res = await r.json().catch(() => ({}));
+  const postar = (c: unknown) => fetch(`${API}/contatos`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json', 'enable-jwt': '1' }, body: JSON.stringify(c) });
+  let r = await postar(corpo), res: any = await r.json().catch(() => ({}));
+  // cidade escrita diferente da do Bling ou telefone inválido: cria o cadastro mesmo assim, sem o campo recusado (dá para completar depois no Bling)
+  if (!r.ok) { const campos = (res?.error?.fields ?? []).map((f: any) => String(f.element || '')).join(' ');
+    if (/cidade|municipio|uf|cep|endereco/i.test(campos)) delete corpo.endereco;
+    if (/celular/i.test(campos)) delete corpo.celular; if (/telefone/i.test(campos)) delete corpo.telefone;
+    if (/cidade|municipio|uf|cep|endereco|celular|telefone/i.test(campos)) { r = await postar(corpo); res = await r.json().catch(() => ({})); } }
   if (!r.ok) throw new Error(`Cliente novo: o Bling recusou criar o cadastro (${r.status}): ${JSON.stringify(res?.error ?? res).slice(0, 500)}`);
   const id = res?.data?.id ? Number(res.data.id) : null;
   if (id) await db.from('pdvs').update({ bling_contato_id: String(id) }).eq('id', p.id);
