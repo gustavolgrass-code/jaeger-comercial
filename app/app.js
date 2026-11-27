@@ -3337,7 +3337,7 @@ async function verPedido(id, p) {
     : `<p style="color:var(--mute);margin:12px 0 0">${o.visita_id ? 'Esta visita não tem contagem do expositor (venda registrada sem contar).' : 'Pedido sem contagem do expositor.'}</p>`;
   const doBling = o.bling_status === 'importado' && !o.criado_por;
   modal(`<h3 style="margin-top:0">Pedido ${esc(o.bling_pedido_id || o.numero || '')} · ${new Date(o.criado_em).toLocaleDateString('pt-BR')}</h3>
-   <p style="color:var(--soft);margin:0">${esc(p.nome)} · ${o.tipo === 'abertura' ? 'abertura' : 'reposição'}${d.visita?.perfis?.nome ? ' · por ' + esc(d.visita.perfis.nome) : ''} · ${o.bling_id ? 'no Bling' : doBling ? 'veio do Bling' : 'não enviado ao Bling'}</p>
+   <p style="color:var(--soft);margin:0"><a href="#" id="vpPerfil" style="color:var(--choc);font-weight:700;text-decoration:underline" title="Abrir o perfil do negócio">${esc(p.nome)}</a> · ${o.tipo === 'abertura' ? 'abertura' : 'reposição'}${d.visita?.perfis?.nome ? ' · por ' + esc(d.visita.perfis.nome) : ''} · ${o.bling_id ? 'no Bling' : doBling ? 'veio do Bling' : 'não enviado ao Bling'}</p>
    <p style="margin:6px 0 0">Pagamento: <b>${esc(o.condicao || '—')}</b>${o.vencimento ? ' · vence ' + dstr(o.vencimento + 'T12:00') : ''}${Array.isArray(o.pagamentos) && o.pagamentos.length > 1 ? '<br><small>' + o.pagamentos.map(x => `${esc(x.forma)} ${brl(x.valor)}${x.vencimento ? ' (' + dstr(x.vencimento + 'T12:00') + ')' : ''}`).join(' · ') + '</small>' : ''}${+o.frete ? ` · frete ${brl(o.frete)}` : ''}</p>
    ${blocoFinPedido(o)}
    <h4 style="margin:14px 0 6px">Itens cobrados</h4>${its.length ? `<table class="dped"><tr><th>Produto</th><th>Qtd.</th><th>Preço</th><th style="text-align:right">Valor</th></tr>${its.map(i => `<tr><td>${esc(i.n)}</td><td>${i.q}</td><td>${brl(i.u)}</td><td style="text-align:right">${brl(i.v)}</td></tr>`).join('')}<tr style="font-weight:700"><td>Total</td><td>${its.reduce((a, i) => a + i.q, 0)}</td><td></td><td style="text-align:right">${brl(o.valor)}</td></tr></table>` : '<small style="color:var(--mute)">sem itens detalhados</small>'}
@@ -3346,6 +3346,7 @@ async function verPedido(id, p) {
     ${doBling ? '<small style="color:var(--mute)">Pedido importado do Bling: edite ou exclua por lá.</small>' : '<div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn car" id="vpEdit">✏️ Editar pedido</button><button class="btn" id="vpExc" style="color:var(--t-bad)">Excluir pedido</button><button class="btn" id="vpRef">Excluir e refazer</button></div>'}
     <button class="btn pri" onclick="fecharModal()">Fechar</button></div>`);
   ligarFinPedido(o, p);
+  if ($('#vpPerfil')) $('#vpPerfil').onclick = e => { e.preventDefault(); fecharModal(); abrirPerfil(o.pdv_id || p.id); };
   if (doBling) return;
   const excluir = async refazer => {
     modal(`<h3>Excluir o pedido de ${new Date(o.criado_em).toLocaleDateString('pt-BR')} (${brl(o.valor)})?</h3><p style="color:var(--soft)">Apaga o pedido${o.visita_id ? ' e a visita/contagem ligada a ele' : ''} no app${o.bling_id ? ` e <b>exclui o pedido nº ${esc(o.bling_pedido_id || o.bling_id)} no Bling</b>` : ''}. Não dá para desfazer.${refazer ? ' Em seguida abre a tela para lançar de novo, já preenchida.' : ''}</p>
