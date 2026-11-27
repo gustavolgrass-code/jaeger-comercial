@@ -1258,7 +1258,7 @@ function telaAbertura() {
   <div id="oConsInfo" class="esteira" hidden style="margin-top:8px"><b>Abertura em consignado.</b> Nada é cobrado nem vai para o Bling agora. O cliente entra no funil em <b>Consignado</b> e na rota; na próxima visita você conta o que sobrou, cobra só o vendido (aí sim vira pedido no Bling) e ele passa a ser cliente normal. <b id="oConsV"></b></div>`}
   <div id="oPagWrap"><h3 style="margin:16px 0 6px">Pagamento</h3><div class="row" style="flex-wrap:wrap;gap:14px;align-items:flex-end"><div class="pay" style="margin:0">${FORMAS.map((c, i) => `<label><input type="radio" name="oc" value="${c}" ${i === 0 ? 'checked' : ''}> ${c}</label>`).join('')}</div>
    <label class="chkcomp" style="margin:0"><input type="checkbox" id="oPago"> <b>Pago</b>, já recebi (dá baixa no Bling)</label>
-   <label class="chkcomp" style="margin:0"><input type="checkbox" id="oNf"> 🧾 <b>Pediu NF</b></label>
+   <label class="chkcomp" style="margin:0"><input type="checkbox" id="oNf" ${p && nfCliente(p.id) ? 'checked' : ''}> 🧾 <b>Pediu NF</b></label>
    <div id="oVencBox"><label class="lb">Vencimento</label><div class="row" style="gap:6px;flex-wrap:nowrap"><input id="oVenc" type="date" value="${vencPadrao(FORMAS[0])}">${atalhoPrazo('oprz')}</div></div>
    <div id="oNBol"><label class="lb">Boletos</label><div class="nbol">${[1, 2, 3, 4].map(n => `<button type="button" data-nbol="${n}" class="${n === 1 ? 'on' : ''}">${n}×</button>`).join('')}</div></div></div>
   <label class="chkcomp"><input type="checkbox" id="oDiv"> Dividir o pagamento (entrada, vários boletos, Pix + cartão…)</label>
@@ -1392,6 +1392,7 @@ function telaAbertura() {
       await atualizarUm(p.id); const n = S.pdvs.find(x => x.id === p.id);
       toast(jaCliente ? `Venda lançada para ${p.nome}.` : `Venda lançada para ${p.nome}. Primeira reposição em ${dstr(n.proxima_reposicao)}.`);
       if (guardar && JSON.stringify(novosPrecos) !== JSON.stringify(S.precosCli || {})) { try { await db.salvarPrecos(p.id, novosPrecos); } catch (e) { toast('Venda salva, mas os preços do cliente não foram guardados: rode o SQL 015'); } }
+      setNfCliente(p.id, $('#oNf')?.checked);
       if ($('#oNf')?.checked && reg?.pedido?.id) await salvarPedFin(reg.pedido.id, { pediu_nf: true });
       if (mandar && reg?.pedido?.id) await enviarAoBling(reg.pedido.id, p.nome, $('#oPago')?.checked); S.abPdv = null;
       const volta = S.vendaVolta; S.vendaVolta = null;
@@ -2660,7 +2661,7 @@ function blocoPag(px, forma, venc) {
    <div class="pgvb"><label class="lb">Vencimento</label><div class="row" style="gap:6px;flex-wrap:nowrap"><input class="pgv" type="date" value="${venc || vencPadrao(forma)}">${atalhoPrazo('pgprz')}</div></div>
    <div class="pgnb"><label class="lb">Boletos</label><div class="nbol">${[1, 2, 3, 4].map(n => `<button type="button" data-nb="${n}" class="${n === 1 ? 'on' : ''}">${n}×</button>`).join('')}</div></div></div>
   <label class="chkcomp pgpagol"><input type="checkbox" class="pgpago"> <b>Pago</b>, já recebi (lança a conta e dá baixa no Bling)</label>
-  <label class="chkcomp"><input type="checkbox" class="pgnf"> 🧾 <b>Pediu NF</b>: o cliente quer nota fiscal</label>
+  <label class="chkcomp"><input type="checkbox" class="pgnf"> 🧾 <b>Pediu NF</b>: o cliente quer nota fiscal <small style="color:var(--mute)">(fica guardado para os próximos pedidos)</small></label>
   <label class="chkcomp"><input type="checkbox" class="pgdiv"> Dividir o pagamento (entrada, vários boletos, Pix + cartão…)</label>
   <label class="chkcomp"><input type="checkbox" class="pgfr"> 🚚 Entrega terceirizada</label>
   <div class="divpag pgfrbox" hidden><div class="row"><label class="lb" style="margin:0">Custo da entrega</label><input class="pgfrv" type="number" step="0.01" min="0" inputmode="decimal" placeholder="R$" style="width:120px"></div>
@@ -2810,7 +2811,7 @@ async function telaReposicao() {
     kitsUsados[i] = (kitsUsados[i] || 0) + 1; document.querySelector(`[data-kq="${i}"]`).textContent = '×' + kitsUsados[i]; calc(); });
   const zerar = cls => { linhas().forEach(r => cls.forEach(c => { const i = r.querySelector('.' + c); if (i) { i.value = 0; i.dataset.mexeu = 1; } })); if (cls.includes('rep')) Object.keys(kitsUsados).forEach(k => { delete kitsUsados[k]; document.querySelector(`[data-kq="${k}"]`).textContent = ''; }); calc(); };
   $('#kZerar').onclick = () => zerar(['rep']); $('#kZerEnc').onclick = () => zerar(['enc']); $('#kZerTudo').onclick = () => zerar(['rep', 'enc', 'trc', 'bon']);
-  pag = ligarPag('rp', () => valItens, () => calc()); pag.preencher(enc?.pag || rasc?.pag); if ((enc || rasc) && (enc || rasc).bling === false && $('#rBling')) $('#rBling').checked = false; calc();
+  pag = ligarPag('rp', () => valItens, () => calc()); pag.preencher(enc?.pag || rasc?.pag); if (nfCliente(p.id) && document.querySelector('.pgnf')) document.querySelector('.pgnf').checked = true; if ((enc || rasc) && (enc || rasc).bling === false && $('#rBling')) $('#rBling').checked = false; calc();
   // pedido para entrega: em vez de fechar, guarda como encomenda para o dia escolhido
   const ent = re ? null : ligarEntrega('rp', on => { $('#fechar').textContent = on ? '📦 Salvar para entrega' : 'Fechar reposição'; });
   atualizaPix();
@@ -2858,6 +2859,7 @@ async function telaReposicao() {
         await salvarEncomenda(p.id, { tipo: 'reposicao', linhas: ln, pag: { forma: g.forma, vencimento: g.vencimento, parcelas: g.parcelas, frete: g.frete, pago: g.pago, pediuNf: g.pediuNf }, bling: mandar, pedido_id: pedId, ...e });
         if (rasc) { const tr = { ...(S.base.regras.rascunhos_rep || {}) }; delete tr[p.id]; db.salvarRegra('rascunhos_rep', tr).catch(() => { }); S.base.regras.rascunhos_rep = tr; }
         toast(`📦 Entrega salva para ${dstr(e.data + 'T12:00')}: entra na rota desse dia${blingTxt}`); S.contando = null; voltarDaRep();
+        setNfCliente(p.id, g.pediuNf);
         if (pedId && g.pediuNf) await salvarPedFin(pedId, { pediu_nf: true });
         if (mandar && pedId && !enc?.pedido_id) enviarAoBling(pedId, p.nome, false);
       } catch (er) { erro(er); $('#fechar').disabled = false; } return; }
@@ -2893,6 +2895,7 @@ async function telaReposicao() {
       if (p.condicao !== g.forma && !cons && !g.parcelas.length) await db.atualizarPdv(p.id, { condicao: g.forma }).catch(() => { });
       if (p.etapa === 'consignado') await db.atualizarPdv(p.id, { condicao: g.forma, etapa: 'avaliacao', avaliacao_inicio: hojeISO(), etapa_motivo: 'Consignado efetivado: primeira venda' }).catch(() => { });
       S.reabrir = null; await recarregar(); await avaliarRisco(); toast('Reposição registrada.' + extra); voltarDaRep();
+      setNfCliente(p.id, g.pediuNf);
       if (g.pediuNf && reg.pedido?.id) await salvarPedFin(reg.pedido.id, { pediu_nf: true });
       if (mandar && reg.pedido && !jaNoBling && (cons ? t.so : t.un) > 0) enviarAoBling(reg.pedido.id, p.nome, g.pago);
     } catch (e) { erro(e); $('#fechar').disabled = false; }
@@ -3345,7 +3348,7 @@ function editarPedidoModal(o, d, p) {
    <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="epOk">Salvar${o.bling_id ? ' e atualizar no Bling' : ''}</button></div>`);
   const tot = () => { let t = 0; prods.forEach(pr => { const q = +document.querySelector(`.epQ[data-p="${pr.id}"]`).value || 0, v = +document.querySelector(`.epP[data-p="${pr.id}"]`).value || 0; t += q * v; document.querySelector(`.epT[data-p="${pr.id}"]`).textContent = q ? brl(q * v) : ''; }); $('#epTot').textContent = brl(t); };
   document.querySelectorAll('.epQ,.epP,.epB').forEach(i => i.oninput = tot); tot(); atualizaPix();
-  $('#epNf').onchange = async () => { await salvarPedFin(o.id, { pediu_nf: $('#epNf').checked }); toast($('#epNf').checked ? 'Marcado: pediu NF' : 'Desmarcado: pediu NF'); if (S.aba === 'pedidos') telaPedidos(); };
+  $('#epNf').onchange = async () => { await salvarPedFin(o.id, { pediu_nf: $('#epNf').checked }); await setNfCliente(o.pdv_id || p.id, $('#epNf').checked); toast($('#epNf').checked ? 'Marcado: pediu NF' : 'Desmarcado: pediu NF'); if (S.aba === 'pedidos') telaPedidos(); };
   $('#epF').onchange = () => { const c = $('#epF').value === 'Consignado'; $('#epV').closest('div').style.display = c ? 'none' : ''; $('#epOk').textContent = c ? '🤝 Virar consignado' : 'Salvar' + (o.bling_id ? ' e atualizar no Bling' : ''); };
   $('#epOk').onclick = async () => {
     // virar consignado: o pedido deixa de ser venda (sai do app e do Bling); o que ficou no expositor continua registrado e a próxima reposição cobra só o vendido
@@ -4565,6 +4568,9 @@ function linkWhatsNF(o, n) {
   const nome = (ct.nome || '').split(' ')[0], txt = `Olá${nome ? ', ' + nome : ''}! Aqui é da Jaeger's Doces. Segue a nota fiscal nº ${n.numero || ''} do seu pedido nº ${o.bling_pedido_id || o.numero || ''} (${brl(+o.valor || 0)}):\n${n.linkDanfe || n.linkPDF}\n\nObrigado pela parceria!`;
   return `https://wa.me/${f}?text=${encodeURIComponent(txt)}`;
 }
+// cliente que pede nota fiscal: fica guardado e vem marcado em todo Repor e venda
+const nfCliente = id => !!(S.base.regras.nf_clientes || {})[id];
+async function setNfCliente(id, on) { if (!id || nfCliente(id) === !!on) return; const t = { ...(S.base.regras.nf_clientes || {}) }; if (on) t[id] = true; else delete t[id]; S.base.regras.nf_clientes = t; await db.salvarRegra('nf_clientes', t).catch(() => { }); }
 const seloNF = id => { const F = pedFin(id); return F.pediu_nf && !nfeOk(F.nfe) ? ' <span class="badge" style="background:#F2C94C;color:#151312">pediu NF</span>' : ''; };
 function blocoFinPedido(o) {
   if (!o.bling_id) return `<div class="pfin"><button class="btn" id="vpPdf">📄 Pedido em PDF</button></div>`;
