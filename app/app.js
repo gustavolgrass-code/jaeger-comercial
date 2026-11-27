@@ -3690,18 +3690,19 @@ async function telaCaixas() {
   const F = FIN.cx = FIN.cx || { de: isoDe(new Date(Date.now() - 30 * DIA)), ate: hojeISO(), conta: '' };
   $('#main').innerHTML = `<section class="view on"><div class="dash pnl"><div class="loading">Lendo caixas e bancos no Bling…</div></div></section>`;
   let ls; try { await finCadastros(); ls = await finLer(`/caixas?dataInicial=${F.de}&dataFinal=${F.ate}${F.conta ? '&idContaFinanceira=' + F.conta : ''}`, 20); } catch (e) { return $('#main .dash').innerHTML = erroFin(e); }
-  const sinal = x => { const t = String(x.debitoCredito ?? x.tipo ?? '').toUpperCase(); return t.startsWith('D') || t === '2' || t === 'S' ? -1 : 1; };
+  // o Bling manda debCred (C = entrada, D = saída) e o valor já com sinal
+  const sinal = x => { const t = String(x.debCred ?? x.debitoCredito ?? x.tipo ?? '').toUpperCase(); return t.startsWith('D') || t === '2' || t === 'S' || (!t && val(x.valor) < 0) ? -1 : 1; }, absV = x => Math.abs(val(x.valor));
   const contaDe = x => x.contaFinanceira?.id ?? x.contaContabil?.id ?? x.portador?.id;
   const f = ls.filter(x => !F.conta || String(contaDe(x)) === String(F.conta)).sort((a, b) => String(b.data).localeCompare(String(a.data)));
-  const ent = f.filter(x => sinal(x) > 0).reduce((s, x) => s + val(x.valor), 0), sai = f.filter(x => sinal(x) < 0).reduce((s, x) => s + val(x.valor), 0);
-  const porConta = {}; f.forEach(x => { const k = contaDe(x) || '-'; porConta[k] = (porConta[k] || 0) + sinal(x) * val(x.valor); });
+  const ent = f.filter(x => sinal(x) > 0).reduce((s, x) => s + absV(x), 0), sai = f.filter(x => sinal(x) < 0).reduce((s, x) => s + absV(x), 0);
+  const porConta = {}; f.forEach(x => { const k = contaDe(x) || '-'; porConta[k] = (porConta[k] || 0) + sinal(x) * absV(x); });
   const nmC = id => (FIN.contas || []).find(c => String(c.id) === String(id))?.descricao || (id === '-' ? 'Sem conta' : '#' + id);
   $('#main').innerHTML = `<section class="view on"><div class="dash pnl">
    <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end"><div><label class="lb">De</label><input type="date" id="cxDe" value="${F.de}"></div><div><label class="lb">até</label><input type="date" id="cxAte" value="${F.ate}"></div>
     <div><label class="lb">Conta</label><select id="cxConta">${opcoes(FIN.contas || [], F.conta, 'Todas as contas')}</select></div><button class="btn" id="cxRec">↻</button><button class="btn pri" id="cxNovo" style="margin-left:auto">+ Lançamento</button></div>
    <div class="kpis"><div class="kpi"><small>Entradas</small><b style="color:var(--t-ok)">${brl(ent)}</b></div><div class="kpi"><small>Saídas</small><b style="color:var(--t-bad)">${brl(sai)}</b></div><div class="kpi"><small>Resultado do período</small><b>${brl(ent - sai)}</b></div><div class="kpi"><small>Lançamentos</small><b>${f.length}</b></div></div>
-   ${Object.keys(porConta).length > 1 ? `<div class="panel"><h3>Movimento por conta</h3>${ranking(Object.entries(porConta).map(([k, v]) => ({ n: nmC(k), v, c: v >= 0 ? COR.bom : COR.ruim })), 'R$')}</div>` : ''}
-   <div class="panel" style="overflow-x:auto">${f.length ? `<table class="dped"><tr><th>Data</th><th>Histórico</th><th>Conta</th><th>Categoria</th><th style="text-align:right">Valor</th></tr>${f.map(x => `<tr><td>${x.data ? dstr(String(x.data).slice(0, 10) + 'T12:00') : '—'}</td><td>${esc(x.historico || x.descricao || '')}</td><td>${esc(nmC(contaDe(x) || '-'))}</td><td>${esc((FIN.cats || []).find(c => String(c.id) === String(x.categoria?.id))?.descricao || '')}</td><td style="text-align:right;font-weight:600;color:${sinal(x) > 0 ? 'var(--t-ok)' : 'var(--t-bad)'}">${sinal(x) > 0 ? '+' : '−'} ${brl(val(x.valor))}</td></tr>`).join('')}</table>` : '<p class="empty">Nenhum lançamento no período.</p>'}</div>
+   ${Object.keys(porConta).length > 1 ? `<div class="panel"><h3>Movimento por conta</h3>${Object.entries(porConta).map(([k, v]) => `<div class="row" style="justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line)"><span>${esc(nmC(k))}</span><b style="color:${v >= 0 ? 'var(--t-ok)' : 'var(--t-bad)'}">${v >= 0 ? '+ ' : '− '}${brl(Math.abs(v))}</b></div>`).join('') + '<small style="color:var(--mute)">Movimento (entradas − saídas) no período escolhido. O saldo atual de cada conta está no Bling.</small>'}</div>` : ''}
+   <div class="panel" style="overflow-x:auto">${f.length ? `<table class="dped"><tr><th>Data</th><th>Histórico</th><th>Conta</th><th>Tipo</th><th style="text-align:right">Valor</th></tr>${f.map(x => `<tr><td>${x.data ? dstr(String(x.data).slice(0, 10) + 'T12:00') : '—'}</td><td>${esc(x.observacoes || x.historico || x.descricao || '')}</td><td>${esc(x.contaFinanceira?.descricao || nmC(contaDe(x) || '-'))}</td><td>${esc((FIN.cats || []).find(c => String(c.id) === String(x.categoria?.id))?.descricao || x.descricao || '')}</td><td style="text-align:right;font-weight:600;color:${sinal(x) > 0 ? 'var(--t-ok)' : 'var(--t-bad)'}">${sinal(x) > 0 ? '+' : '−'} ${brl(absV(x))}</td></tr>`).join('')}</table>` : '<p class="empty">Nenhum lançamento no período.</p>'}</div>
    <small style="color:var(--mute)">Lido do Bling agora (Financeiro → Caixas e bancos).</small></div></section>`;
   $('#cxDe').onchange = $('#cxAte').onchange = () => { F.de = $('#cxDe').value; F.ate = $('#cxAte').value; telaCaixas(); }; $('#cxConta').onchange = e => { F.conta = e.target.value; telaCaixas(); };
   $('#cxRec').onclick = () => telaCaixas();
@@ -3712,7 +3713,7 @@ async function telaCaixas() {
     document.querySelectorAll('#lxT [data-t]').forEach(b => b.onclick = () => document.querySelectorAll('#lxT [data-t]').forEach(x => x.classList.toggle('on', x === b)));
     $('#lxOk').onclick = async () => { const v = +$('#lxV').value; if (!(v > 0)) return toast('Coloque o valor'); if (!$('#lxC').value) return toast('Escolha a conta'); if (!$('#lxH').value.trim()) return toast('Escreva o histórico');
       const t = document.querySelector('#lxT .on').dataset.t; $('#lxOk').disabled = true;
-      try { await finEsc('POST', '/caixas', { data: $('#lxD').value, valor: v, debitoCredito: t, contaFinanceira: { id: +$('#lxC').value }, contaContabil: { id: +$('#lxC').value }, historico: $('#lxH').value.trim(), ...($('#lxCat').value ? { categoria: { id: +$('#lxCat').value } } : {}) });
+      try { await finEsc('POST', '/caixas', { data: $('#lxD').value, valor: v, debitoCredito: t, debCred: t, contaFinanceira: { id: +$('#lxC').value }, contaContabil: { id: +$('#lxC').value }, historico: $('#lxH').value.trim(), ...($('#lxCat').value ? { categoria: { id: +$('#lxCat').value } } : {}) });
         fecharModal(); toast('Lançamento feito no Bling'); telaCaixas(); } catch (e) { $('#lxOk').disabled = false; toast('O Bling recusou: ' + e.message.slice(0, 160)); } }; };
 }
 
