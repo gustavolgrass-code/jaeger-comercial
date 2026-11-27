@@ -1631,7 +1631,7 @@ function metConsignado(D, ini, fim) {
     conv: ef.length + perd.length ? ef.length / (ef.length + perd.length) : null, diasEf: media(ef), naRua: soma(aberto, 'val'), unRua: soma(aberto, 'un') };
 }
 function blocoConsignado(D, ini, fim, rotPer) {
-  const M = metConsignado(D, ini, fim); if (!M.casos.length) return '';
+  const M = metConsignado(D, ini, fim); if (!M.casos.length) return `<h2 class="psec">🤝 Consignado</h2><div class="panel"><p class="empty" style="padding:6px 0">Ainda não há aberturas em consignado. Quando você marcar <b>🤝 Consignado</b> em Cadastrar venda, aqui aparecem: quantos abrimos, quanto de mercadoria ficou nos clientes, quantos viraram venda, % vendido no acerto e o valor que está na rua.</p></div>`;
   const kp = (n, v, sub) => `<div class="kpi"><small>${n}</small><b>${v}</b>${sub ? `<small class="sub">${sub}</small>` : ''}</div>`;
   return `<h2 class="psec">🤝 Consignado</h2><div class="pgrid">
    <div class="panel"><h3>Resultado · ${rotPer}</h3><p class="psub">Aberturas em consignado: o que ficou no cliente e quanto virou venda</p>
