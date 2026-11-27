@@ -4505,12 +4505,19 @@ async function baixarNoBling(pedidoId) {
   await salvarPedFin(pedidoId, { pago: !falha.length && cs.some(c => !c.boleto), pago_auto: auto.length > 0, pix: auto.map(c => c.linkPix).filter(Boolean)[0] || null, pago_erro: falha.length ? falha.map(c => c.erro).join(' · ').slice(0, 400) : null, pago_em: hojeISO() });
   return { r, falha, bol, auto };
 }
+// WhatsApp do cliente com a mensagem da nota pronta (sem número cadastrado, abre para escolher o contato)
+function linkWhatsNF(o, n) {
+  const p = S.pdvs.find(x => x.id === o.pdv_id) || {}, ct = S.contatos?.find(c => c.id === p.contato_id) || {};
+  let f = String(ct.whatsapp || ct.telefone || p.telefone || '').replace(/\D/g, ''); if (f.startsWith('0')) f = f.replace(/^0+/, ''); if (f.length === 10 || f.length === 11) f = '55' + f; else if (!(f.startsWith('55') && f.length >= 12)) f = '';
+  const nome = (ct.nome || '').split(' ')[0], txt = `Olá${nome ? ', ' + nome : ''}! Aqui é da Jaeger's Doces. Segue a nota fiscal nº ${n.numero || ''} do seu pedido nº ${o.bling_pedido_id || o.numero || ''} (${brl(+o.valor || 0)}):\n${n.linkDanfe || n.linkPDF}\n\nObrigado pela parceria!`;
+  return `https://wa.me/${f}?text=${encodeURIComponent(txt)}`;
+}
 function blocoFinPedido(o) {
   if (!o.bling_id) return `<div class="pfin"><button class="btn" id="vpPdf">📄 Pedido em PDF</button></div>`;
   const F = pedFin(o.id), n0 = F.nfe, n = n0 && ![4, 2].includes(+n0.situacao) ? n0 : null, temBol = /boleto/i.test(o.condicao || ''), bols = (F.contas || []).filter(c => c.linkBoleto);
   return `<div class="pfin"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
     <button class="btn" id="vpPdf">📄 Pedido em PDF</button>
-    ${n ? `<span class="fst" style="--c:${nfeOk(n) ? COR.bom : COR.aviso}">NF-e ${esc(n.numero || '')} · ${NFE_SIT[n.situacao] || 'enviada'}</span>${nfeOk(n) && (n.linkDanfe || n.linkPDF) ? `<a class="btn" href="${esc(n.linkDanfe || n.linkPDF)}" target="_blank" rel="noopener">📄 DANFE</a>` : ''}${!nfeOk(n) ? '<button class="btn" id="vpNfe">🧾 Emitir a nota de novo</button>' : ''}` : `<button class="btn" id="vpNfe">🧾 Gerar nota fiscal</button>${n0 ? `<small style="color:var(--mute)">tentativa anterior (nº ${esc(n0.numero || '')}) ${NFE_SIT[n0.situacao]?.toLowerCase() || ''}</small>` : ''}`}
+    ${n ? `<span class="fst" style="--c:${nfeOk(n) ? COR.bom : COR.aviso}">NF-e ${esc(n.numero || '')} · ${NFE_SIT[n.situacao] || 'enviada'}</span>${nfeOk(n) && (n.linkDanfe || n.linkPDF) ? `<a class="btn" href="${esc(n.linkDanfe || n.linkPDF)}" target="_blank" rel="noopener">📄 DANFE</a><a class="btn" href="${esc(linkWhatsNF(o, n))}" target="_blank" rel="noopener">📲 Enviar NF por WhatsApp</a>` : ''}${!nfeOk(n) ? '<button class="btn" id="vpNfe">🧾 Emitir a nota de novo</button>' : ''}` : `<button class="btn" id="vpNfe">🧾 Gerar nota fiscal</button>${n0 ? `<small style="color:var(--mute)">tentativa anterior (nº ${esc(n0.numero || '')}) ${NFE_SIT[n0.situacao]?.toLowerCase() || ''}</small>` : ''}`}
     ${temBol ? (bols.length ? bols.map((c, i) => `<a class="btn" href="${esc(c.linkBoleto)}" target="_blank" rel="noopener">💳 Boleto${bols.length > 1 ? ' ' + (i + 1) : ''} · ${brl(c.valor)}</a><button class="mini" data-cpy="${esc(c.linkBoleto)}">copiar link</button>`).join('') : '<button class="btn" id="vpBol">💳 Gerar boleto</button>') : ''}
     ${F.pago ? `<span class="fst" style="--c:${COR.bom}">Pago · baixado no Bling${F.pago_em ? ' em ' + dstr(F.pago_em + 'T12:00') : ''}</span>${F.pix ? `<a class="btn" href="${esc(F.pix)}" target="_blank" rel="noopener">QR Code Pix</a>` : ''}` : /^(pix|dinheiro|cart)/i.test(o.condicao || '') || (o.condicao || '').includes('+') ? '<button class="btn" id="vpPago">✅ Marcar como pago</button>' : ''}
     ${!F.pago && !(F.contas || []).length ? '<button class="btn" id="vpConta">📥 Lançar conta a receber</button>' : ''}
