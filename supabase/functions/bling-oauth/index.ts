@@ -206,7 +206,7 @@ async function escreverFin(metodo: string, caminho: string, corpo: unknown) {
 // O Bling guarda o custo no vínculo produto-fornecedor; tenta, nesta ordem: PATCH do produto, PUT do vínculo /produtos/fornecedores, PUT do produto inteiro (só produto simples)
 async function enviarBling(metodo: string, caminho: string, corpo: unknown, token: string) {
   const r = await fetch(`${API}${caminho}`, { method: metodo, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json', 'enable-jwt': '1' }, body: JSON.stringify(corpo) });
-  const txt = await r.text(); return { ok: r.ok, status: r.status, txt: txt.slice(0, 900) };
+  let txt = await r.text(); try { const j = JSON.parse(txt); const e = j?.error; txt = e ? [e.message, e.description, ...(e.fields || []).map((f: any) => f.msg)].filter(Boolean).join(' · ') : JSON.stringify(j); } catch { /* texto puro */ } return { ok: r.ok, status: r.status, txt: txt.slice(0, 900) };
 }
 async function atualizarCustos(itens: { id: string | number; custo: number }[]) {
   const token = await tokenValido(), out: unknown[] = [];
@@ -285,10 +285,10 @@ async function contasPedido(pedidoId: string) {
     if (nf) {
       if (![5, 6, 7].includes(Number(nf.situacao))) throw new Error(`Este pedido está ligado à nota fiscal ${nf.numero || ''}, que ainda não foi autorizada (situação ${nf.situacao}). Emita a nota pelo botão "Gerar nota fiscal" (ou exclua a nota no Bling) e depois lance a conta.`);
       const r = await enviarBling('POST', `/nfe/${nfId}/lancar-contas`, {}, token);
-      if (!r.ok && !/lan[cç]ad/i.test(r.txt)) throw new Error(`O Bling não lançou as contas da nota (${r.status}): ${r.txt}`);
+      if (!r.ok && !/j[aá] existem contas|lan[cç]ad/i.test(r.txt)) throw new Error(`O Bling não lançou as contas da nota: ${r.txt}`);
     } else {
       const r = await enviarBling('POST', `/pedidos/vendas/${ped.bling_id}/lancar-contas`, {}, token);
-      if (!r.ok && !/lan[cç]ad/i.test(r.txt)) throw new Error(`O Bling não lançou as contas (${r.status}): ${r.txt}`);
+      if (!r.ok && !/j[aá] existem contas|lan[cç]ad/i.test(r.txt)) throw new Error(`O Bling não lançou as contas: ${r.txt}`);
     }
     lancou = true; await new Promise(res => setTimeout(res, 1200)); contas = await contasDoPedido(String(ped.bling_id), token, ped.criado_em, nfId);
   }
