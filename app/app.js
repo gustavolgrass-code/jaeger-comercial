@@ -3637,7 +3637,9 @@ async function baixarConta(tipo, id, c) {
    <p style="font-size:12px;color:var(--mute)">Baixa parcial: faça direto no Bling (a API do Bling já quitou contas inteiras quando recebeu valor parcial).</p>
    <div class="row" style="margin-top:12px;justify-content:flex-end"><button class="btn" onclick="fecharModal()">Cancelar</button><button class="btn pri" id="bxOk">Confirmar ${rec ? 'recebimento' : 'pagamento'} de ${brl(saldo)}</button></div>`);
   $('#bxOk').onclick = async () => { if (!$('#bxC').value) return toast('Escolha a conta financeira'); $('#bxOk').disabled = true;
-    const corpo = { data: $('#bxD').value, valor: saldo, valorPago: saldo, valorRecebido: saldo, portador: { id: +$('#bxC').value }, ...($('#bxCat').value ? { categoria: { id: +$('#bxCat').value } } : {}), historico: $('#bxH').value.trim() || undefined };
+    // Bling Conta: o Bling recusa a baixa quando a conta financeira é informada; sem informar, cai na própria Bling Conta
+    const nomeC = (FIN.contas || []).find(x => String(x.id) === $('#bxC').value)?.descricao || '', semPort = /bling conta/i.test(nomeC) || /bling conta/i.test(c.contaContabil?.descricao || '') && String(c.contaContabil?.id) === $('#bxC').value;
+    const corpo = { data: $('#bxD').value, valor: saldo, valorPago: saldo, valorRecebido: saldo, ...(semPort ? {} : { portador: { id: +$('#bxC').value } }), ...($('#bxCat').value ? { categoria: { id: +$('#bxCat').value } } : {}), historico: $('#bxH').value.trim() || undefined };
     try { await finEsc('POST', `/contas/${tipo}/${id}/baixar`, corpo); fecharModal(); toast(`${rec ? 'Recebimento' : 'Pagamento'} de ${brl(saldo)} baixado no Bling`); telaContas(tipo); }
     catch (e) { $('#bxOk').disabled = false; modal(`<h3>O Bling recusou a baixa</h3><p style="font-size:13px;color:var(--t-bad)">${esc(e.message)}</p><div class="row" style="justify-content:flex-end"><button class="btn pri" onclick="fecharModal()">Ok</button></div>`); } };
 }
