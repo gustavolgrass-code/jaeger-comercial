@@ -2780,8 +2780,11 @@ async function telaReposicao() {
   const ent = re ? null : ligarEntrega('rp', on => { $('#fechar').textContent = on ? '📦 Salvar para entrega' : 'Fechar reposição'; });
   atualizaPix();
   if ($('#encDesc')) $('#encDesc').onclick = async e => { e.preventDefault(); const todas = { ...(S.base.regras.encomendas || {}) }, pid = todas[p.id]?.pedido_id; delete todas[p.id];
-    if (pid && !confirm('Descartar a entrega e excluir também o pedido já criado (no app e no Bling)?')) return;
-    try { if (pid) { try { await db.bling('excluir_pedido', { pedido_id: pid }); } catch (er) { if (!/não foi enviado|sem bling/i.test(er.message)) toast('Bling: ' + er.message); } await db.excluirPedido(pid, null); }
+    // pedido com nota autorizada ou já pago nunca é excluído junto: só a entrega sai da agenda
+    const F = pid ? pedFin(pid) : {}, protegido = pid && (nfeOk(F.nfe) || F.pago);
+    if (protegido) { if (!confirm('Este pedido já tem nota fiscal autorizada ou está pago: ele continua no app e no Bling. Tirar só a entrega da agenda?')) return; }
+    else if (pid && !confirm('Descartar a entrega e excluir também o pedido já criado (no app e no Bling)?')) return;
+    try { if (pid && !protegido) { try { await db.bling('excluir_pedido', { pedido_id: pid }); } catch (er) { if (!/não foi enviado|sem bling/i.test(er.message)) toast('Bling: ' + er.message); } await db.excluirPedido(pid, null); }
       await db.salvarRegra('encomendas', todas); S.base.regras.encomendas = todas; toast('Encomenda descartada'); telaReposicao(); } catch (er) { erro(er); } };
   // salvar edição: guarda o que está na tela sem fechar a reposição (na entrega agendada, atualiza a entrega e o pedido já criado)
   if ($('#rascDesc')) $('#rascDesc').onclick = async e => { e.preventDefault(); const t = { ...(S.base.regras.rascunhos_rep || {}) }; delete t[p.id]; await db.salvarRegra('rascunhos_rep', t).catch(() => { }); S.base.regras.rascunhos_rep = t; telaReposicao(); };
