@@ -45,10 +45,18 @@ async function tokenValido() {
   return pedirToken({ grant_type: 'refresh_token', refresh_token: data.refresh_token });
 }
 
+// token recusado (ex.: depois de mudar as permissões do aplicativo no Bling): renova uma vez; se não der, pede para reconectar
+async function renovarToken() {
+  const { data } = await db.from('bling_conexao').select('refresh_token').eq('id', 1).maybeSingle();
+  try { return await pedirToken({ grant_type: 'refresh_token', refresh_token: data?.refresh_token }); }
+  catch { throw new Error('O acesso ao Bling expirou ou mudou de permissões: clique em "Reconectar" em Regras e metas → Integração com o Bling e autorize de novo.'); }
+}
 async function chamar(caminho: string, token: string) {
+  let renovou = false;
   for (let tentativa = 0; tentativa < 4; tentativa++) {
     const r = await fetch(`${API}${caminho}`, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'enable-jwt': '1' } });
     if (r.status === 429) { await esperar(1500 * (tentativa + 1)); continue; }
+    if (r.status === 401 && !renovou) { renovou = true; token = await renovarToken(); continue; }
     const corpo = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(`Bling ${caminho} (${r.status}): ${JSON.stringify(corpo).slice(0, 300)}`);
     await esperar(350); // limite do Bling: ~3 chamadas por segundo
