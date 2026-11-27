@@ -1610,6 +1610,37 @@ function metCampo(D, ini, fim, vend) {
   vis.filter(v => v.resultado === 'nao_estava' || v.tipo === 'nao_estava').forEach(() => motivos['Não estava']++);
   return { vis: vis.length, rep, pro, dias, porDia: dias ? vis.length / dias : null, tempo: gaps.length ? gaps.reduce((a, b) => a + b, 0) / gaps.length : null, rotas: rotas.length, plan, feitas, cumprida: plan ? feitas / plan : null, motivos };
 }
+// consignado: quantos abrimos, quanto de mercadoria ficou, quantos viraram venda e quanto venderam no acerto
+function metConsignado(D, ini, fim) {
+  const prod = Object.fromEntries(S.base.produtos.map(p => [p.id, p])), ets = D.etapas || [];
+  const ent = ets.filter(e => e.para === 'consignado'), sai = ets.filter(e => e.de === 'consignado');
+  const cs = (D.contagens || []).filter(c => c.visitas);
+  const casos = ent.map(e => {
+    const em = new Date(e.em), dia = isoDe(em), p = S.pdvs.find(x => x.id === e.pdv_id) || {};
+    // o que ficou: contagens do mesmo dia da entrada em consignado
+    const dx = cs.filter(c => c.visitas.pdv_id === e.pdv_id && isoDe(new Date(c.visitas.em)) === dia && +c.reposto > 0);
+    const un = dx.reduce((a, c) => a + +c.reposto, 0), val = dx.reduce((a, c) => a + +c.reposto * +(p.precos?.[c.produto_id] ?? prod[c.produto_id]?.preco ?? 0), 0);
+    const s2 = sai.find(x => x.pdv_id === e.pdv_id && new Date(x.em) >= em), efet = s2 && ['avaliacao', 'ativo', 'risco', 'revisao'].includes(s2.para) ? s2 : null, perd = s2 && !efet ? s2 : null;
+    const ped = efet ? (D.porPdv[e.pdv_id] || []).find(o => o.data >= em) : null;
+    return { id: e.pdv_id, nome: p.nome || '—', em, un, val, efet, perd, venda: ped ? +ped.valor : 0, dias: efet ? (new Date(efet.em) - em) / DIA : (Date.now() - em) / DIA, aberto: p.etapa === 'consignado' };
+  });
+  const noPer = casos.filter(c => c.em >= ini && c.em < fim), ate = casos.filter(c => c.em < fim);
+  const ef = ate.filter(c => c.efet), aberto = casos.filter(c => c.aberto), perd = ate.filter(c => c.perd);
+  const soma = (l, k) => l.reduce((a, c) => a + c[k], 0), media = l => l.length ? soma(l, 'dias') / l.length : null;
+  return { casos, noPer, ate, ef, aberto, perd, valPer: soma(noPer, 'val'), unPer: soma(noPer, 'un'), valAte: soma(ate, 'val'), vendaEf: soma(ef, 'venda'), deixEf: soma(ef, 'val'),
+    conv: ef.length + perd.length ? ef.length / (ef.length + perd.length) : null, diasEf: media(ef), naRua: soma(aberto, 'val'), unRua: soma(aberto, 'un') };
+}
+function blocoConsignado(D, ini, fim, rotPer) {
+  const M = metConsignado(D, ini, fim); if (!M.casos.length) return '';
+  const kp = (n, v, sub) => `<div class="kpi"><small>${n}</small><b>${v}</b>${sub ? `<small class="sub">${sub}</small>` : ''}</div>`;
+  return `<h2 class="psec">🤝 Consignado</h2><div class="pgrid">
+   <div class="panel"><h3>Resultado · ${rotPer}</h3><p class="psub">Aberturas em consignado: o que ficou no cliente e quanto virou venda</p>
+    <div class="kpis k2">${kp('Consignados no período', M.noPer.length, `${fmt(M.unPer)} un. · ${brl(M.valPer)} deixados`)}${kp('Até o fim do período', M.ate.length, `${brl(M.valAte)} em mercadoria deixada`)}
+     ${kp('Viraram venda', M.ef.length + (M.conv != null ? ` <small style="font-size:14px">(${pctM(M.conv)})</small>` : ''), M.perd.length ? `${M.perd.length} desistiram` : 'nenhuma desistência')}${kp('Vendido no acerto', M.deixEf ? pctM(M.vendaEf / M.deixEf) : '—', M.ef.length ? `${brl(M.vendaEf)} de ${brl(M.deixEf)} deixados · ${M.diasEf != null ? Math.round(M.diasEf) + ' dias até o acerto' : ''}` : 'aparece depois do primeiro acerto')}</div>
+    <div class="kpis k2" style="margin-top:8px">${kp('Em consignado agora', M.aberto.length, `${fmt(M.unRua)} un. · <b>${brl(M.naRua)}</b> na rua`)}</div></div>
+   <div class="panel"><h3>Clientes em consignado</h3><p class="psub">Os mais recentes primeiro</p>
+    <table class="dped"><tr><th>Cliente</th><th>Desde</th><th style="text-align:right">Deixado</th><th>Situação</th></tr>${M.casos.sort((a, b) => b.em - a.em).slice(0, 12).map(c => `<tr class="lnkperfil" data-perfil="${c.id}" style="cursor:pointer"><td><b>${esc(c.nome)}</b></td><td>${dstr(isoDe(c.em) + 'T12:00')}</td><td style="text-align:right">${fmt(c.un)} un. · ${brl(c.val)}</td><td>${c.efet ? `<span class="fst" style="--c:${COR.bom}">Virou venda${c.venda ? ' · ' + brl(c.venda) : ''}</span>` : c.perd ? `<span class="fst" style="--c:${COR.ruim}">Desistiu</span>` : `<span class="fst" style="--c:#C9A46A">Em consignado · ${Math.round(c.dias)} dias</span>`}</td></tr>`).join('')}</table></div></div>`;
+}
 function blocoCarteira(D, ini, fim, rotPer) {
   const F = metFunil(D, PV.vend), E = metExpositor(D, ini, fim, PV.vend), C = metCampo(D, ini, fim, PV.vend), SC = saudeCarteira(D);
   const nF = k => SC.filter(x => x.faixa === k).length, giros = SC.map(x => x.giro).filter(Boolean);
@@ -1859,7 +1890,7 @@ async function telaPainel(recarregarDados) {
    <div class="kpi"><small>Pontos cadastrados</small><b>${cads}</b><small class="sub">meta ${(MT.cadastros_semana || 0) * Math.round(duTot.length / 6)} ${noU}</small></div>
    <div class="kpi"><small>Tarefas atrasadas</small><b>${S.pdvs.filter(p => p.acao_data && ymd(p.acao_data) < hojeISO()).length}</b></div></div>
 
-  ${blocoCarteira(D, ini, fim, rotCurto)}
+  ${blocoCarteira(D, ini, fim, rotCurto)}${blocoConsignado(D, ini, fim, rotCurto)}
   <div id="orfaosBling"></div>
   ${(() => { const al = alertasProsp(); return al.length ? `<div class="panel alertas"><h3>Alertas de prospecção (${al.length}) · visitados sem próxima ação</h3>${al.slice(0, 30).map(p => `<div class="trow" style="cursor:default"><i style="background:${p.ultimo_resultado === 'nao_estava' ? '#3F6FA8' : etapa(p.etapa).c}"></i><div style="flex:1"><b>${esc(p.nome)}</b><br><small style="color:var(--mute)">${RESULTADOS[p.ultimo_resultado]?.n || 'Visitado'} em ${dstr(p.ultima_prospeccao)}${p.melhor_horario ? ' · melhor horário: ' + esc(p.melhor_horario) : ''}</small></div><button class="mini" data-altar="${p.id}">+ tarefa</button><button class="mini" data-alab="${p.id}">abrir</button></div>`).join('')}</div>` : ''; })()}
   </div></section>`;
@@ -1874,6 +1905,7 @@ async function telaPainel(recarregarDados) {
   $('#pvVend').onchange = e => { PV.vend = e.target.value; telaPainel(); };
   $('#pvAtual').onclick = () => telaPainel(true);
   $('#pvDetCart').onclick = () => irPara('carteiramet');
+  document.querySelectorAll('#main tr[data-perfil]').forEach(tr => tr.onclick = () => abrirPerfil(tr.dataset.perfil));
   sec.querySelectorAll('[data-cmet]').forEach(d => d.onclick = () => { S.perfilId = d.dataset.cmet; S.sel = d.dataset.cmet; irPara('pedcli'); });
   $('#pvBO').onclick = () => telaBackoffice(); sec.querySelectorAll('[data-bo]').forEach(a => a.onclick = e => { e.preventDefault(); telaBackoffice(); });
   sec.querySelectorAll('[data-ab]').forEach(d => d.onclick = () => abrirPerfil(d.dataset.ab));
