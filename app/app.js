@@ -3692,6 +3692,13 @@ async function telaContas(tipo) { // tipo: 'receber' | 'pagar'
     const q = (FIN['q_' + tipo] || '').toLowerCase();
     const f = ls.filter(x => (F.sit === 'todos' || (F.sit === 'abertos' ? aberto(x) : F.sit === 'vencidos' ? aberto(x) && x.vencimento < hoje0 : !aberto(x) && [2].includes(+x.situacao))) && (!q || nomeContato(x.contato).toLowerCase().includes(q)))
       .sort((a, b) => a.vencimento < b.vencimento ? -1 : 1);
+    // quando foi dado o recebimento pelo app (baixa pelo app ou pedido marcado como Pago)
+    const BX = { ...(S.base.regras.baixas_app || {}) }, PF = S.base.regras.pedidos_fin || {}, pagos = Object.entries(PF).filter(([, v]) => v.pago).map(([k]) => k);
+    if (rec && pagos.length && !FIN._bidMap) { FIN._bidMap = {}; db.pedidosPorId(pagos).then(r => { FIN._bidMap = Object.fromEntries(r.map(x => [String(x.bling_id), x.id])); desenha(); }).catch(() => { }); }
+    const quando = x => BX[x.id] || (rec && +x.situacao === 2 && FIN._bidMap?.[String(x.origem?.id)] ? (PF[FIN._bidMap[String(x.origem.id)]]?.pago_hora || PF[FIN._bidMap[String(x.origem.id)]]?.em) : null);
+    const ORDF = { venc: x => x.vencimento || '', nome: x => nomeContato(x.contato).toLowerCase(), valor: x => val(x.valor), sit: x => +x.situacao, quando: x => quando(x) || '' };
+    F.ord = F.ord || 'venc'; F.dir = F.dir || 1; f.sort((a, b) => { const A = ORDF[F.ord](a), B = ORDF[F.ord](b); return (A < B ? -1 : A > B ? 1 : 0) * F.dir; });
+    const thO = (k, n, st = '') => `<th data-ordf="${k}" style="cursor:pointer;white-space:nowrap;${st}">${n}${F.ord === k ? (F.dir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
     const soma = a => a.reduce((s, x) => s + val(x.saldo ?? x.valor), 0), abertos = ls.filter(aberto);
     const venc = abertos.filter(x => x.vencimento < hoje0), prox = abertos.filter(x => x.vencimento >= hoje0 && x.vencimento <= em7), quit = ls.filter(x => +x.situacao === 2);
     $('#finCorpo').innerHTML = `<div class="kpis"><div class="kpi"><small>Em aberto</small><b>${brl(soma(abertos))}</b><small class="sub">${abertos.length} contas no período</small></div>
@@ -3701,11 +3708,13 @@ async function telaContas(tipo) { // tipo: 'receber' | 'pagar'
      ${rec && prev.length ? `<details class="panel" style="overflow-x:auto"><summary style="cursor:pointer"><b>Pedidos do Bling sem conta a receber (${prev.length}) · ${brl(prev.reduce((a, o) => a + (+o.valor || 0), 0))}</b> <small style="color:var(--mute)">· não aparecem em Contas a receber no Bling nem nos totais acima</small></summary><p class="psub" style="margin-top:8px">São pedidos que ainda não tiveram a conta lançada. Se o cliente ainda vai pagar, use <b>Lançar conta</b>: ela passa a aparecer aqui e no Bling como em aberto.</p>
        <table class="dped"><tr><th>Vencimento</th><th>Cliente</th><th>Pedido</th><th>Pagamento</th><th style="text-align:right">Valor</th><th></th></tr>${prev.sort((a, b) => String(a.vencimento || a.criado_em).localeCompare(String(b.vencimento || b.criado_em))).map(o => `<tr class="lnk" data-pprev="${o.id}" data-pdv="${o.pdv_id}"><td>${o.vencimento ? dstr(o.vencimento + 'T12:00') : '<small style="color:var(--mute)">sem vencimento</small>'}</td><td>${esc(o.pdvs?.nome || '—')}</td><td>Bling ${esc(o.bling_pedido_id || '')} · ${new Date(o.criado_em).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</td><td>${esc(o.condicao || '—')}</td><td style="text-align:right"><b>${brl(+o.valor || 0)}</b></td><td><button class="mini" data-lanc="${o.id}">Lançar conta</button></td></tr>`).join('')}</table></details>` : ''}
      ${!rec ? `<div class="kpis k2">${Object.entries(CLASSES_FIN).map(([k, n]) => { const ls2 = ls.filter(x => classeConta(x) === k && +x.situacao !== 4); return ls2.length ? `<div class="kpi"><small>${n}</small><b>${brl(ls2.reduce((a, x) => a + val(x.valor), 0))}</b><small class="sub">${ls2.length} conta${ls2.length === 1 ? '' : 's'} no período</small></div>` : ''; }).join('')}${(() => { const sc = ls.filter(x => !classeConta(x)); return sc.length ? `<div class="kpi"><small>Sem classe</small><b>${brl(sc.reduce((a, x) => a + val(x.valor), 0))}</b><small class="sub">${sc.length} conta${sc.length === 1 ? '' : 's'}: marque na coluna Classe</small></div>` : ''; })()}</div>` : ''}
-     <div class="panel" style="overflow-x:auto">${f.length ? `<table class="dped"><tr><th>Vencimento</th><th>${rec ? 'Cliente' : 'Fornecedor'}</th><th>Valor</th><th>Situação</th>${rec ? '' : '<th>Classe</th>'}<th></th></tr>${f.map(x => { const atr = aberto(x) && x.vencimento < hoje0;
+     <div class="panel" style="overflow-x:auto">${f.length ? `<table class="dped"><tr>${thO('venc', 'Vencimento')}${thO('nome', rec ? 'Cliente' : 'Fornecedor')}${thO('valor', 'Valor')}${thO('sit', 'Situação')}${thO('quando', rec ? 'Recebido em' : 'Pago em')}${rec ? '' : '<th>Classe</th>'}<th></th></tr>${f.map(x => { const atr = aberto(x) && x.vencimento < hoje0;
        return `<tr class="lnk" data-fid="${x.id}"><td style="${atr ? 'color:var(--t-bad);font-weight:600' : ''}">${dstr(x.vencimento + 'T12:00')}${atr ? `<br><small>${Math.floor((new Date(hoje0) - new Date(x.vencimento)) / DIA)} dias atrasado</small>` : ''}</td><td>${esc(nomeContato(x.contato))}</td><td><b>${brl(val(x.valor))}</b></td>
         <td><span class="badge" style="background:${+x.situacao === 2 ? 'var(--bg-ok)' : atr ? 'var(--bg-bad)' : aberto(x) ? 'var(--bg-warn)' : 'var(--sand)'}">${SIT_FIN[tipo][x.situacao] || x.situacao}</span></td>
+        <td>${(q => q ? `${dstr(q)} <small style="color:var(--mute)">${new Date(q).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</small>` : +x.situacao === 2 ? '<small style="color:var(--mute)">no Bling</small>' : '—')(quando(x))}</td>
         ${rec ? '' : `<td><select class="fcls" data-cid="${x.id}"><option value="">—</option>${Object.entries(CLASSES_FIN).map(([k, n]) => `<option value="${k}" ${classeConta(x) === k ? 'selected' : ''}>${n}</option>`).join('')}</select></td>`}
         <td>${aberto(x) ? `<button class="mini" data-baixa="${x.id}">${rec ? 'Receber' : 'Pagar'}</button>` : ''}</td></tr>`; }).join('')}</table>` : '<p class="empty">Nenhuma conta com esses filtros.</p>'}</div>`;
+    document.querySelectorAll('[data-ordf]').forEach(th => th.onclick = () => { if (F.ord === th.dataset.ordf) F.dir = -F.dir; else { F.ord = th.dataset.ordf; F.dir = th.dataset.ordf === 'quando' || th.dataset.ordf === 'valor' ? -1 : 1; } telaContas(tipo); });
     document.querySelectorAll('[data-fid]').forEach(tr => tr.onclick = e => { if (e.target.closest('[data-baixa],.fcls')) return; detalheConta(tipo, tr.dataset.fid); });
     document.querySelectorAll('.fcls').forEach(sel => { sel.onclick = e => e.stopPropagation(); sel.onchange = async () => { const x = ls.find(y => String(y.id) === sel.dataset.cid), outras = ls.filter(y => y !== x && String(y.contato?.id) === String(x.contato?.id)).length;
       const todas = outras > 0 && confirm(`Marcar como "${CLASSES_FIN[sel.value] || 'sem classe'}" todas as contas de ${nomeContato(x.contato)} (inclusive as próximas)?`);
@@ -3758,7 +3767,7 @@ async function baixarConta(tipo, id, c) {
     // Bling Conta: o Bling recusa a baixa quando a conta financeira é informada; sem informar, cai na própria Bling Conta
     const nomeC = (FIN.contas || []).find(x => String(x.id) === $('#bxC').value)?.descricao || '', semPort = /bling conta/i.test(nomeC) || /bling conta/i.test(c.contaContabil?.descricao || '') && String(c.contaContabil?.id) === $('#bxC').value;
     const corpo = { data: $('#bxD').value, valor: saldo, valorPago: saldo, valorRecebido: saldo, ...(semPort ? {} : { portador: { id: +$('#bxC').value } }), ...($('#bxCat').value ? { categoria: { id: +$('#bxCat').value } } : {}), historico: $('#bxH').value.trim() || undefined };
-    try { await finEsc('POST', `/contas/${tipo}/${id}/baixar`, corpo); fecharModal(); toast(`${rec ? 'Recebimento' : 'Pagamento'} de ${brl(saldo)} baixado no Bling`); telaContas(tipo); }
+    try { await finEsc('POST', `/contas/${tipo}/${id}/baixar`, corpo); await marcarBaixa([id]); fecharModal(); toast(`${rec ? 'Recebimento' : 'Pagamento'} de ${brl(saldo)} baixado no Bling`); telaContas(tipo); }
     catch (e) { $('#bxOk').disabled = false; modal(`<h3>O Bling recusou a baixa</h3><p style="font-size:13px;color:var(--t-bad)">${esc(e.message)}</p><div class="row" style="justify-content:flex-end"><button class="btn pri" onclick="fecharModal()">Ok</button></div>`); } };
 }
 async function novaConta(tipo) {
@@ -4562,9 +4571,12 @@ const nfeOk = n => [5, 6, 7].includes(+n?.situacao);
 const pedFin = id => (S.base.regras.pedidos_fin || {})[id] || {};
 async function salvarPedFin(id, patch) { const t = { ...(S.base.regras.pedidos_fin || {}) }; t[id] = { ...(t[id] || {}), ...patch, em: new Date().toISOString() }; S.base.regras.pedidos_fin = t; await db.salvarRegra('pedidos_fin', t).catch(() => { }); }
 const msgBling = e => /ação desconhecida/.test(e.message) ? 'publique a função bling-oauth nova (Supabase → Edge Functions)' : e.message;
+// quando o app deu baixa numa conta: { idDaConta: data e hora }
+async function marcarBaixa(ids) { const t = { ...(S.base.regras.baixas_app || {}) }, h = new Date().toISOString(); ids.filter(Boolean).forEach(i => t[i] = h); S.base.regras.baixas_app = t; await db.salvarRegra('baixas_app', t).catch(() => { }); }
 async function baixarNoBling(pedidoId) {
   const r = await db.bling('baixar_pedido', { pedido_id: pedidoId }), cs = r.contas || [], falha = cs.filter(c => !c.ok), bol = cs.filter(c => c.boleto), auto = cs.filter(c => c.automatico);
-  await salvarPedFin(pedidoId, { pago: !falha.length && cs.some(c => !c.boleto), pago_auto: auto.length > 0, pix: auto.map(c => c.linkPix).filter(Boolean)[0] || null, pago_erro: falha.length ? falha.map(c => c.erro).join(' · ').slice(0, 400) : null, pago_em: hojeISO() });
+  await salvarPedFin(pedidoId, { pago_hora: new Date().toISOString(), pago: !falha.length && cs.some(c => !c.boleto), pago_auto: auto.length > 0, pix: auto.map(c => c.linkPix).filter(Boolean)[0] || null, pago_erro: falha.length ? falha.map(c => c.erro).join(' · ').slice(0, 400) : null, pago_em: hojeISO() });
+  await marcarBaixa(cs.filter(c => c.ok && !c.boleto && !c.ja).map(c => c.id));
   return { r, falha, bol, auto };
 }
 // WhatsApp do cliente com a mensagem da nota pronta (sem número cadastrado, abre para escolher o contato)
