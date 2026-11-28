@@ -326,7 +326,38 @@ async function baixarPedido(pedidoId: string) {
     const r = await enviarBling('POST', `/contas/receber/${c.id}/baixar`, corpo, token);
     out.push({ id: c.id, valor: corpo.valorRecebido, forma: nomeDe(c.forma), ok: r.ok, ...(r.ok ? {} : { erro: `Bling (${r.status}): ${r.txt}` }) });
   }
-  return { lancou, contas: out };
+  // tudo recebido: o pedido passa a "Atendido" no Bling e no app
+  let atendido = false;
+  if (out.length && out.every((c: any) => c.ok && !c.boleto)) { try { atendido = await atenderPedido(pedidoId, token); } catch { /* segue */ } }
+  return { lancou, contas: out, atendido };
+}
+// muda o pedido para "Atendido" (situação 9 do Bling) e grava no app
+async function atenderPedido(pedidoId: string, token: string) {
+  const { data: ped } = await db.from('pedidos').select('id, bling_id, bling_situacao').eq('id', pedidoId).maybeSingle();
+  if (!ped?.bling_id) return false; if (/atendid/i.test(ped.bling_situacao || '')) return true;
+  const r = await enviarBling('PATCH', `/pedidos/vendas/${ped.bling_id}/situacoes/9`, {}, token);
+  if (!r.ok && !/mesma situa|j[aá] est/i.test(r.txt)) throw new Error(`Bling não mudou para Atendido: ${r.txt}`);
+  await db.from('pedidos').update({ bling_situacao: 'Atendido' }).eq('id', pedidoId); return true;
+}
+// confere os pedidos em aberto: se todas as contas a receber já estão recebidas (ou o app marcou pago sem conta em aberto), vira "Atendido"
+async function atenderRecebidos() {
+  const token = await tokenValido(), desde = new Date(Date.now() - 150 * 864e5).toISOString();
+  const { data: peds } = await db.from('pedidos').select('id, bling_id, bling_situacao, criado_em').not('bling_id', 'is', null).gte('criado_em', desde);
+  const abertos = (peds ?? []).filter((o: any) => /em aberto|em andamento/i.test(o.bling_situacao || ''));
+  if (!abertos.length) return { conferidos: 0, atendidos: [] };
+  const { data: rf } = await db.from('regras').select('valor').eq('chave', 'pedidos_fin').maybeSingle(); const PF: Record<string, any> = rf?.valor ?? {};
+  // todas as contas a receber com vencimento na janela, agrupadas pela origem (pedido ou nota)
+  const porOrigem: Record<string, number[]> = {}, de = new Date(Date.now() - 200 * 864e5).toISOString().slice(0, 10), ate = new Date(Date.now() + 160 * 864e5).toISOString().slice(0, 10);
+  for (let pg = 1; pg <= 30; pg++) { const r: any = await chamar(`/contas/receber?dataInicial=${de}&dataFinal=${ate}&pagina=${pg}&limite=100`, token), d = r?.data ?? [];
+    d.forEach((c: any) => { const o = String(c.origem?.id ?? ''); if (o) (porOrigem[o] = porOrigem[o] || []).push(Number(c.situacao)); }); if (d.length < 100) break; }
+  const atendidos: string[] = [], erros: any[] = [];
+  for (const o of abertos) { try {
+    let sits = porOrigem[String(o.bling_id)];
+    if (!sits) { const nfId = PF[o.id]?.nfe?.id ?? ((await chamar(`/pedidos/vendas/${o.bling_id}`, token) as any)?.data?.notaFiscal?.id); if (nfId) sits = porOrigem[String(nfId)]; }
+    const validas = (sits ?? []).filter(x => ![4, 5].includes(x)), tudoRecebido = validas.length > 0 && validas.every(x => x === 2), pagoSemConta = !validas.length && !!PF[o.id]?.pago;
+    if ((tudoRecebido || pagoSemConta) && await atenderPedido(o.id, token)) atendidos.push(o.id);
+  } catch (e) { erros.push({ id: o.id, erro: (e as Error).message }); } }
+  return { conferidos: abertos.length, atendidos, erros };
 }
 // nota fiscal: gera a NF-e do pedido, transmite para a SEFAZ e devolve número e links
 async function lerNfe(id: number | string, token: string) { const n: any = (await chamar(`/nfe/${id}`, token))?.data ?? {}; return { id: n.id, numero: n.numero, serie: n.serie, situacao: n.situacao, chave: n.chaveAcesso || null, linkDanfe: n.linkDanfe || null, linkPDF: n.linkPDF || null, valor: n.valorNota }; }
@@ -603,6 +634,7 @@ Deno.serve(async (req) => {
     if (acao === 'atualizar_custos') return json(await atualizarCustos(itens));
     if (acao === 'atualizar_precos') return json(await atualizarPrecos(itens));
     if (acao === 'contas_pedido') return json(await contasPedido(String(pedido_id || '')));
+    if (acao === 'atender_recebidos') return json(await atenderRecebidos());
     if (acao === 'baixar_pedido') return json(await baixarPedido(String(pedido_id || '')));
     if (acao === 'gerar_nfe') return json(await gerarNfe(String(pedido_id || ''), nfe_id ? String(nfe_id) : undefined, Number(numero) || undefined));
     if (acao === 'nfe_pdf') return json(await pdfNfe(String(nfe_id || '')));

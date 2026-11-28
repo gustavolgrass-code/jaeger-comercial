@@ -3481,6 +3481,10 @@ async function telaPedidos() {
   $('#pdTipo').onchange = e => { F.tipo = e.target.value; desenha(); }; $('#pdVend').onchange = e => { F.vend = e.target.value; desenha(); }; $('#pdQ').oninput = e => { F.q = e.target.value; desenha(); };
   $('#pdNova').onclick = () => irPara('abertura');
   desenha();
+  // pedido já recebido (todas as contas baixadas no Bling ou marcado pago no app) vira "Atendido" sozinho; confere no máximo a cada 5 min
+  if (!S.atRecTs || Date.now() - S.atRecTs > 5 * 60e3) { S.atRecTs = Date.now();
+    db.bling('atender_recebidos').then(r => { const ids = new Set((r?.data ?? r)?.atendidos || []); if (!ids.size || S.aba !== 'pedidos') return;
+      ls.forEach(o => { if (ids.has(o.id)) o.bling_situacao = 'Atendido'; }); desenha(); toast(`${ids.size} pedido${ids.size > 1 ? 's' : ''} recebido${ids.size > 1 ? 's' : ''} marcado${ids.size > 1 ? 's' : ''} como Atendido`); }).catch(() => { }); }
 }
 
 /* =================== financeiro (integrado ao Bling) =================== */
