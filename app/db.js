@@ -338,3 +338,10 @@ export async function editarPedido(pedidoId, { itens, condicao, vencimento }) {
 }
 
 export async function atualizarProduto(id, patch) { return ok(await sb.from('produtos').update(patch).eq('id', id).select()); }
+// consignados em aberto: a última visita (abertura/reposição) de cada cliente com o que foi deixado
+export async function consignadosAbertos(pdvIds) {
+  if (!pdvIds.length) return [];
+  const vs = ok(await sb.from('visitas').select('id, pdv_id, tipo, em, observacao, usuario_id, contagens(produto_id, reposto, deixado_agora)').in('pdv_id', pdvIds).in('tipo', ['abertura', 'reposicao']).order('em', { ascending: false }));
+  const out = {}; vs.forEach(v => { if (!out[v.pdv_id] && (v.contagens || []).some(c => +c.reposto > 0)) out[v.pdv_id] = v; });
+  return Object.values(out);
+}
