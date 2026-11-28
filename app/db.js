@@ -237,12 +237,16 @@ export async function dadosReabrir(visitaId) {
 // tudo de um pedido: itens (app ou Bling) e, se veio de uma reposição, a contagem do expositor
 export async function detalhePedido(id) {
   const o = ok(await sb.from('pedidos').select('*').eq('id', id).single());
+  // pedido sem visita ligada (ex.: veio do Bling): usa a contagem do mesmo cliente no mesmo dia
+  let visId = o.visita_id;
+  if (!visId && o.pdv_id) { const d = new Date(o.criado_em), d0 = new Date(d.getFullYear(), d.getMonth(), d.getDate()), d1 = new Date(+d0 + 864e5);
+    const vs = ok(await sb.from('visitas').select('id, em').eq('pdv_id', o.pdv_id).in('tipo', ['reposicao', 'abertura']).gte('em', d0.toISOString()).lt('em', d1.toISOString()).order('em', { ascending: false }).limit(1)); visId = vs[0]?.id || null; }
   const [itens, bitens, contagens] = await Promise.all([
     sb.from('pedido_itens').select('produto_id, quantidade, preco_unit, bonificado').eq('pedido_id', id).then(ok),
     sb.from('bling_itens').select('codigo, descricao, quantidade, valor, desconto').eq('pedido_id', id).then(ok).catch(() => []),
-    o.visita_id ? sb.from('contagens').select('produto_id, deixado_anterior, encontrado, troca, reposto, sellout, deixado_agora').eq('visita_id', o.visita_id).then(ok) : [],
+    visId ? sb.from('contagens').select('produto_id, deixado_anterior, encontrado, troca, reposto, sellout, deixado_agora').eq('visita_id', visId).then(ok) : [],
   ]);
-  const vis = o.visita_id ? ok(await sb.from('visitas').select('id, tipo, em, observacao, perfis(nome)').eq('id', o.visita_id).maybeSingle()) : null;
+  const vis = visId ? ok(await sb.from('visitas').select('id, tipo, em, observacao, perfis(nome)').eq('id', visId).maybeSingle()) : null;
   return { pedido: o, itens, bitens, contagens, visita: vis };
 }
 // itens de todos os pedidos de um cliente (do app e do Bling), para ver o que mais sai
@@ -345,3 +349,17 @@ export async function consignadosAbertos(pdvIds) {
   const out = {}; vs.forEach(v => { if (!out[v.pdv_id] && (v.contagens || []).some(c => +c.reposto > 0)) out[v.pdv_id] = v; });
   return Object.values(out);
 }
+// quanto foi encontrado no expositor em cada pedido (pela visita ligada; sem visita, a do mesmo cliente no mesmo dia)
+export async function encontradosDosPedidos(peds) {
+  const dia = t => { const d = new Date(t); return d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate(); };
+  const visDe = {}; peds.forEach(o => { if (o.visita_id) visDe[o.id] = o.visita_id; });
+  const sem = peds.filter(o => !o.visita_id && o.pdv_id);
+  if (sem.length) { const ts = sem.map(o => +new Date(o.criado_em)), de = new Date(Math.min(...ts) - 864e5).toISOString(), ate = new Date(Math.max(...ts) + 864e5).toISOString();
+    const vs = await tudo(() => sb.from('visitas').select('id, pdv_id, em').in('pdv_id', [...new Set(sem.map(o => o.pdv_id))].slice(0, 300)).in('tipo', ['reposicao', 'abertura']).gte('em', de).lt('em', ate));
+    sem.forEach(o => { const v = vs.find(x => x.pdv_id === o.pdv_id && dia(x.em) === dia(o.criado_em)); if (v) visDe[o.id] = v.id; }); }
+  const ids = [...new Set(Object.values(visDe))]; if (!ids.length) return {};
+  const cs = []; for (let i = 0; i < ids.length; i += 200) cs.push(...ok(await sb.from('contagens').select('visita_id, produto_id, encontrado').in('visita_id', ids.slice(i, i + 200))));
+  const porVis = {}; cs.forEach(c => { const e = porVis[c.visita_id] = porVis[c.visita_id] || { enc: 0, prod: {} }; e.enc += +c.encontrado || 0; e.prod[c.produto_id] = +c.encontrado || 0; });
+  const out = {}; Object.entries(visDe).forEach(([pid, vid]) => { if (porVis[vid]) out[pid] = porVis[vid]; }); return out;
+}
+export async function pedidosDasVisitas(ids) { if (!ids.length) return []; return ok(await sb.from('pedidos').select('id, visita_id, pdv_id').in('visita_id', ids)); }
