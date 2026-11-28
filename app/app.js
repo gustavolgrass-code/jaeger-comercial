@@ -599,7 +599,7 @@ function painelAreas(s) {
 }
 
 /* ---- quadrantes da carteira: agrupa os clientes pela proximidade e mede quanto cada grupo compra ---- */
-const COR_Q = ['#2a78d6', '#eb6834', '#1baf7a', '#7B4FC0', '#d03b3b', '#B8860B'];
+const COR_Q = ['#2a78d6', '#eb6834', '#1baf7a', '#7B4FC0', '#d03b3b', '#B8860B', '#0F9BA8', '#C2508A'];
 function agruparQuad(pts, k) {
   // começa pelos pontos mais distantes entre si (resultado estável) e ajusta os centros (k-médias)
   let C = [pts.reduce((a, b) => (b.lat < a.lat ? b : a))];
@@ -623,8 +623,13 @@ async function desenharQuad() {
   const est = g => { const os = g.flatMap(p => ped[p.id] || []), fat = os.reduce((a, o) => a + Number(o.valor || 0), 0), c = { lat: g.reduce((a, x) => a + x.lat, 0) / g.length, lng: g.reduce((a, x) => a + x.lng, 0) / g.length };
     return { n: g.length, ativos: g.filter(p => p.etapa === 'ativo').length, compradores: new Set(os.map(o => o.pdv_id)).size, fatMes: fat / 6, pedMes: os.length / 6, ticket: os.length ? fat / os.length : 0, porCliente: g.length ? fat / 6 / g.length : 0,
       raio: Math.max(...g.map(x => km2(x, c))), bairros: [...new Set(g.map(p => p.bairro).filter(Boolean))], cidades: [...new Set(g.map(p => p.cidade).filter(Boolean))], regs: [...new Set(g.map(p => p.regiao).filter(Boolean))], c }; };
-  S.quads = agruparQuad(dentro, k).map(q => ({ ...est(q.g), g: q.g })).sort((a, b) => b.fatMes - a.fatMes).map((q, i) => ({ ...q, i, cor: COR_Q[i % COR_Q.length], nome: `Q${i + 1}` }));
-  S.quadFora = fora.length ? { ...est(fora), g: fora } : null;
+  // quem fica fora do miolo vira quadrante próprio quando há 2+ clientes perto entre si (até 25 km), ex.: Minas do Leão + Butiá
+  const grupos = []; fora.forEach(p => { const ja = grupos.filter(g => g.some(x => km2(x, p) <= 25)); const novo = [p, ...ja.flat()]; ja.forEach(g => grupos.splice(grupos.indexOf(g), 1)); grupos.push(novo); });
+  const extras = grupos.filter(g => g.length >= 2), soltos = grupos.filter(g => g.length < 2).flat();
+  const base = agruparQuad(dentro, k).map(q => ({ ...est(q.g), g: q.g })).sort((a, b) => b.fatMes - a.fatMes);
+  const ext = extras.map(g => ({ ...est(g), g })).sort((a, b) => b.fatMes - a.fatMes);
+  S.quads = [...base, ...ext].map((q, i) => ({ ...q, i, cor: COR_Q[i % COR_Q.length], nome: `Q${i + 1}` }));
+  S.quadFora = soltos.length ? { ...est(soltos), g: soltos } : null;
   if (camadaQuad) camadaQuad.clearLayers(); else camadaQuad = L.layerGroup().addTo(mapa);
   S.quads.forEach(q => { const h = casca(q.g);
     if (h.length >= 3) L.polygon(h.map(x => [x.lat, x.lng]), { color: q.cor, weight: 2, fillColor: q.cor, fillOpacity: .12 }).bindTooltip(`${q.nome} · ${q.n} clientes · ${brl(q.fatMes)}/mês`).on('click', () => { S.sel = null; S.quadSel = q.i; painel(); }).addTo(camadaQuad);
